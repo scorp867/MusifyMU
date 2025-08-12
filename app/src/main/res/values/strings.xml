@@ -1,0 +1,37 @@
+<resources>
+    <string name="app_name">Musify MU</string>
+
+    <!-- Navigation -->
+    <string name="library">Library</string>
+    <string name="search">Search</string>
+    <string name="playlists">Playlists</string>
+    <string name="queue">Queue</string>
+    <string name="now_playing">Now Playing</string>
+    <string name="lyrics">Lyrics</string>
+
+    <!-- Actions -->
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="next">Next</string>
+    <string name="previous">Previous</string>
+    <string name="shuffle">Shuffle</string>
+    <string name="repeat">Repeat</string>
+    <string name="repeat_one">Repeat One</string>
+    <string name="repeat_all">Repeat All</string>
+    <string name="repeat_off">Repeat Off</string>
+    <string name="view_lyrics">View Lyrics</string>
+    <string name="no_lyrics_found">No lyrics found</string>
+
+    <!-- Playlist -->
+    <string name="new_playlist">New Playlist</string>
+    <string name="playlist_name">Playlist Name</string>
+    <string name="create">Create</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Search -->
+    <string name="search_hint">Search</string>
+
+    <!-- Permissions -->
+    <string name="permission_rationale_audio">Musify MU needs access to your audio files to build your library.</string>
+    <string name="permission_rationale_mic">Musify MU needs microphone access to enable voice commands.</string>
+</resources>
