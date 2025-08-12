@@ -21,6 +21,7 @@ import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
 import androidx.compose.material.DismissDirection
 import androidx.compose.material.DismissValue
+import com.musify.mu.util.toMediaItem
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +69,7 @@ fun QueueScreen(navController: NavController) {
                 .padding(paddingValues)
                 .fillMaxSize()
                 .reorderable(state)
-                .detectReorder(afterLongPress = true),
+                .detectReorder(state),
             contentPadding = PaddingValues(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -76,7 +77,6 @@ fun QueueScreen(navController: NavController) {
                 val dismissState = rememberDismissState(confirmStateChange = { value ->
                     when (value) {
                         DismissValue.DismissedToEnd -> {
-                            // Swipe right: Play next (reinsert at current+1)
                             val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
                                 .coerceAtMost(controller?.mediaItemCount ?: 0)
                             controller?.removeMediaItem(idx)
@@ -84,10 +84,9 @@ fun QueueScreen(navController: NavController) {
                             true
                         }
                         DismissValue.DismissedToStart -> {
-                            // Swipe left: Remove with undo
                             controller?.removeMediaItem(idx)
                             val removed = track
-                            LaunchedEffect("undo_$idx_${track.mediaId}") {
+                            LaunchedEffect(key1 = "undo_${'$'}idx_${'$'}{track.mediaId}") {
                                 val res = snackbarHostState.showSnackbar(
                                     message = "Removed from queue",
                                     actionLabel = "Undo",

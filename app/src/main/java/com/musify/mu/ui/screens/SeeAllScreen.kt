@@ -11,6 +11,7 @@ import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track>, Int) -> Unit) {
@@ -18,6 +19,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
     val repo = remember { LibraryRepository.get(context) }
     var title by remember { mutableStateOf("") }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(type) {
         title = when (type) {
@@ -44,14 +46,16 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         },
         floatingActionButton = {
             if (type == "favorites") {
-                ExtendedFloatingActionButton(text = { Text("Save order") }, onClick = {
-                    // Persist order
-                    val order = tracks.mapIndexed { index, track -> com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index) }
-                    androidx.lifecycle.compose.collectAsStateWithLifecycle
-                    androidx.compose.runtime.LaunchedEffect(order) {
-                        repo.saveFavoritesOrder(order)
+                ExtendedFloatingActionButton(
+                    text = { Text("Save order") },
+                    icon = {},
+                    onClick = {
+                        val order = tracks.mapIndexed { index, track -> com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index) }
+                        scope.launch {
+                            repo.saveFavoritesOrder(order)
+                        }
                     }
-                })
+                )
             }
         }
     ) { padding ->
@@ -62,7 +66,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                     .padding(padding)
                     .fillMaxSize()
                     .reorderable(reorderState)
-                    .detectReorder(afterLongPress = true),
+                    .detectReorder(reorderState),
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {

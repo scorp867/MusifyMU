@@ -394,8 +394,6 @@ class PlayerService : MediaLibraryService() {
             currentNotificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_music_note)
                 .setContentIntent(createPlayerActivityIntent())
-                .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
-                    .setMediaSession(mediaLibrarySession?.sessionCompatToken))
                 .setPriority(NotificationCompat.PRIORITY_LOW)
         }
         
