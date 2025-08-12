@@ -48,6 +48,19 @@ class PlaybackStateStore(context: Context) {
         return State(ids, index, pos, repeat, shuffle, play)
     }
 
+    suspend fun clear() {
+        ds.updateData {
+            it.toMutablePreferences().apply {
+                remove(KEY_QUEUE)
+                remove(KEY_INDEX)
+                remove(KEY_POSITION)
+                remove(KEY_REPEAT)
+                remove(KEY_SHUFFLE)
+                remove(KEY_PLAY)
+            }
+        }
+    }
+
     data class State(
         val mediaIds: List<String>,
         val index: Int,

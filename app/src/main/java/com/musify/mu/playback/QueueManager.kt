@@ -11,8 +11,29 @@ class QueueManager(private val player: ExoPlayer) {
         play: Boolean = true,
         startPosMs: Long = 0L
     ) {
-        player.setMediaItems(items, startIndex, startPosMs)
+        // Validate startIndex
+        val validStartIndex = startIndex.coerceIn(0, items.size - 1)
+        
+        // Set media items without start position first to avoid IllegalSeekPositionException
+        player.setMediaItems(items, validStartIndex, 0L)
         player.prepare()
+        
+        // If we need to seek to a specific position, do it after preparation
+        if (startPosMs > 0L) {
+            player.addListener(object : androidx.media3.common.Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                        // Only seek if the position is valid
+                        val duration = player.duration
+                        if (duration != androidx.media3.common.C.TIME_UNSET && startPosMs < duration) {
+                            player.seekTo(startPosMs)
+                        }
+                        player.removeListener(this)
+                    }
+                }
+            })
+        }
+        
         if (play) player.play()
     }
 

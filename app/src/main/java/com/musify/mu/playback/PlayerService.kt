@@ -172,19 +172,65 @@ class PlayerService : MediaLibraryService() {
 
         // Try to restore last session state
         serviceScope.launch(Dispatchers.IO) {
-            val state = stateStore.load()
-            if (state != null && state.mediaIds.isNotEmpty()) {
-                val items = state.mediaIds.mapNotNull { id -> repo.getTrackByMediaId(id)?.toMediaItem() }
-                if (items.isNotEmpty()) {
-                    launch(Dispatchers.Main) {
-                        queue.setQueue(items, state.index, play = false, startPosMs = state.posMs)
-                        player.repeatMode = state.repeat
-                        player.shuffleModeEnabled = state.shuffle
-                        // Only start playing if it was playing before and we have valid tracks
-                        if (state.play && items.isNotEmpty()) {
-                            player.play()
+            try {
+                val state = stateStore.load()
+                if (state != null && state.mediaIds.isNotEmpty()) {
+                    // Validate that media files still exist before creating MediaItems
+                    val validTracks = state.mediaIds.mapNotNull { id -> 
+                        repo.getTrackByMediaId(id)?.let { track ->
+                            // Check if the file still exists
+                            try {
+                                val uri = android.net.Uri.parse(track.mediaId)
+                                val inputStream = context.contentResolver.openInputStream(uri)
+                                inputStream?.close()
+                                track
+                            } catch (e: Exception) {
+                                android.util.Log.w("PlayerService", "Media file not found: ${track.mediaId}")
+                                null
+                            }
                         }
                     }
+                    
+                    if (validTracks.isNotEmpty()) {
+                        val items = validTracks.map { it.toMediaItem() }
+                        launch(Dispatchers.Main) {
+                            try {
+                                // Validate position before setting queue
+                                val validPosMs = if (state.posMs > 0L) state.posMs else 0L
+                                val validIndex = state.index.coerceIn(0, items.size - 1)
+                                
+                                queue.setQueue(items, validIndex, play = false, startPosMs = validPosMs)
+                                player.repeatMode = state.repeat
+                                player.shuffleModeEnabled = state.shuffle
+                                // Only start playing if it was playing before and we have valid tracks
+                                if (state.play && items.isNotEmpty()) {
+                                    player.play()
+                                }
+                            } catch (e: Exception) {
+                                // If restoration fails, just set the queue without position
+                                queue.setQueue(items, 0, play = false, startPosMs = 0L)
+                            }
+                        }
+                    } else {
+                        // Clear invalid state if no valid tracks found
+                        stateStore.clear()
+                        // Stop the service if no valid media found
+                        launch(Dispatchers.Main) {
+                            stopSelf()
+                        }
+                    }
+                } else {
+                    // No state to restore, stop the service
+                    launch(Dispatchers.Main) {
+                        stopSelf()
+                    }
+                }
+            } catch (e: Exception) {
+                // Log error but don't crash the service
+                android.util.Log.w("PlayerService", "Failed to restore playback state", e)
+                // Stop the service on error
+                launch(Dispatchers.Main) {
+                    stopSelf()
                 }
             }
         }
@@ -214,9 +260,31 @@ class PlayerService : MediaLibraryService() {
     // Public helper for other components to start playback for a list of media IDs
     fun playMediaIds(ids: List<String>, startIndex: Int = 0, startPos: Long = 0L) {
         serviceScope.launch {
-            val tracks = repo.getAllTracks().filter { ids.contains(it.mediaId) }
-            val items = tracks.map { it.toMediaItem() }
-            queue.setQueue(items, startIndex, play = true, startPosMs = startPos)
+            try {
+                val tracks = repo.getAllTracks().filter { ids.contains(it.mediaId) }
+                
+                // Validate that media files exist before creating MediaItems
+                val validTracks = tracks.filter { track ->
+                    try {
+                        val uri = android.net.Uri.parse(track.mediaId)
+                        val inputStream = context.contentResolver.openInputStream(uri)
+                        inputStream?.close()
+                        true
+                    } catch (e: Exception) {
+                        android.util.Log.w("PlayerService", "Media file not found: ${track.mediaId}")
+                        false
+                    }
+                }
+                
+                val items = validTracks.map { it.toMediaItem() }
+                if (items.isNotEmpty()) {
+                    val validStartIndex = startIndex.coerceIn(0, items.size - 1)
+                    val validStartPos = if (startPos > 0L) startPos else 0L
+                    queue.setQueue(items, validStartIndex, play = true, startPosMs = validStartPos)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PlayerService", "Failed to play media IDs", e)
+            }
         }
     }
     
@@ -267,6 +335,14 @@ class PlayerService : MediaLibraryService() {
     private fun checkIfServiceShouldStop() {
         // Stop the service if there's no media in the queue and we're not playing
         if (player.mediaItemCount == 0 && !player.isPlaying) {
+            // Clear the state when stopping the service
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    stateStore.clear()
+                } catch (e: Exception) {
+                    android.util.Log.w("PlayerService", "Failed to clear state", e)
+                }
+            }
             stopSelf()
         }
     }
