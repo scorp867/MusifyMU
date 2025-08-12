@@ -181,7 +181,7 @@ class PlayerService : MediaLibraryService() {
                             // Check if the file still exists
                             try {
                                 val uri = android.net.Uri.parse(track.mediaId)
-                                val inputStream = context.contentResolver.openInputStream(uri)
+                                val inputStream = this@PlayerService.contentResolver.openInputStream(uri)
                                 inputStream?.close()
                                 track
                             } catch (e: Exception) {
@@ -267,7 +267,7 @@ class PlayerService : MediaLibraryService() {
                 val validTracks = tracks.filter { track ->
                     try {
                         val uri = android.net.Uri.parse(track.mediaId)
-                        val inputStream = context.contentResolver.openInputStream(uri)
+                        val inputStream = this@PlayerService.contentResolver.openInputStream(uri)
                         inputStream?.close()
                         true
                     } catch (e: Exception) {
