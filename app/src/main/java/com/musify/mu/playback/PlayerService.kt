@@ -135,8 +135,26 @@ class PlayerService : MediaLibraryService() {
                     if (isNotificationActive) {
                         stopForegroundService()
                     }
-                    // Check if we should stop the service entirely
-                    checkIfServiceShouldStop()
+                }
+            }
+            
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // Handle service lifecycle based on playback state
+                when (playbackState) {
+                    Player.STATE_IDLE -> {
+                        // Service should stop when idle
+                        if (isNotificationActive) {
+                            stopForegroundService()
+                        }
+                        checkIfServiceShouldStop()
+                    }
+                    Player.STATE_ENDED -> {
+                        // Service should stop when playback ends
+                        if (isNotificationActive) {
+                            stopForegroundService()
+                        }
+                        checkIfServiceShouldStop()
+                    }
                 }
             }
             
@@ -146,6 +164,11 @@ class PlayerService : MediaLibraryService() {
                     serviceScope.launch(Dispatchers.IO) {
                         repo.recordPlayed(item.mediaId)
                     }
+                }
+                
+                // Update notification with new track info
+                if (isNotificationActive) {
+                    updateNotification()
                 }
             }
             
@@ -170,6 +193,15 @@ class PlayerService : MediaLibraryService() {
             }
         })
 
+        // Clear old artwork cache and refresh library
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                repo.clearArtworkCache()
+            } catch (e: Exception) {
+                android.util.Log.w("PlayerService", "Failed to clear artwork cache", e)
+            }
+        }
+        
         // Try to restore last session state
         serviceScope.launch(Dispatchers.IO) {
             try {
@@ -216,12 +248,14 @@ class PlayerService : MediaLibraryService() {
                         stateStore.clear()
                         // Stop the service if no valid media found
                         launch(Dispatchers.Main) {
+                            stopForegroundService()
                             stopSelf()
                         }
                     }
                 } else {
                     // No state to restore, stop the service
                     launch(Dispatchers.Main) {
+                        stopForegroundService()
                         stopSelf()
                     }
                 }
@@ -245,6 +279,14 @@ class PlayerService : MediaLibraryService() {
         // Stop the service when app is swiped away from recents
         player.pause()
         stopForegroundService()
+        // Clear state and stop service immediately
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                stateStore.clear()
+            } catch (e: Exception) {
+                android.util.Log.w("PlayerService", "Failed to clear state", e)
+            }
+        }
         stopSelf()
     }
 
@@ -254,6 +296,16 @@ class PlayerService : MediaLibraryService() {
         mediaLibrarySession?.release()
         player.release()
         serviceScope.cancel()
+        
+        // Clear state on destroy
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                stateStore.clear()
+            } catch (e: Exception) {
+                android.util.Log.w("PlayerService", "Failed to clear state on destroy", e)
+            }
+        }
+        
         super.onDestroy()
     }
 
@@ -319,8 +371,9 @@ class PlayerService : MediaLibraryService() {
         val currentItem = player.currentMediaItem
         val title = currentItem?.mediaMetadata?.title?.toString() ?: "Musify MU"
         val artist = currentItem?.mediaMetadata?.artist?.toString() ?: "Unknown Artist"
+        val artworkUri = currentItem?.mediaMetadata?.artworkUri
         
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(artist)
             .setSmallIcon(R.drawable.ic_music_note)
@@ -329,7 +382,25 @@ class PlayerService : MediaLibraryService() {
                 .setMediaSession(mediaLibrarySession?.sessionCompatToken))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
-            .build()
+        
+        // Add artwork if available
+        artworkUri?.let { uri ->
+            try {
+                builder.setLargeIcon(android.graphics.BitmapFactory.decodeFile(uri.path))
+            } catch (e: Exception) {
+                android.util.Log.w("PlayerService", "Failed to load notification artwork", e)
+            }
+        }
+        
+        return builder.build()
+    }
+    
+    private fun updateNotification() {
+        if (isNotificationActive) {
+            val notification = createNotification()
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        }
     }
     
     private fun checkIfServiceShouldStop() {
@@ -343,6 +414,7 @@ class PlayerService : MediaLibraryService() {
                     android.util.Log.w("PlayerService", "Failed to clear state", e)
                 }
             }
+            stopForegroundService()
             stopSelf()
         }
     }
