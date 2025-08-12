@@ -86,7 +86,6 @@ fun QueueScreen(navController: NavController) {
                         DismissValue.DismissedToStart -> {
                             // Swipe left: Remove with undo
                             controller?.removeMediaItem(idx)
-                            // snapshot for undo
                             val removed = track
                             LaunchedEffect("undo_$idx_${track.mediaId}") {
                                 val res = snackbarHostState.showSnackbar(
@@ -108,8 +107,7 @@ fun QueueScreen(navController: NavController) {
                     directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
                     background = {},
                     dismissContent = {
-                        ReorderableItem(state, key = track.mediaId) { isDragging ->
-                            var showMenu by remember { mutableStateOf(false) }
+                        ReorderableItem(state, key = track.mediaId) { _ ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -133,28 +131,6 @@ fun QueueScreen(navController: NavController) {
                                             else LocalContentColor.current
                                         )
                                         Text(track.artist, style = MaterialTheme.typography.bodyMedium)
-                                    }
-                                }
-                                Box {
-                                    IconButton(onClick = { showMenu = true }) {
-                                        Icon(Icons.Default.MoreVert, contentDescription = "More")
-                                    }
-                                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                        DropdownMenuItem(text = { Text("Play next") }, onClick = {
-                                            val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                                                .coerceAtMost(controller?.mediaItemCount ?: 0)
-                                            controller?.removeMediaItem(idx)
-                                            controller?.addMediaItem(insertIndex, track.toMediaItem())
-                                            showMenu = false
-                                        })
-                                        DropdownMenuItem(text = { Text("Add to end") }, onClick = {
-                                            controller?.addMediaItem(track.toMediaItem())
-                                            showMenu = false
-                                        })
-                                        DropdownMenuItem(text = { Text("Remove") }, onClick = {
-                                            controller?.removeMediaItem(idx)
-                                            showMenu = false
-                                        })
                                     }
                                 }
                             }

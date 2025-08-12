@@ -33,15 +33,12 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.Artwork
 import com.musify.mu.ui.navigation.Screen
-import com.musify.mu.playback.LocalMediaController
-import com.musify.mu.util.toMediaItem
 
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
-    val controller = LocalMediaController.current
     
     var recentPlayed by remember { mutableStateOf<List<Track>>(emptyList()) }
     var recentAdded by remember { mutableStateOf<List<Track>>(emptyList()) }
@@ -132,13 +129,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         }
                     },
                     haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/recently_played") },
-                    onAddNext = { track ->
-                        val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                            .coerceAtMost(controller?.mediaItemCount ?: 0)
-                        controller?.addMediaItem(insertIndex, track.toMediaItem())
-                    },
-                    onAddEnd = { track -> controller?.addMediaItem(track.toMediaItem()) }
+                    onSeeAll = { navController.navigate("see_all/recently_played") }
                 )
             }
             
@@ -156,13 +147,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         }
                     },
                     haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/recently_added") },
-                    onAddNext = { track ->
-                        val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                            .coerceAtMost(controller?.mediaItemCount ?: 0)
-                        controller?.addMediaItem(insertIndex, track.toMediaItem())
-                    },
-                    onAddEnd = { track -> controller?.addMediaItem(track.toMediaItem()) }
+                    onSeeAll = { navController.navigate("see_all/recently_added") }
                 )
             }
             
@@ -180,13 +165,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         }
                     },
                     haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/favorites") },
-                    onAddNext = { track ->
-                        val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                            .coerceAtMost(controller?.mediaItemCount ?: 0)
-                        controller?.addMediaItem(insertIndex, track.toMediaItem())
-                    },
-                    onAddEnd = { track -> controller?.addMediaItem(track.toMediaItem()) }
+                    onSeeAll = { navController.navigate("see_all/favorites") }
                 )
             }
         }
@@ -267,9 +246,7 @@ private fun AnimatedCarousel(
     data: List<Track>,
     onPlay: (List<Track>, Int) -> Unit,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
-    onSeeAll: () -> Unit,
-    onAddNext: (Track) -> Unit,
-    onAddEnd: (Track) -> Unit
+    onSeeAll: () -> Unit
 ) {
     if (data.isEmpty()) return
     
@@ -309,9 +286,7 @@ private fun AnimatedCarousel(
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onPlay(data, index)
-                    },
-                    onAddNext = { onAddNext(track) },
-                    onAddEnd = { onAddEnd(track) }
+                    }
                 )
             }
         }
@@ -321,9 +296,7 @@ private fun AnimatedCarousel(
 @Composable
 private fun TrackCard(
     track: Track,
-    onClick: () -> Unit,
-    onAddNext: () -> Unit,
-    onAddEnd: () -> Unit
+    onClick: () -> Unit
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -331,7 +304,6 @@ private fun TrackCard(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "scale"
     )
-    var showMenu by remember { mutableStateOf(false) }
     
     Card(
         modifier = Modifier
@@ -354,7 +326,7 @@ private fun TrackCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(12dp))
             ) {
                     Artwork(
                         data = track.artUri,
@@ -402,16 +374,6 @@ private fun TrackCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
             )
-            
-            Box(modifier = Modifier.fillMaxWidth()) {
-                IconButton(onClick = { showMenu = true }, modifier = Modifier.align(Alignment.CenterEnd)) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "More")
-                }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    DropdownMenuItem(text = { Text("Play next") }, onClick = { onAddNext(); showMenu = false })
-                    DropdownMenuItem(text = { Text("Add to end") }, onClick = { onAddEnd(); showMenu = false })
-                }
-            }
         }
     }
 }
