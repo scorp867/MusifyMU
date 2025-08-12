@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -43,6 +44,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var recentAdded by remember { mutableStateOf<List<Track>>(emptyList()) }
     var favorites by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var refreshTrigger by remember { mutableStateOf(0) }
     
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -74,11 +76,17 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         }
     }
 
-    // Refresh data when screen becomes visible
-    LaunchedEffect(navController.currentBackStackEntryAsState().value?.destination?.route) {
-        if (navController.currentBackStackEntryAsState().value?.destination?.route == "home") {
+    // Refresh data when trigger changes
+    LaunchedEffect(refreshTrigger) {
+        if (refreshTrigger > 0) {
             refreshData()
         }
+    }
+
+    // Refresh data when the screen becomes visible (simplified approach)
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(1000) // Initial delay
+        refreshData()
     }
 
     // Create gradient background
@@ -112,7 +120,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     title = "Recently Played",
                     icon = Icons.Rounded.History,
                     data = recentPlayed,
-                    onPlay = onPlay,
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        // Trigger refresh after a short delay to allow the database to update
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
                     haptic = haptic
                 )
             }
@@ -122,7 +137,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     title = "Recently Added",
                     icon = Icons.Rounded.NewReleases,
                     data = recentAdded,
-                    onPlay = onPlay,
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        // Trigger refresh after a short delay to allow the database to update
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
                     haptic = haptic
                 )
             }
@@ -132,7 +154,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     title = "Favourites",
                     icon = Icons.Rounded.Favorite,
                     data = favorites,
-                    onPlay = onPlay,
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        // Trigger refresh after a short delay to allow the database to update
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
                     haptic = haptic
                 )
             }
