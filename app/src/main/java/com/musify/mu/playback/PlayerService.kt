@@ -5,6 +5,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
@@ -27,6 +30,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import java.io.File
+import java.io.FileOutputStream
 
 class PlayerService : MediaLibraryService() {
 
@@ -40,6 +45,7 @@ class PlayerService : MediaLibraryService() {
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
     private var isNotificationActive = false
     private var hasValidMedia = false
+    private var currentNotificationBuilder: NotificationCompat.Builder? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -124,7 +130,9 @@ class PlayerService : MediaLibraryService() {
                     startForegroundService()
                 } else {
                     audioFocusManager.abandon()
-                    stopForegroundService()
+                    if (isPlaying.not()) {
+                        stopForegroundService()
+                    }
                 }
             }
             
@@ -179,7 +187,7 @@ class PlayerService : MediaLibraryService() {
                     val validTracks = state.mediaIds.mapNotNull { id -> 
                         repo.getTrackByMediaId(id)?.let { track ->
                             try {
-                                val uri = android.net.Uri.parse(track.mediaId)
+                                val uri = Uri.parse(track.mediaId)
                                 val inputStream = this@PlayerService.contentResolver.openInputStream(uri)
                                 inputStream?.close()
                                 track
@@ -281,7 +289,7 @@ class PlayerService : MediaLibraryService() {
                 // Validate that media files exist
                 val validTracks = tracks.filter { track ->
                     try {
-                        val uri = android.net.Uri.parse(track.mediaId)
+                        val uri = Uri.parse(track.mediaId)
                         val inputStream = this@PlayerService.contentResolver.openInputStream(uri)
                         inputStream?.close()
                         true
@@ -330,6 +338,7 @@ class PlayerService : MediaLibraryService() {
         if (isNotificationActive) {
             stopForeground(true)
             isNotificationActive = false
+            currentNotificationBuilder = null
         }
     }
     
@@ -347,26 +356,58 @@ class PlayerService : MediaLibraryService() {
         val artist = currentItem?.mediaMetadata?.artist?.toString() ?: "Unknown Artist"
         val artworkUri = currentItem?.mediaMetadata?.artworkUri
         
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(artist)
-            .setSmallIcon(R.drawable.ic_music_note)
-            .setContentIntent(createPlayerActivityIntent())
-            .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
-                .setMediaSession(mediaLibrarySession?.sessionCompatToken))
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
+        // Create or reuse notification builder to prevent flickering
+        if (currentNotificationBuilder == null) {
+            currentNotificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_music_note)
+                .setContentIntent(createPlayerActivityIntent())
+                .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
+                    .setMediaSession(mediaLibrarySession?.sessionCompatToken))
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true)
+        }
         
-        // Add artwork if available
-        artworkUri?.let { uri ->
-            try {
-                builder.setLargeIcon(android.graphics.BitmapFactory.decodeFile(uri.path))
-            } catch (e: Exception) {
-                android.util.Log.w("PlayerService", "Failed to load notification artwork", e)
+        currentNotificationBuilder?.apply {
+            setContentTitle(title)
+            setContentText(artist)
+            
+            // Load and set artwork
+            artworkUri?.let { uri ->
+                try {
+                    val bitmap = loadArtworkBitmap(uri.toString())
+                    bitmap?.let { setLargeIcon(it) }
+                } catch (e: Exception) {
+                    android.util.Log.w("PlayerService", "Failed to load notification artwork", e)
+                }
             }
         }
         
-        return builder.build()
+        return currentNotificationBuilder!!.build()
+    }
+    
+    private fun loadArtworkBitmap(artworkUri: String): Bitmap? {
+        return try {
+            val uri = Uri.parse(artworkUri)
+            when {
+                uri.scheme == "content" -> {
+                    // Handle content:// URIs (MediaStore)
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        BitmapFactory.decodeStream(input)
+                    }
+                }
+                uri.scheme == "file" -> {
+                    // Handle file:// URIs
+                    BitmapFactory.decodeFile(uri.path)
+                }
+                else -> {
+                    // Try to decode as file path
+                    BitmapFactory.decodeFile(artworkUri)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("PlayerService", "Failed to load artwork: $artworkUri", e)
+            null
+        }
     }
     
     private fun createNotificationChannel() {

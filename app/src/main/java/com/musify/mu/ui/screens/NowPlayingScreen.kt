@@ -183,6 +183,13 @@ fun NowPlayingScreen(navController: NavController) {
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Top section with album art and track info
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
             // Top bar with back button and menu
             Row(
                 modifier = Modifier
@@ -339,8 +346,16 @@ fun NowPlayingScreen(navController: NavController) {
                 }
             }
             
-            Spacer(modifier = Modifier.height(40.dp))
-            
+            }
+        }
+        
+        // Fixed bottom section with controls
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+        ) {
             // Progress bar with glassmorphism
             Column(
                 modifier = Modifier
@@ -391,9 +406,9 @@ fun NowPlayingScreen(navController: NavController) {
                 }
             }
             
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             
-            // Glassmorphism control panel
+            // Glassmorphism control panel - FIXED POSITION
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -541,8 +556,6 @@ fun NowPlayingScreen(navController: NavController) {
                     }
                 }
             }
-            
-            Spacer(modifier = Modifier.height(24.dp))
             
             Spacer(modifier = Modifier.height(16.dp))
             

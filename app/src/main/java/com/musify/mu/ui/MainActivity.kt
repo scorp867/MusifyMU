@@ -29,6 +29,7 @@ import androidx.media3.session.SessionToken
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.musify.mu.data.db.entities.Track
+import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.playback.PlayerService
 import com.musify.mu.ui.components.NowPlayingBar
 import com.musify.mu.ui.navigation.MusifyNavGraph
@@ -52,33 +53,37 @@ class MainActivity : ComponentActivity() {
             MusifyTheme {
                 val navController = rememberNavController()
                 val scope = rememberCoroutineScope()
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val repo = remember { LibraryRepository.get(context) }
 
                 var controller by remember { mutableStateOf<MediaController?>(null) }
                 var currentTrack by remember { mutableStateOf<Track?>(null) }
                 var isPlaying by remember { mutableStateOf(false) }
-
-                LaunchedEffect(Unit) {
-                    // Don't start the service immediately - only when needed
-                    // We'll create the controller but not start playback
-                }
+                var hasPlayedBefore by remember { mutableStateOf(false) }
 
                 // Create controller only when we need to play
                 val createController = {
-                    val token = SessionToken(applicationContext, ComponentName(applicationContext, PlayerService::class.java))
-                    MediaController.Builder(applicationContext, token).buildAsync()
-                }
-
-                // Cleanup controller when activity is destroyed
-                DisposableEffect(Unit) {
-                    onDispose {
-                        controller?.release()
-                    }
+                    val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
+                    MediaController.Builder(context, token).buildAsync()
                 }
 
                 // Check if we should navigate to player from notification
                 LaunchedEffect(intent?.getStringExtra("navigate_to")) {
                     if (intent?.getStringExtra("navigate_to") == "player") {
                         navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route)
+                    }
+                }
+
+                // Check for last played track on app start
+                LaunchedEffect(Unit) {
+                    try {
+                        val recentTracks = repo.recentlyPlayed(1)
+                        if (recentTracks.isNotEmpty()) {
+                            currentTrack = recentTracks.first()
+                            hasPlayedBefore = true
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Failed to load recent tracks", e)
                     }
                 }
 
@@ -91,6 +96,7 @@ class MainActivity : ComponentActivity() {
                                 controller?.addListener(object : Player.Listener {
                                     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                                         currentTrack = mediaItem?.toTrack()
+                                        hasPlayedBefore = true
                                     }
                                     
                                     override fun onIsPlayingChanged(isPlayingNow: Boolean) {
@@ -104,6 +110,7 @@ class MainActivity : ComponentActivity() {
                                             val item = controller?.currentMediaItem
                                             if (item != null) {
                                                 currentTrack = item.toTrack()
+                                                hasPlayedBefore = true
                                             }
                                         }
                                     }
@@ -126,6 +133,13 @@ class MainActivity : ComponentActivity() {
                 val currentRoute = navBackStackEntry?.destination?.route
                 val isPlayerScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route
 
+                // Cleanup controller when activity is destroyed
+                DisposableEffect(Unit) {
+                    onDispose {
+                        controller?.release()
+                    }
+                }
+
                 androidx.compose.runtime.CompositionLocalProvider(com.musify.mu.playback.LocalMediaController provides controller) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -140,9 +154,9 @@ class MainActivity : ComponentActivity() {
                                 exit = fadeOut(animationSpec = tween(300))
                             ) {
                                 Column {
-                                    // Show now playing bar only when there's a current track
+                                    // Show now playing bar only when there's a current track and we've played before
                                     AnimatedVisibility(
-                                        visible = currentTrack != null,
+                                        visible = currentTrack != null && hasPlayedBefore,
                                         enter = fadeIn(animationSpec = tween(300)),
                                         exit = fadeOut(animationSpec = tween(300))
                                     ) {

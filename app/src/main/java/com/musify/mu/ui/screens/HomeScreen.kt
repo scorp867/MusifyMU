@@ -47,17 +47,37 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    // Function to refresh data
+    val refreshData = {
+        scope.launch {
+            try {
+                recentPlayed = repo.recentlyPlayed(12)
+                recentAdded = repo.recentlyAdded(12)
+                favorites = repo.favorites()
+            } catch (e: Exception) {
+                android.util.Log.w("HomeScreen", "Failed to refresh data", e)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         scope.launch {
             try {
-            recentPlayed = repo.recentlyPlayed(12)
-            recentAdded = repo.recentlyAdded(12)
-            favorites = repo.favorites()
+                recentPlayed = repo.recentlyPlayed(12)
+                recentAdded = repo.recentlyAdded(12)
+                favorites = repo.favorites()
             } catch (e: Exception) {
                 // Handle error gracefully
             } finally {
                 isLoading = false
             }
+        }
+    }
+
+    // Refresh data when screen becomes visible
+    LaunchedEffect(navController.currentBackStackEntryAsState().value?.destination?.route) {
+        if (navController.currentBackStackEntryAsState().value?.destination?.route == "home") {
+            refreshData()
         }
     }
 
