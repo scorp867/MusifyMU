@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
-import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -15,7 +14,6 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaStyleNotificationHelper
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.musify.mu.ui.MainActivity
@@ -41,12 +39,10 @@ class PlayerService : MediaLibraryService() {
 
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
     private var isNotificationActive = false
+    private var hasValidMedia = false
 
     override fun onCreate() {
         super.onCreate()
-        
-        // Only create notification channel when needed, not on service creation
-        // createNotificationChannel() - REMOVED from here
         
         repo = LibraryRepository.get(this)
         stateStore = PlaybackStateStore(this)
@@ -105,7 +101,7 @@ class PlayerService : MediaLibraryService() {
                 mediaSession: MediaSession,
                 controller: MediaSession.ControllerInfo,
                 mediaItems: MutableList<MediaItem>
-            ): com.google.common.util.concurrent.ListenableFuture<MutableList<MediaItem>> {
+            ): ListenableFuture<MutableList<MediaItem>> {
                 val resolved = runBlocking(Dispatchers.IO) {
                     mediaItems.map { it.mediaId }
                         .mapNotNull { id -> repo.getTrackByMediaId(id)?.toMediaItem() }
@@ -123,38 +119,12 @@ class PlayerService : MediaLibraryService() {
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) {
+                if (isPlaying && hasValidMedia) {
                     audioFocusManager.request()
-                    // Start foreground service with notification only when playing
-                    if (!isNotificationActive) {
-                        startForegroundService()
-                    }
+                    startForegroundService()
                 } else {
                     audioFocusManager.abandon()
-                    // Stop foreground service when not playing
-                    if (isNotificationActive) {
-                        stopForegroundService()
-                    }
-                }
-            }
-            
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                // Handle service lifecycle based on playback state
-                when (playbackState) {
-                    Player.STATE_IDLE -> {
-                        // Service should stop when idle
-                        if (isNotificationActive) {
-                            stopForegroundService()
-                        }
-                        checkIfServiceShouldStop()
-                    }
-                    Player.STATE_ENDED -> {
-                        // Service should stop when playback ends
-                        if (isNotificationActive) {
-                            stopForegroundService()
-                        }
-                        checkIfServiceShouldStop()
-                    }
+                    stopForegroundService()
                 }
             }
             
@@ -167,13 +137,13 @@ class PlayerService : MediaLibraryService() {
                 }
                 
                 // Update notification with new track info
-                if (isNotificationActive) {
+                if (isNotificationActive && hasValidMedia) {
                     updateNotification()
                 }
             }
             
             override fun onEvents(player: Player, events: Player.Events) {
-                // Access player on its application thread (main), persist off-thread
+                // Save playback state
                 serviceScope.launch {
                     val ids = queue.snapshotIds()
                     val index = player.currentMediaItemIndex
@@ -186,31 +156,28 @@ class PlayerService : MediaLibraryService() {
                     }
                 }
                 
-                // Check if queue became empty
-                if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) && player.mediaItemCount == 0) {
-                    checkIfServiceShouldStop()
+                // Check if we have valid media
+                hasValidMedia = player.mediaItemCount > 0
+                
+                // Handle service lifecycle
+                if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
+                    if (player.mediaItemCount == 0) {
+                        // No media items, stop service
+                        stopForegroundService()
+                        stopSelf()
+                    }
                 }
             }
         })
 
-        // Clear old artwork cache and refresh library
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                repo.clearArtworkCache()
-            } catch (e: Exception) {
-                android.util.Log.w("PlayerService", "Failed to clear artwork cache", e)
-            }
-        }
-        
         // Try to restore last session state
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val state = stateStore.load()
                 if (state != null && state.mediaIds.isNotEmpty()) {
-                    // Validate that media files still exist before creating MediaItems
+                    // Validate that media files still exist
                     val validTracks = state.mediaIds.mapNotNull { id -> 
                         repo.getTrackByMediaId(id)?.let { track ->
-                            // Check if the file still exists
                             try {
                                 val uri = android.net.Uri.parse(track.mediaId)
                                 val inputStream = this@PlayerService.contentResolver.openInputStream(uri)
@@ -227,42 +194,39 @@ class PlayerService : MediaLibraryService() {
                         val items = validTracks.map { it.toMediaItem() }
                         launch(Dispatchers.Main) {
                             try {
-                                // Validate position before setting queue
                                 val validPosMs = if (state.posMs > 0L) state.posMs else 0L
                                 val validIndex = state.index.coerceIn(0, items.size - 1)
                                 
                                 queue.setQueue(items, validIndex, play = false, startPosMs = validPosMs)
                                 player.repeatMode = state.repeat
                                 player.shuffleModeEnabled = state.shuffle
-                                // Only start playing if it was playing before and we have valid tracks
+                                hasValidMedia = true
+                                
+                                // Only start playing if it was playing before
                                 if (state.play && items.isNotEmpty()) {
                                     player.play()
                                 }
                             } catch (e: Exception) {
                                 // If restoration fails, just set the queue without position
                                 queue.setQueue(items, 0, play = false, startPosMs = 0L)
+                                hasValidMedia = true
                             }
                         }
                     } else {
                         // Clear invalid state if no valid tracks found
                         stateStore.clear()
-                        // Stop the service if no valid media found
                         launch(Dispatchers.Main) {
-                            stopForegroundService()
                             stopSelf()
                         }
                     }
                 } else {
                     // No state to restore, stop the service
                     launch(Dispatchers.Main) {
-                        stopForegroundService()
                         stopSelf()
                     }
                 }
             } catch (e: Exception) {
-                // Log error but don't crash the service
                 android.util.Log.w("PlayerService", "Failed to restore playback state", e)
-                // Stop the service on error
                 launch(Dispatchers.Main) {
                     stopSelf()
                 }
@@ -279,7 +243,6 @@ class PlayerService : MediaLibraryService() {
         // Stop the service when app is swiped away from recents
         player.pause()
         stopForegroundService()
-        // Clear state and stop service immediately
         serviceScope.launch(Dispatchers.IO) {
             try {
                 stateStore.clear()
@@ -315,7 +278,7 @@ class PlayerService : MediaLibraryService() {
             try {
                 val tracks = repo.getAllTracks().filter { ids.contains(it.mediaId) }
                 
-                // Validate that media files exist before creating MediaItems
+                // Validate that media files exist
                 val validTracks = tracks.filter { track ->
                     try {
                         val uri = android.net.Uri.parse(track.mediaId)
@@ -333,6 +296,7 @@ class PlayerService : MediaLibraryService() {
                     val validStartIndex = startIndex.coerceIn(0, items.size - 1)
                     val validStartPos = if (startPos > 0L) startPos else 0L
                     queue.setQueue(items, validStartIndex, play = true, startPosMs = validStartPos)
+                    hasValidMedia = true
                 }
             } catch (e: Exception) {
                 android.util.Log.e("PlayerService", "Failed to play media IDs", e)
@@ -341,7 +305,7 @@ class PlayerService : MediaLibraryService() {
     }
     
     private fun createPlayerActivityIntent(): PendingIntent {
-        val intent = Intent(this, com.musify.mu.ui.MainActivity::class.java).apply {
+        val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra("navigate_to", "player")
         }
@@ -354,16 +318,26 @@ class PlayerService : MediaLibraryService() {
     }
     
     private fun startForegroundService() {
-        createNotificationChannel()
-        val notification = createNotification()
-        startForeground(NOTIFICATION_ID, notification)
-        isNotificationActive = true
+        if (!isNotificationActive && hasValidMedia) {
+            createNotificationChannel()
+            val notification = createNotification()
+            startForeground(NOTIFICATION_ID, notification)
+            isNotificationActive = true
+        }
     }
     
     private fun stopForegroundService() {
         if (isNotificationActive) {
             stopForeground(true)
             isNotificationActive = false
+        }
+    }
+    
+    private fun updateNotification() {
+        if (isNotificationActive && hasValidMedia) {
+            val notification = createNotification()
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.notify(NOTIFICATION_ID, notification)
         }
     }
     
@@ -393,30 +367,6 @@ class PlayerService : MediaLibraryService() {
         }
         
         return builder.build()
-    }
-    
-    private fun updateNotification() {
-        if (isNotificationActive) {
-            val notification = createNotification()
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.notify(NOTIFICATION_ID, notification)
-        }
-    }
-    
-    private fun checkIfServiceShouldStop() {
-        // Stop the service if there's no media in the queue and we're not playing
-        if (player.mediaItemCount == 0 && !player.isPlaying) {
-            // Clear the state when stopping the service
-            serviceScope.launch(Dispatchers.IO) {
-                try {
-                    stateStore.clear()
-                } catch (e: Exception) {
-                    android.util.Log.w("PlayerService", "Failed to clear state", e)
-                }
-            }
-            stopForegroundService()
-            stopSelf()
-        }
     }
     
     private fun createNotificationChannel() {

@@ -2,18 +2,11 @@ package com.musify.mu.data.media
 
 import android.content.ContentUris
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.net.Uri
 import android.provider.MediaStore
-import android.util.Size
 import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.entities.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
-import java.io.File
-import java.io.FileOutputStream
 
 class MediaStoreScanner(private val context: Context, private val db: AppDatabase) {
 
@@ -52,7 +45,7 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                 val album = cursor.getString(albumCol) ?: "Unknown"
                 val duration = cursor.getLong(durationCol)
                 val albumId = cursor.getLong(albumIdCol)
-                val artUri = getOrCreateUniqueAlbumArt(albumId, artist, album, contentUri.toString())
+                val artUri = getAlbumArt(albumId)
                 val dateAdded = cursor.getLong(dateAddedCol)
 
                 tracks += Track(
@@ -71,127 +64,9 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
         tracks
     }
     
-    // Method to clear old artwork cache
-    suspend fun clearArtworkCache() {
-        withContext(Dispatchers.IO) {
-            try {
-                val artDir = File(context.filesDir, "album_art")
-                if (artDir.exists()) {
-                    artDir.listFiles()?.forEach { file ->
-                        file.delete()
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.w("MediaStoreScanner", "Failed to clear artwork cache", e)
-            }
-        }
-    }
-    
-    private suspend fun getOrCreateUniqueAlbumArt(albumId: Long, artist: String, album: String, mediaId: String): String? {
-        return try {
-            // Create a unique hash for this specific track
-            // Use mediaId to ensure uniqueness for each track
-            val trackKey = "${mediaId.hashCode()}_${artist.trim()}_${album.trim()}"
-            val hashKey = trackKey.hashCode().toString()
-            val filename = "track_art_${hashKey}.jpg"
-            
-            val artDir = File(context.filesDir, "album_art")
-            if (!artDir.exists()) {
-                artDir.mkdirs()
-            }
-            
-            val artFile = File(artDir, filename)
-            
-            // If file already exists, return its URI
-            if (artFile.exists()) {
-                return Uri.fromFile(artFile).toString()
-            }
-            
-            // Try to get artwork from the individual track first, then fallback to album
-            val trackUri = android.net.Uri.parse(mediaId)
-            val bitmap = try {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    context.contentResolver.loadThumbnail(trackUri, Size(512, 512), null)
-                } else {
-                    // For older versions, try to get track artwork
-                    val cursor = context.contentResolver.query(
-                        trackUri,
-                        arrayOf(MediaStore.Audio.Media.ALBUM_ID),
-                        null,
-                        null,
-                        null
-                    )
-                    cursor?.use {
-                        if (it.moveToFirst()) {
-                            val albumId = it.getLong(0)
-                            if (albumId != 0L) {
-                                val albumArtUri = ContentUris.withAppendedId(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, albumId)
-                                val albumCursor = context.contentResolver.query(
-                                    MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
-                                    arrayOf(MediaStore.Audio.Albums.ALBUM_ART),
-                                    "${MediaStore.Audio.Albums._ID} = ?",
-                                    arrayOf(albumId.toString()),
-                                    null
-                                )
-                                albumCursor?.use { ac ->
-                                    if (ac.moveToFirst()) {
-                                        val artPath = ac.getString(0)
-                                        if (artPath != null) {
-                                            BitmapFactory.decodeFile(artPath)
-                                        } else null
-                                    } else null
-                                }
-                            } else null
-                        } else null
-                    }
-                }
-            } catch (e: Exception) {
-                // Fallback to album artwork if track artwork fails
-                if (albumId != 0L) {
-                    val albumArtUri = ContentUris.withAppendedId(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, albumId)
-                    try {
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                            context.contentResolver.loadThumbnail(albumArtUri, Size(512, 512), null)
-                        } else {
-                            val cursor = context.contentResolver.query(
-                                MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
-                                arrayOf(MediaStore.Audio.Albums.ALBUM_ART),
-                                "${MediaStore.Audio.Albums._ID} = ?",
-                                arrayOf(albumId.toString()),
-                                null
-                            )
-                            cursor?.use {
-                                if (it.moveToFirst()) {
-                                    val artPath = it.getString(0)
-                                    if (artPath != null) {
-                                        BitmapFactory.decodeFile(artPath)
-                                    } else null
-                                } else null
-                            }
-                        }
-                    } catch (e2: Exception) {
-                        null
-                    }
-                } else null
-            }
-                
-                // Save bitmap to file with unique name
-                bitmap?.let {
-                    FileOutputStream(artFile).use { out ->
-                        it.compress(Bitmap.CompressFormat.JPEG, 90, out)
-                    }
-                    Uri.fromFile(artFile).toString()
-                } ?: run {
-                    // Return null if we can't process the image
-                    null
-                }
-            } catch (e: Exception) {
-                // If we can't get the artwork, return null
-                null
-            }
-        } catch (e: Exception) {
-            // Final fallback to null
-            null
-        }
+    private fun getAlbumArt(albumId: Long): String? {
+        return if (albumId != 0L) {
+            ContentUris.withAppendedId(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, albumId).toString()
+        } else null
     }
 }

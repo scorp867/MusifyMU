@@ -58,28 +58,14 @@ class MainActivity : ComponentActivity() {
                 var isPlaying by remember { mutableStateOf(false) }
 
                 LaunchedEffect(Unit) {
+                    // Don't start the service immediately - only when needed
+                    // We'll create the controller but not start playback
+                }
+
+                // Create controller only when we need to play
+                val createController = {
                     val token = SessionToken(applicationContext, ComponentName(applicationContext, PlayerService::class.java))
-                    controller = MediaController.Builder(applicationContext, token).buildAsync().await()
-                    controller?.addListener(object : Player.Listener {
-                        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                            currentTrack = mediaItem?.toTrack()
-                        }
-                        
-                        override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                            isPlaying = isPlayingNow
-                        }
-                        
-                        override fun onPlaybackStateChanged(playbackState: Int) {
-                            isPlaying = controller?.isPlaying == true
-                            // Update track info when ready
-                            if (playbackState == Player.STATE_READY) {
-                                val item = controller?.currentMediaItem
-                                if (item != null) {
-                                    currentTrack = item.toTrack()
-                                }
-                            }
-                        }
-                    })
+                    MediaController.Builder(applicationContext, token).buildAsync()
                 }
 
                 // Cleanup controller when activity is destroyed
@@ -98,10 +84,39 @@ class MainActivity : ComponentActivity() {
 
                 val onPlay: (List<Track>, Int) -> Unit = { tracks, index ->
                     scope.launch {
-                        controller?.let { c ->
-                            c.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
-                            c.prepare()
-                            c.play()
+                        try {
+                            // Create controller only when we need to play
+                            if (controller == null) {
+                                controller = createController().await()
+                                controller?.addListener(object : Player.Listener {
+                                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                                        currentTrack = mediaItem?.toTrack()
+                                    }
+                                    
+                                    override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                                        isPlaying = isPlayingNow
+                                    }
+                                    
+                                    override fun onPlaybackStateChanged(playbackState: Int) {
+                                        isPlaying = controller?.isPlaying == true
+                                        // Update track info when ready
+                                        if (playbackState == Player.STATE_READY) {
+                                            val item = controller?.currentMediaItem
+                                            if (item != null) {
+                                                currentTrack = item.toTrack()
+                                            }
+                                        }
+                                    }
+                                })
+                            }
+                            
+                            controller?.let { c ->
+                                c.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
+                                c.prepare()
+                                c.play()
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to start playback", e)
                         }
                     }
                 }
