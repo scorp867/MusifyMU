@@ -31,8 +31,14 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.util.PermissionHelper
 import com.musify.mu.ui.navigation.Screen
+import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.musify.mu.playback.LocalMediaController
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
+import androidx.compose.material.DismissValue
+import androidx.compose.material.DismissDirection
 
 enum class SortType {
     TITLE, ARTIST, ALBUM, DATE_ADDED
@@ -46,6 +52,7 @@ fun LibraryScreen(
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
+    val controller = LocalMediaController.current
     
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -121,12 +128,66 @@ fun LibraryScreen(
                     key = { track -> track.mediaId }
                 ) { track ->
                     val index = tracks.indexOf(track)
-                    TrackItem(
-                        track = track,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onPlay(tracks, index)
-                            // Don't navigate to player screen - only play the song
+                    val dismissState = rememberDismissState(confirmStateChange = { value ->
+                        when (value) {
+                            DismissValue.DismissedToStart -> {
+                                // Swipe left -> Add to end
+                                controller?.addMediaItem(track.toMediaItem())
+                                true
+                            }
+                            DismissValue.DismissedToEnd -> {
+                                // Swipe right -> Play next
+                                val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
+                                    .coerceAtMost(controller?.mediaItemCount ?: 0)
+                                controller?.addMediaItem(insertIndex, track.toMediaItem())
+                                true
+                            }
+                            else -> false
+                        }
+                    })
+                    SwipeToDismiss(
+                        state = dismissState,
+                        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
+                        background = {
+                            val direction = dismissState.dismissDirection
+                            val color = when (direction) {
+                                DismissDirection.StartToEnd -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                                DismissDirection.EndToStart -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
+                                null -> Color.Transparent
+                            }
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(72.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(color)
+                                    .padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                // Left hint: Play Next
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Play next")
+                                }
+                                // Right hint: Add to End
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Add to end")
+                                    Spacer(Modifier.width(8.dp))
+                                    Icon(Icons.Rounded.QueueMusic, contentDescription = null)
+                                }
+                            }
+                        },
+                        dismissContent = {
+                            TrackItem(
+                                track = track,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onPlay(tracks, index)
+                                    // Don't navigate to player screen - only play the song
+                                }
+                            )
                         }
                     )
                 }

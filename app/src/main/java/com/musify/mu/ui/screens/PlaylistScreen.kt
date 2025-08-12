@@ -47,7 +47,7 @@ fun PlaylistScreen(navController: NavController) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            // TODO: Navigate to screen showing tracks in this playlist
+                            navController.navigate("playlist/${playlist.id}")
                         }
                         .padding(8.dp)
                 ) {

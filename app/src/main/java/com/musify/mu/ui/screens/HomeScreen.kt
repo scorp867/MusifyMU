@@ -128,7 +128,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             refreshTrigger++
                         }
                     },
-                    haptic = haptic
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/recently_played") }
                 )
             }
             
@@ -145,7 +146,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             refreshTrigger++
                         }
                     },
-                    haptic = haptic
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/recently_added") }
                 )
             }
             
@@ -162,7 +164,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             refreshTrigger++
                         }
                     },
-                    haptic = haptic
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/favorites") }
                 )
             }
         }
@@ -242,7 +245,8 @@ private fun AnimatedCarousel(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     data: List<Track>,
     onPlay: (List<Track>, Int) -> Unit,
-    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onSeeAll: () -> Unit
 ) {
     if (data.isEmpty()) return
     
@@ -263,8 +267,12 @@ private fun AnimatedCarousel(
                 style = MaterialTheme.typography.titleLarge.copy(
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f)
             )
+            TextButton(onClick = onSeeAll) {
+                Text("See all")
+            }
         }
         
         LazyRow(

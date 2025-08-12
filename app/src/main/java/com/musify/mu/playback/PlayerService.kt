@@ -44,6 +44,7 @@ class PlayerService : MediaLibraryService() {
 
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
     private var isNotificationActive = false
+    private var isInForeground = false
     private var hasValidMedia = false
     private var currentNotificationBuilder: NotificationCompat.Builder? = null
 
@@ -125,14 +126,17 @@ class PlayerService : MediaLibraryService() {
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying && hasValidMedia) {
-                    audioFocusManager.request()
-                    startForegroundService()
-                } else {
-                    audioFocusManager.abandon()
-                    if (isPlaying.not()) {
-                        stopForegroundService()
+                if (hasValidMedia) {
+                    if (isPlaying) {
+                        audioFocusManager.request()
+                        startOrPromoteToForeground()
+                    } else {
+                        audioFocusManager.abandon()
+                        // Do not remove the notification; keep it and just update ongoing flag
+                        demoteFromForegroundKeepNotification()
                     }
+                    // Update play/pause visual state in notification without recreating
+                    updateNotification()
                 }
             }
             
@@ -210,14 +214,18 @@ class PlayerService : MediaLibraryService() {
                                 player.shuffleModeEnabled = state.shuffle
                                 hasValidMedia = true
                                 
-                                // Only start playing if it was playing before
+                                // Start foreground if it was playing previously, otherwise post background notification
                                 if (state.play && items.isNotEmpty()) {
                                     player.play()
+                                } else {
+                                    // Post a non-foreground notification to allow seamless controls and avoid flicker later
+                                    postOrUpdateBackgroundNotification()
                                 }
                             } catch (e: Exception) {
                                 // If restoration fails, just set the queue without position
                                 queue.setQueue(items, 0, play = false, startPosMs = 0L)
                                 hasValidMedia = true
+                                postOrUpdateBackgroundNotification()
                             }
                         }
                     } else {
@@ -251,13 +259,7 @@ class PlayerService : MediaLibraryService() {
         // Stop the service when app is swiped away from recents
         player.pause()
         stopForegroundService()
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                stateStore.clear()
-            } catch (e: Exception) {
-                android.util.Log.w("PlayerService", "Failed to clear state", e)
-            }
-        }
+        // Do not clear playback state to allow seamless resume on next launch
         stopSelf()
     }
 
@@ -325,28 +327,54 @@ class PlayerService : MediaLibraryService() {
         )
     }
     
-    private fun startForegroundService() {
-        if (!isNotificationActive && hasValidMedia) {
+    private fun startOrPromoteToForeground() {
+        if (!isNotificationActive) {
             createNotificationChannel()
             val notification = createNotification()
             startForeground(NOTIFICATION_ID, notification)
+            isNotificationActive = true
+            isInForeground = true
+        } else if (!isInForeground) {
+            // Already showing a background notification, promote to foreground
+            val notification = createNotification()
+            startForeground(NOTIFICATION_ID, notification)
+            isInForeground = true
+        }
+    }
+    
+    private fun demoteFromForegroundKeepNotification() {
+        if (isInForeground) {
+            // Keep the notification visible to avoid flicker
+            stopForeground(false)
+            isInForeground = false
             isNotificationActive = true
         }
     }
     
     private fun stopForegroundService() {
-        if (isNotificationActive) {
+        if (isNotificationActive || isInForeground) {
             stopForeground(true)
+            isInForeground = false
             isNotificationActive = false
             currentNotificationBuilder = null
         }
     }
     
+    private fun postOrUpdateBackgroundNotification() {
+        createNotificationChannel()
+        val notification = createNotification()
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(NOTIFICATION_ID, notification)
+        isNotificationActive = true
+        isInForeground = false
+    }
+    
     private fun updateNotification() {
-        if (isNotificationActive && hasValidMedia) {
+        if (hasValidMedia) {
             val notification = createNotification()
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.notify(NOTIFICATION_ID, notification)
+            isNotificationActive = true
         }
     }
     
@@ -364,21 +392,24 @@ class PlayerService : MediaLibraryService() {
                 .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaLibrarySession?.sessionCompatToken))
                 .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true)
         }
         
         currentNotificationBuilder?.apply {
+            setOngoing(player.isPlaying)
             setContentTitle(title)
             setContentText(artist)
             
             // Load and set artwork
-            artworkUri?.let { uri ->
+            if (artworkUri != null) {
                 try {
-                    val bitmap = loadArtworkBitmap(uri.toString())
-                    bitmap?.let { setLargeIcon(it) }
+                    val bitmap = loadArtworkBitmap(artworkUri.toString())
+                    if (bitmap != null) setLargeIcon(bitmap) else setLargeIcon(null as Bitmap?)
                 } catch (e: Exception) {
                     android.util.Log.w("PlayerService", "Failed to load notification artwork", e)
+                    setLargeIcon(null as Bitmap?)
                 }
+            } else {
+                setLargeIcon(null as Bitmap?)
             }
         }
         
