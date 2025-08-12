@@ -45,10 +45,7 @@ class PlayerService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
-    private var isNotificationActive = false
-    private var isInForeground = false
     private var hasValidMedia = false
-    private var currentNotificationBuilder: NotificationCompat.Builder? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -132,14 +129,9 @@ class PlayerService : MediaLibraryService() {
                 if (hasValidMedia) {
                     if (isPlaying) {
                         audioFocusManager.request()
-                        startOrPromoteToForeground()
                     } else {
                         audioFocusManager.abandon()
-                        // Do not remove the notification; keep it and just update ongoing flag
-                        demoteFromForegroundKeepNotification()
                     }
-                    // Update play/pause visual state in notification without recreating
-                    updateNotification()
                 }
             }
             
@@ -187,6 +179,8 @@ class PlayerService : MediaLibraryService() {
             }
         })
 
+        // We no longer show our own persistent notification; Android system may show media controls if the session is active.
+
         // Try to restore last session state
         serviceScope.launch(Dispatchers.IO) {
             try {
@@ -219,18 +213,13 @@ class PlayerService : MediaLibraryService() {
                                 player.shuffleModeEnabled = state.shuffle
                                 hasValidMedia = true
                                 
-                                // Start foreground if it was playing previously, otherwise post background notification
                                 if (state.play && items.isNotEmpty()) {
                                     player.play()
-                                } else {
-                                    // Post a non-foreground notification to allow seamless controls and avoid flicker later
-                                    postOrUpdateBackgroundNotification()
                                 }
                             } catch (e: Exception) {
                                 // If restoration fails, just set the queue without position
                                 queue.setQueue(items, 0, play = false, startPosMs = 0L)
                                 hasValidMedia = true
-                                postOrUpdateBackgroundNotification()
                             }
                         }
                     } else {
@@ -263,8 +252,6 @@ class PlayerService : MediaLibraryService() {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
         player.pause()
-        stopForegroundService()
-        // Do not clear playback state to allow seamless resume on next launch
         stopSelf()
     }
 
@@ -332,55 +319,8 @@ class PlayerService : MediaLibraryService() {
         )
     }
     
-    private fun startOrPromoteToForeground() {
-        if (!isNotificationActive) {
-            createNotificationChannel()
-            val notification = createNotification()
-            startForeground(NOTIFICATION_ID, notification)
-            isNotificationActive = true
-            isInForeground = true
-        } else if (!isInForeground) {
-            // Already showing a background notification, promote to foreground
-            val notification = createNotification()
-            startForeground(NOTIFICATION_ID, notification)
-            isInForeground = true
-        }
-    }
-    
-    private fun demoteFromForegroundKeepNotification() {
-        if (isInForeground) {
-            // Keep the notification visible to avoid flicker
-            stopForeground(false)
-            isInForeground = false
-            isNotificationActive = true
-        }
-    }
-    
     private fun stopForegroundService() {
-        if (isNotificationActive || isInForeground) {
-            stopForeground(true)
-            isInForeground = false
-            isNotificationActive = false
-            currentNotificationBuilder = null
-        }
-    }
-    
-    private fun postOrUpdateBackgroundNotification() {
-        createNotificationChannel()
-        val notification = createNotification()
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.notify(NOTIFICATION_ID, notification)
-        isNotificationActive = true
-        isInForeground = false
-    }
-    
-    private fun updateNotification() {
-        if (hasValidMedia) {
-            val notification = createNotification()
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.notify(NOTIFICATION_ID, notification)
-            isNotificationActive = true
-        }
+        // No-op since we don't manage our own notification anymore
     }
     
     private fun createNotification(): Notification {

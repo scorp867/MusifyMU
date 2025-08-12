@@ -326,7 +326,7 @@ private fun TrackCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12dp))
+                    .clip(RoundedCornerShape(12.dp))
             ) {
                     Artwork(
                         data = track.artUri,
