@@ -29,6 +29,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.media3.ui.PlayerNotificationManager
 
 class PlayerService : MediaLibraryService() {
 
@@ -40,6 +41,7 @@ class PlayerService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
+    private var playerNotificationManager: PlayerNotificationManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -166,6 +168,8 @@ class PlayerService : MediaLibraryService() {
                 }
             }
         }
+
+        setupPlayerNotification()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? {
@@ -222,6 +226,68 @@ class PlayerService : MediaLibraryService() {
             
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun setupPlayerNotification() {
+        val session = mediaLibrarySession ?: return
+        val notificationId = 1001
+        val channelId = "PLAYBACK_CHANNEL"
+
+        val builder = PlayerNotificationManager.Builder(this, notificationId, channelId)
+            .setMediaDescriptionAdapter(object : PlayerNotificationManager.MediaDescriptionAdapter {
+                override fun getCurrentContentTitle(player: Player): CharSequence {
+                    val md = player.currentMediaItem?.mediaMetadata
+                    return md?.title ?: ""
+                }
+
+                override fun createCurrentContentIntent(player: Player): PendingIntent? {
+                    return createPlayerActivityIntent()
+                }
+
+                override fun getCurrentContentText(player: Player): CharSequence? {
+                    val md = player.currentMediaItem?.mediaMetadata
+                    return md?.artist
+                }
+
+                override fun getCurrentLargeIcon(
+                    player: Player,
+                    callback: PlayerNotificationManager.BitmapCallback
+                ): android.graphics.Bitmap? {
+                    // No async artwork loading here for simplicity; rely on media style to show session art if provided
+                    return null
+                }
+            })
+            .setNotificationListener(object : PlayerNotificationManager.NotificationListener {
+                override fun onNotificationPosted(
+                    notificationId: Int,
+                    notification: Notification,
+                    ongoing: Boolean
+                ) {
+                    if (ongoing) {
+                        startForeground(notificationId, notification)
+                    } else {
+                        // Not ongoing: ensure service is not in foreground but keep notification for controls
+                        stopForeground(false)
+                    }
+                }
+
+                override fun onNotificationCancelled(notificationId: Int, dismissedByUser: Boolean) {
+                    stopForeground(true)
+                    stopSelf()
+                }
+            })
+
+        playerNotificationManager = builder.build().apply {
+            setUseNextAction(true)
+            setUseNextActionInCompactView(true)
+            setUsePreviousAction(true)
+            setUsePreviousActionInCompactView(true)
+            setUsePlayPauseActions(true)
+            setSmallIcon(R.mipmap.ic_launcher)
+            setPriority(NotificationCompat.PRIORITY_LOW)
+            setMediaSessionToken(session.sessionCompatToken)
+            setPlayer(player)
         }
     }
 }

@@ -47,6 +47,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         
         super.onCreate(savedInstanceState)
+
+        // Request notification permission on Android 13+
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+            }
+        }
         
         setContent {
             MusifyTheme {
