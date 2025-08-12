@@ -14,6 +14,7 @@ import com.musify.mu.data.repo.LibraryRepository
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
+import com.musify.mu.ui.components.TrackPickerSheet
 
 @Composable
 fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay: (List<Track>, Int) -> Unit) {
@@ -22,16 +23,19 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var title by remember { mutableStateOf("Playlist") }
     val scope = rememberCoroutineScope()
+    var showPicker by remember { mutableStateOf(false) }
+    var allTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
     LaunchedEffect(playlistId) {
         tracks = repo.playlistTracks(playlistId)
         title = repo.playlists().find { it.id == playlistId }?.name ?: "Playlist"
+        allTracks = repo.getAllTracks()
     }
 
     Scaffold(
         topBar = {
             SmallTopAppBar(title = { Text(title) }, actions = {
-                IconButton(onClick = { /* TODO: open track picker to add to playlist */ }) {
+                IconButton(onClick = { showPicker = true }) {
                     Icon(Icons.Default.Add, contentDescription = "Add")
                 }
             })
@@ -76,6 +80,16 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                     modifier = Modifier.clickable { onPlay(tracks, idx) }
                 )
                 Divider()
+            }
+        }
+    }
+
+    if (showPicker) {
+        TrackPickerSheet(allTracks = allTracks, onDismiss = { showPicker = false }) { ids ->
+            scope.launch {
+                repo.addToPlaylist(playlistId, ids)
+                tracks = repo.playlistTracks(playlistId)
+                showPicker = false
             }
         }
     }
