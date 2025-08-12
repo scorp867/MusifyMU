@@ -24,7 +24,7 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY dateAddedSec DESC LIMIT :limit")
     suspend fun getRecentlyAdded(limit: Int): List<Track>
 
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlayHistory(entry: PlayHistory)
 
     @Query("SELECT t.* FROM track t JOIN play_history h ON t.mediaId = h.mediaId ORDER BY h.playedAt DESC LIMIT :limit")

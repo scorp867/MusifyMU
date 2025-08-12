@@ -29,6 +29,7 @@ import androidx.media3.session.SessionToken
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.musify.mu.data.db.entities.Track
+import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.playback.PlayerService
 import com.musify.mu.ui.components.NowPlayingBar
 import com.musify.mu.ui.navigation.MusifyNavGraph
@@ -52,34 +53,18 @@ class MainActivity : ComponentActivity() {
             MusifyTheme {
                 val navController = rememberNavController()
                 val scope = rememberCoroutineScope()
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val repo = remember { LibraryRepository.get(context) }
 
                 var controller by remember { mutableStateOf<MediaController?>(null) }
                 var currentTrack by remember { mutableStateOf<Track?>(null) }
                 var isPlaying by remember { mutableStateOf(false) }
+                var hasPlayedBefore by remember { mutableStateOf(false) }
 
-                LaunchedEffect(Unit) {
-                    val token = SessionToken(applicationContext, ComponentName(applicationContext, PlayerService::class.java))
-                    controller = MediaController.Builder(applicationContext, token).buildAsync().await()
-                    controller?.addListener(object : Player.Listener {
-                        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                            currentTrack = mediaItem?.toTrack()
-                        }
-                        
-                        override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                            isPlaying = isPlayingNow
-                        }
-                        
-                        override fun onPlaybackStateChanged(playbackState: Int) {
-                            isPlaying = controller?.isPlaying == true
-                            // Update track info when ready
-                            if (playbackState == Player.STATE_READY) {
-                                val item = controller?.currentMediaItem
-                                if (item != null) {
-                                    currentTrack = item.toTrack()
-                                }
-                            }
-                        }
-                    })
+                // Create controller only when we need to play
+                val createController = {
+                    val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
+                    MediaController.Builder(context, token).buildAsync()
                 }
 
                 // Check if we should navigate to player from notification
@@ -89,12 +74,56 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                // Check for last played track on app start
+                LaunchedEffect(Unit) {
+                    try {
+                        val recentTracks = repo.recentlyPlayed(1)
+                        if (recentTracks.isNotEmpty()) {
+                            currentTrack = recentTracks.first()
+                            hasPlayedBefore = true
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Failed to load recent tracks", e)
+                    }
+                }
+
                 val onPlay: (List<Track>, Int) -> Unit = { tracks, index ->
                     scope.launch {
-                        controller?.let { c ->
-                            c.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
-                            c.prepare()
-                            c.play()
+                        try {
+                            // Create controller only when we need to play
+                            if (controller == null) {
+                                controller = createController().await()
+                                controller?.addListener(object : Player.Listener {
+                                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                                        currentTrack = mediaItem?.toTrack()
+                                        hasPlayedBefore = true
+                                    }
+                                    
+                                    override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                                        isPlaying = isPlayingNow
+                                    }
+                                    
+                                    override fun onPlaybackStateChanged(playbackState: Int) {
+                                        isPlaying = controller?.isPlaying == true
+                                        // Update track info when ready
+                                        if (playbackState == Player.STATE_READY) {
+                                            val item = controller?.currentMediaItem
+                                            if (item != null) {
+                                                currentTrack = item.toTrack()
+                                                hasPlayedBefore = true
+                                            }
+                                        }
+                                    }
+                                })
+                            }
+                            
+                            controller?.let { c ->
+                                c.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
+                                c.prepare()
+                                c.play()
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to start playback", e)
                         }
                     }
                 }
@@ -103,6 +132,13 @@ class MainActivity : ComponentActivity() {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
                 val isPlayerScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route
+
+                // Cleanup controller when activity is destroyed
+                DisposableEffect(Unit) {
+                    onDispose {
+                        controller?.release()
+                    }
+                }
 
                 androidx.compose.runtime.CompositionLocalProvider(com.musify.mu.playback.LocalMediaController provides controller) {
                 Surface(
@@ -118,9 +154,9 @@ class MainActivity : ComponentActivity() {
                                 exit = fadeOut(animationSpec = tween(300))
                             ) {
                                 Column {
-                                    // Show now playing bar only when there's a current track
+                                    // Show now playing bar only when there's a current track and we've played before
                                     AnimatedVisibility(
-                                        visible = currentTrack != null,
+                                        visible = currentTrack != null && hasPlayedBefore,
                                         enter = fadeIn(animationSpec = tween(300)),
                                         exit = fadeOut(animationSpec = tween(300))
                                     ) {
