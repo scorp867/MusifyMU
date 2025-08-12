@@ -23,6 +23,7 @@ import com.musify.mu.ui.MainActivity
 import com.musify.mu.R
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.data.repo.PlaybackStateStore
+import com.musify.mu.data.repo.QueueStateStore
 import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ class PlayerService : MediaLibraryService() {
     private lateinit var queue: QueueManager
     private lateinit var repo: LibraryRepository
     private lateinit var stateStore: PlaybackStateStore
+    private lateinit var queueStateStore: QueueStateStore
     private lateinit var audioFocusManager: AudioFocusManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -53,8 +55,9 @@ class PlayerService : MediaLibraryService() {
         
         repo = LibraryRepository.get(this)
         stateStore = PlaybackStateStore(this)
+        queueStateStore = QueueStateStore(this)
         player = ExoPlayer.Builder(this).build()
-        queue = QueueManager(player)
+        queue = QueueManager(player, queueStateStore)
         
         // Initialize audio focus manager
         audioFocusManager = AudioFocusManager(this) { focusChange ->
@@ -145,6 +148,8 @@ class PlayerService : MediaLibraryService() {
                 mediaItem?.let { item ->
                     serviceScope.launch(Dispatchers.IO) {
                         repo.recordPlayed(item.mediaId)
+                        // If we advanced to next item, decrement play-next count if needed
+                        queueStateStore.decrementOnAdvance()
                     }
                 }
                 

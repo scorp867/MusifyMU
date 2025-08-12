@@ -35,6 +35,12 @@ data class Like(
     val likedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "favorites_order")
+data class FavoritesOrder(
+    @PrimaryKey val mediaId: String,
+    val position: Int
+)
+
 @Entity(tableName = "lyrics_map")
 data class LyricsMap(
     @PrimaryKey val mediaId: String,

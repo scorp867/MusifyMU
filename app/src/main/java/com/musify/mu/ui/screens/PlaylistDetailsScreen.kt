@@ -1,6 +1,7 @@
 package com.musify.mu.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
@@ -10,6 +11,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.MoreVert
 
 @Composable
 fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay: (List<Track>, Int) -> Unit) {
@@ -17,6 +21,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var title by remember { mutableStateOf("Playlist") }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(playlistId) {
         tracks = repo.playlistTracks(playlistId)
@@ -24,7 +29,13 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     }
 
     Scaffold(
-        topBar = { SmallTopAppBar(title = { Text(title) }) }
+        topBar = {
+            SmallTopAppBar(title = { Text(title) }, actions = {
+                IconButton(onClick = { /* TODO: open track picker to add to playlist */ }) {
+                    Icon(Icons.Default.Add, contentDescription = "Add")
+                }
+            })
+        }
     ) { padding ->
         LazyColumn(
             modifier = Modifier
@@ -35,6 +46,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
         ) {
             items(tracks.size) { idx ->
                 val track = tracks[idx]
+                var showMenu by remember { mutableStateOf(false) }
                 ListItem(
                     headlineContent = { Text(track.title) },
                     supportingContent = { Text(track.artist) },
@@ -44,6 +56,22 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                             contentDescription = track.title,
                             modifier = Modifier.size(48.dp)
                         )
+                    },
+                    trailingContent = {
+                        Box {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More")
+                            }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = {
+                                    scope.launch {
+                                        repo.removeFromPlaylist(playlistId, track.mediaId)
+                                        tracks = repo.playlistTracks(playlistId)
+                                        showMenu = false
+                                    }
+                                })
+                            }
+                        }
                     },
                     modifier = Modifier.clickable { onPlay(tracks, idx) }
                 )

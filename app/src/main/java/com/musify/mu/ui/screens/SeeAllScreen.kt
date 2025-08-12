@@ -10,6 +10,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
+import org.burnoutcrew.reorderable.*
 
 @Composable
 fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track>, Int) -> Unit) {
@@ -33,33 +34,81 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         }
     }
 
+    val reorderState = if (type == "favorites") rememberReorderableLazyListState(onMove = { from, to ->
+        tracks = tracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
+    }) else null
+
     Scaffold(
         topBar = {
             SmallTopAppBar(title = { Text(title) })
+        },
+        floatingActionButton = {
+            if (type == "favorites") {
+                ExtendedFloatingActionButton(text = { Text("Save order") }, onClick = {
+                    // Persist order
+                    val order = tracks.mapIndexed { index, track -> com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index) }
+                    androidx.lifecycle.compose.collectAsStateWithLifecycle
+                    androidx.compose.runtime.LaunchedEffect(order) {
+                        repo.saveFavoritesOrder(order)
+                    }
+                })
+            }
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize(),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(tracks.size) { idx ->
-                val track = tracks[idx]
-                ListItem(
-                    headlineContent = { Text(track.title) },
-                    supportingContent = { Text(track.artist) },
-                    leadingContent = {
-                        com.musify.mu.ui.components.Artwork(
-                            data = track.artUri,
-                            contentDescription = track.title,
-                            modifier = Modifier.size(48.dp)
+        if (type == "favorites") {
+            LazyColumn(
+                state = reorderState!!.listState,
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize()
+                    .reorderable(reorderState)
+                    .detectReorder(afterLongPress = true),
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(tracks.size, key = { idx -> tracks[idx].mediaId }) { idx ->
+                    val track = tracks[idx]
+                    ReorderableItem(reorderState, key = track.mediaId) { _ ->
+                        ListItem(
+                            headlineContent = { Text(track.title) },
+                            supportingContent = { Text(track.artist) },
+                            leadingContent = {
+                                com.musify.mu.ui.components.Artwork(
+                                    data = track.artUri,
+                                    contentDescription = track.title,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                            },
+                            modifier = Modifier.clickable { onPlay(tracks, idx) }
                         )
-                    },
-                    modifier = Modifier.clickable { onPlay(tracks, idx) }
-                )
-                Divider()
+                        Divider()
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .padding(padding)
+                    .fillMaxSize(),
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(tracks.size) { idx ->
+                    val track = tracks[idx]
+                    ListItem(
+                        headlineContent = { Text(track.title) },
+                        supportingContent = { Text(track.artist) },
+                        leadingContent = {
+                            com.musify.mu.ui.components.Artwork(
+                                data = track.artUri,
+                                contentDescription = track.title,
+                                modifier = Modifier.size(48.dp)
+                            )
+                        },
+                        modifier = Modifier.clickable { onPlay(tracks, idx) }
+                    )
+                    Divider()
+                }
             }
         }
     }

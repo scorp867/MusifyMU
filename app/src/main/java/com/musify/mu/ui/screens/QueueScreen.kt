@@ -17,6 +17,10 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
 import androidx.compose.foundation.lazy.itemsIndexed
 import org.burnoutcrew.reorderable.*
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
+import androidx.compose.material.DismissDirection
+import androidx.compose.material.DismissValue
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,13 +28,12 @@ fun QueueScreen(navController: NavController) {
     val controller = LocalMediaController.current
     var queue by remember { mutableStateOf<List<Track>>(emptyList()) }
     var currentIndex by remember { mutableStateOf(0) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val state = rememberReorderableLazyListState(onMove = { from, to ->
-        // Update local queue and apply to player
         queue = queue.toMutableList().apply {
             add(to.index, removeAt(from.index))
         }
-        // Apply reorder to controller
         val fromIdx = from.index
         val toIdx = to.index
         if (fromIdx != toIdx) {
@@ -40,10 +43,8 @@ fun QueueScreen(navController: NavController) {
 
     LaunchedEffect(controller) {
         controller?.let { c ->
-            // Initial load
             queue = (0 until c.mediaItemCount).mapNotNull { idx -> c.getMediaItemAt(idx)?.toTrack() }
             currentIndex = c.currentMediaItemIndex
-            // Listen to changes
             c.addListener(object : androidx.media3.common.Player.Listener {
                 override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                     currentIndex = c.currentMediaItemIndex
@@ -58,7 +59,8 @@ fun QueueScreen(navController: NavController) {
     Scaffold(
         topBar = {
             TopBar(title = "Queue")
-        }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { paddingValues ->
         LazyColumn(
             state = state.listState,
@@ -71,42 +73,94 @@ fun QueueScreen(navController: NavController) {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             itemsIndexed(queue, key = { idx, item -> item.mediaId }) { idx, track ->
-                ReorderableItem(state, key = track.mediaId) { isDragging ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(if (idx == currentIndex) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface)
-                            .clickable { controller?.seekTo(idx) }
-                            .padding(8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row {
-                            AsyncImage(
-                                model = track.artUri,
-                                contentDescription = track.title,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = track.title,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (idx == currentIndex) MaterialTheme.colorScheme.primary
-                                    else LocalContentColor.current
-                                )
-                                Text(track.artist, style = MaterialTheme.typography.bodyMedium)
-                            }
+                val dismissState = rememberDismissState(confirmStateChange = { value ->
+                    when (value) {
+                        DismissValue.DismissedToEnd -> {
+                            // Swipe right: Play next (reinsert at current+1)
+                            val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
+                                .coerceAtMost(controller?.mediaItemCount ?: 0)
+                            controller?.removeMediaItem(idx)
+                            controller?.addMediaItem(insertIndex, track.toMediaItem())
+                            true
                         }
-                        Row {
-                            IconButton(onClick = { controller?.removeMediaItem(idx) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove from Queue")
+                        DismissValue.DismissedToStart -> {
+                            // Swipe left: Remove with undo
+                            controller?.removeMediaItem(idx)
+                            // snapshot for undo
+                            val removed = track
+                            LaunchedEffect("undo_$idx_${track.mediaId}") {
+                                val res = snackbarHostState.showSnackbar(
+                                    message = "Removed from queue",
+                                    actionLabel = "Undo",
+                                    duration = SnackbarDuration.Short
+                                )
+                                if (res == SnackbarResult.ActionPerformed) {
+                                    controller?.addMediaItem(idx, removed.toMediaItem())
+                                }
                             }
-                            IconButton(onClick = { /* Add menu: play next / add to end for future */ }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "More")
+                            true
+                        }
+                        else -> false
+                    }
+                })
+                SwipeToDismiss(
+                    state = dismissState,
+                    directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
+                    background = {},
+                    dismissContent = {
+                        ReorderableItem(state, key = track.mediaId) { isDragging ->
+                            var showMenu by remember { mutableStateOf(false) }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(if (idx == currentIndex) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface)
+                                    .clickable { controller?.seekTo(idx) }
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row {
+                                    AsyncImage(
+                                        model = track.artUri,
+                                        contentDescription = track.title,
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Column {
+                                        Text(
+                                            text = track.title,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = if (idx == currentIndex) MaterialTheme.colorScheme.primary
+                                            else LocalContentColor.current
+                                        )
+                                        Text(track.artist, style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                                Box {
+                                    IconButton(onClick = { showMenu = true }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = "More")
+                                    }
+                                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                        DropdownMenuItem(text = { Text("Play next") }, onClick = {
+                                            val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
+                                                .coerceAtMost(controller?.mediaItemCount ?: 0)
+                                            controller?.removeMediaItem(idx)
+                                            controller?.addMediaItem(insertIndex, track.toMediaItem())
+                                            showMenu = false
+                                        })
+                                        DropdownMenuItem(text = { Text("Add to end") }, onClick = {
+                                            controller?.addMediaItem(track.toMediaItem())
+                                            showMenu = false
+                                        })
+                                        DropdownMenuItem(text = { Text("Remove") }, onClick = {
+                                            controller?.removeMediaItem(idx)
+                                            showMenu = false
+                                        })
+                                    }
+                                }
                             }
                         }
                     }
-                }
+                )
             }
         }
     }

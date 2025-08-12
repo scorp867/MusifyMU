@@ -75,8 +75,22 @@ interface AppDao {
     @Query("SELECT EXISTS(SELECT 1 FROM likes WHERE mediaId = :mediaId)")
     suspend fun isLiked(mediaId: String): Boolean
 
-    @Query("SELECT t.* FROM track t JOIN likes l ON t.mediaId = l.mediaId ORDER BY l.likedAt DESC")
+    // Favorites with optional manual order
+    @Query(
+        """
+        SELECT t.* FROM track t
+        JOIN likes l ON t.mediaId = l.mediaId
+        LEFT JOIN favorites_order fo ON fo.mediaId = t.mediaId
+        ORDER BY CASE WHEN fo.position IS NULL THEN 1 ELSE 0 END, fo.position ASC, l.likedAt DESC
+        """
+    )
     suspend fun getFavorites(): List<Track>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertFavoriteOrder(order: List<FavoritesOrder>)
+
+    @Query("DELETE FROM favorites_order WHERE mediaId = :mediaId")
+    suspend fun clearFavoriteOrderFor(mediaId: String)
 
     // Lyrics mapping
     @Insert(onConflict = OnConflictStrategy.REPLACE)

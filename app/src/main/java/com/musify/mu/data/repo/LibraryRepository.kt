@@ -31,6 +31,7 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun unlike(mediaId: String) = db.dao().unlike(mediaId)
     suspend fun isLiked(mediaId: String): Boolean = db.dao().isLiked(mediaId)
     suspend fun favorites(): List<Track> = db.dao().getFavorites()
+    suspend fun saveFavoritesOrder(order: List<FavoritesOrder>) = db.dao().upsertFavoriteOrder(order)
 
     suspend fun getTrackByMediaId(mediaId: String): Track? = db.dao().getTrack(mediaId)
 
