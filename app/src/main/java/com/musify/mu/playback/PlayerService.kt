@@ -286,7 +286,7 @@ class PlayerService : MediaLibraryService() {
             setUsePlayPauseActions(true)
             setSmallIcon(R.mipmap.ic_launcher)
             setPriority(NotificationCompat.PRIORITY_LOW)
-            setMediaSessionToken(session.token)
+            setMediaSessionToken(mediaLibrarySession!!.sessionCompatToken)
             setPlayer(player)
         }
     }
