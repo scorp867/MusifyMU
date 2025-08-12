@@ -82,6 +82,13 @@ class MainActivity : ComponentActivity() {
                     })
                 }
 
+                // Cleanup controller when activity is destroyed
+                DisposableEffect(Unit) {
+                    onDispose {
+                        controller?.release()
+                    }
+                }
+
                 // Check if we should navigate to player from notification
                 LaunchedEffect(intent?.getStringExtra("navigate_to")) {
                     if (intent?.getStringExtra("navigate_to") == "player") {

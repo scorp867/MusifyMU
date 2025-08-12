@@ -40,12 +40,13 @@ class PlayerService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
+    private var isNotificationActive = false
 
     override fun onCreate() {
         super.onCreate()
         
-        // Create notification channel for media playback
-        createNotificationChannel()
+        // Only create notification channel when needed, not on service creation
+        // createNotificationChannel() - REMOVED from here
         
         repo = LibraryRepository.get(this)
         stateStore = PlaybackStateStore(this)
@@ -124,8 +125,18 @@ class PlayerService : MediaLibraryService() {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     audioFocusManager.request()
+                    // Start foreground service with notification only when playing
+                    if (!isNotificationActive) {
+                        startForegroundService()
+                    }
                 } else {
                     audioFocusManager.abandon()
+                    // Stop foreground service when not playing
+                    if (isNotificationActive) {
+                        stopForegroundService()
+                    }
+                    // Check if we should stop the service entirely
+                    checkIfServiceShouldStop()
                 }
             }
             
@@ -151,18 +162,29 @@ class PlayerService : MediaLibraryService() {
                         stateStore.save(ids, index, pos, repeat, shuffle, play)
                     }
                 }
+                
+                // Check if queue became empty
+                if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) && player.mediaItemCount == 0) {
+                    checkIfServiceShouldStop()
+                }
             }
         })
 
         // Try to restore last session state
         serviceScope.launch(Dispatchers.IO) {
             val state = stateStore.load()
-            if (state != null) {
+            if (state != null && state.mediaIds.isNotEmpty()) {
                 val items = state.mediaIds.mapNotNull { id -> repo.getTrackByMediaId(id)?.toMediaItem() }
-                launch(Dispatchers.Main) {
-                    queue.setQueue(items, state.index, play = state.play, startPosMs = state.posMs)
-                    player.repeatMode = state.repeat
-                    player.shuffleModeEnabled = state.shuffle
+                if (items.isNotEmpty()) {
+                    launch(Dispatchers.Main) {
+                        queue.setQueue(items, state.index, play = false, startPosMs = state.posMs)
+                        player.repeatMode = state.repeat
+                        player.shuffleModeEnabled = state.shuffle
+                        // Only start playing if it was playing before and we have valid tracks
+                        if (state.play && items.isNotEmpty()) {
+                            player.play()
+                        }
+                    }
                 }
             }
         }
@@ -176,11 +198,13 @@ class PlayerService : MediaLibraryService() {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
         player.pause()
+        stopForegroundService()
         stopSelf()
     }
 
     override fun onDestroy() {
         audioFocusManager.abandon()
+        stopForegroundService()
         mediaLibrarySession?.release()
         player.release()
         serviceScope.cancel()
@@ -209,10 +233,48 @@ class PlayerService : MediaLibraryService() {
         )
     }
     
+    private fun startForegroundService() {
+        createNotificationChannel()
+        val notification = createNotification()
+        startForeground(NOTIFICATION_ID, notification)
+        isNotificationActive = true
+    }
+    
+    private fun stopForegroundService() {
+        if (isNotificationActive) {
+            stopForeground(true)
+            isNotificationActive = false
+        }
+    }
+    
+    private fun createNotification(): Notification {
+        val currentItem = player.currentMediaItem
+        val title = currentItem?.mediaMetadata?.title?.toString() ?: "Musify MU"
+        val artist = currentItem?.mediaMetadata?.artist?.toString() ?: "Unknown Artist"
+        
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(artist)
+            .setSmallIcon(R.drawable.ic_music_note)
+            .setContentIntent(createPlayerActivityIntent())
+            .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
+                .setMediaSession(mediaLibrarySession?.sessionCompatToken))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
+    }
+    
+    private fun checkIfServiceShouldStop() {
+        // Stop the service if there's no media in the queue and we're not playing
+        if (player.mediaItemCount == 0 && !player.isPlaying) {
+            stopSelf()
+        }
+    }
+    
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                "PLAYBACK_CHANNEL",
+                CHANNEL_ID,
                 "Music Playback",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
@@ -223,5 +285,10 @@ class PlayerService : MediaLibraryService() {
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannel(channel)
         }
+    }
+    
+    companion object {
+        private const val CHANNEL_ID = "PLAYBACK_CHANNEL"
+        private const val NOTIFICATION_ID = 1001
     }
 }
