@@ -145,10 +145,7 @@ class PlayerService : MediaLibraryService() {
                     }
                 }
                 
-                // Update notification with new track info
-                if (isNotificationActive && hasValidMedia) {
-                    updateNotification()
-                }
+
             }
             
             override fun onEvents(player: Player, events: Player.Events) {
@@ -323,41 +320,7 @@ class PlayerService : MediaLibraryService() {
         // No-op since we don't manage our own notification anymore
     }
     
-    private fun createNotification(): Notification {
-        val currentItem = player.currentMediaItem
-        val title = currentItem?.mediaMetadata?.title?.toString() ?: "Musify MU"
-        val artist = currentItem?.mediaMetadata?.artist?.toString() ?: "Unknown Artist"
-        val artworkUri = currentItem?.mediaMetadata?.artworkUri
-        
-        // Create or reuse notification builder to prevent flickering
-        if (currentNotificationBuilder == null) {
-            currentNotificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_music_note)
-                .setContentIntent(createPlayerActivityIntent())
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-        }
-        
-        currentNotificationBuilder?.apply {
-            setOngoing(player.isPlaying)
-            setContentTitle(title)
-            setContentText(artist)
-            
-            // Load and set artwork
-            if (artworkUri != null) {
-                try {
-                    val bitmap = loadArtworkBitmap(artworkUri.toString())
-                    if (bitmap != null) setLargeIcon(bitmap) else setLargeIcon(null as Bitmap?)
-                } catch (e: Exception) {
-                    android.util.Log.w("PlayerService", "Failed to load notification artwork", e)
-                    setLargeIcon(null as Bitmap?)
-                }
-            } else {
-                setLargeIcon(null as Bitmap?)
-            }
-        }
-        
-        return currentNotificationBuilder!!.build()
-    }
+
     
     private fun loadArtworkBitmap(artworkUri: String): Bitmap? {
         return try {
@@ -384,21 +347,7 @@ class PlayerService : MediaLibraryService() {
         }
     }
     
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Music Playback",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Music playback controls"
-                setShowBadge(false)
-            }
-            
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(channel)
-        }
-    }
+    private fun createNotificationChannel() { /* no-op */ }
     
     companion object {
         private const val CHANNEL_ID = "PLAYBACK_CHANNEL"

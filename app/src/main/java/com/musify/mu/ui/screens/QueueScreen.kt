@@ -86,7 +86,7 @@ fun QueueScreen(navController: NavController) {
                         DismissValue.DismissedToStart -> {
                             controller?.removeMediaItem(idx)
                             val removed = track
-                            LaunchedEffect(key1 = "undo_${'$'}idx_${'$'}{track.mediaId}") {
+                            LaunchedEffect(key1 = "undo_" + idx.toLong() + "_" + track.mediaId) {
                                 val res = snackbarHostState.showSnackbar(
                                     message = "Removed from queue",
                                     actionLabel = "Undo",
