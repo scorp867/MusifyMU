@@ -46,14 +46,8 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
         var totalCount = 0
         
         try {
-            // Build selection criteria
-            val selection = buildString {
-                append("${MediaStore.Audio.Media.IS_MUSIC} != 0")
-                // Also include files that might not be marked as music but are audio files
-                append(" OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%'")
-                // Exclude very short files
-                append(" AND ${MediaStore.Audio.Media.DURATION} > 10000")
-            }
+            // Build selection criteria - simplified for better compatibility
+            val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
             
             // First, get the total count
             context.contentResolver.query(

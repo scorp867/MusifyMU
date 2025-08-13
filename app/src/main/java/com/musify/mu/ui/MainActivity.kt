@@ -37,6 +37,15 @@ import com.musify.mu.ui.theme.MusifyTheme
 import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.await
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.musify.mu.util.PermissionHelper
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.flow.collectLatest
+import com.musify.mu.data.repo.LibraryRefreshState
 
 class MainActivity : ComponentActivity() {
 
@@ -60,6 +69,59 @@ class MainActivity : ComponentActivity() {
                 var currentTrack by remember { mutableStateOf<Track?>(null) }
                 var isPlaying by remember { mutableStateOf(false) }
                 var hasPlayedBefore by remember { mutableStateOf(false) }
+                
+                // Permission handling states
+                var hasPermission by remember { mutableStateOf(false) }
+                var showPermissionRationale by remember { mutableStateOf(false) }
+                var permissionChecked by remember { mutableStateOf(false) }
+                
+                // Permission launcher
+                val audioPermissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestMultiplePermissions()
+                ) { permissions ->
+                    val allGranted = permissions.values.all { it }
+                    hasPermission = allGranted
+                    permissionChecked = true
+                    
+                    if (allGranted) {
+                        // Start scanning music library in background
+                        scope.launch {
+                            repo.refreshLibraryWithProgress().collectLatest { state ->
+                                when (state) {
+                                    is LibraryRefreshState.Success -> {
+                                        // Library loaded successfully
+                                    }
+                                    is LibraryRefreshState.Error -> {
+                                        // Handle error if needed
+                                    }
+                                    else -> { /* Loading */ }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Check permissions on startup
+                LaunchedEffect(Unit) {
+                    val activity = context as? android.app.Activity
+                    hasPermission = activity?.let { PermissionHelper.hasAudioPermission(it) } ?: true
+                    
+                    if (!hasPermission && activity != null) {
+                        if (PermissionHelper.shouldShowAudioRationale(activity)) {
+                            showPermissionRationale = true
+                        } else {
+                            PermissionHelper.requestAudioPermission(audioPermissionLauncher)
+                        }
+                    } else {
+                        permissionChecked = true
+                        // If we already have permission, refresh library in background
+                        if (hasPermission) {
+                            scope.launch {
+                                repo.refreshLibraryWithProgress().collectLatest { /* We don't need to show progress here */ }
+                            }
+                        }
+                    }
+                }
 
                 // Build controller eagerly so miniplayer controls work after restart
                 LaunchedEffect(Unit) {
@@ -190,6 +252,39 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+                }
+                
+                // Permission rationale dialog
+                if (showPermissionRationale) {
+                    AlertDialog(
+                        onDismissRequest = { showPermissionRationale = false },
+                        title = { Text("Permission Required") },
+                        text = { 
+                            Text(
+                                "Musify needs access to your music library to play songs. " +
+                                "Without this permission, the app cannot function properly."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showPermissionRationale = false
+                                    PermissionHelper.requestAudioPermission(audioPermissionLauncher)
+                                }
+                            ) {
+                                Text("Grant Permission")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showPermissionRationale = false }) {
+                                Text("Exit App")
+                            }
+                        },
+                        properties = DialogProperties(
+                            dismissOnBackPress = false,
+                            dismissOnClickOutside = false
+                        )
+                    )
                 }
             }
         }
