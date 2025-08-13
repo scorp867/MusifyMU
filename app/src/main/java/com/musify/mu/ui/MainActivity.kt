@@ -130,11 +130,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Track the current destination to hide bottom elements on player and queue screens
+                // Track the current destination to hide bottom elements on player screen
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
-                val isOverlayScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route ||
-                        currentRoute == com.musify.mu.ui.navigation.Screen.Queue.route
+                val isPlayerScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route
+                val isQueueScreen = currentRoute == com.musify.mu.ui.navigation.Screen.Queue.route
+                val shouldHideBottomBar = isPlayerScreen || isQueueScreen
 
                 // Cleanup controller when activity is destroyed
                 DisposableEffect(Unit) {
@@ -152,7 +153,7 @@ class MainActivity : ComponentActivity() {
                         bottomBar = {
                             // Animated visibility for smoother transitions
                             AnimatedVisibility(
-                                visible = !isOverlayScreen,
+                                visible = !shouldHideBottomBar,
                                 enter = fadeIn(animationSpec = tween(300)),
                                 exit = fadeOut(animationSpec = tween(300))
                             ) {
@@ -184,7 +185,7 @@ class MainActivity : ComponentActivity() {
                     ) { paddingValues ->
                         MusifyNavGraph(
                             navController = navController,
-                            modifier = Modifier.padding(if (!isOverlayScreen) paddingValues else PaddingValues(0.dp)),
+                            modifier = Modifier.padding(if (!shouldHideBottomBar) paddingValues else PaddingValues(0.dp)),
                             onPlay = onPlay
                         )
                     }

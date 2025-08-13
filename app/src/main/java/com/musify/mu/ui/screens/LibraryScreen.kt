@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +36,10 @@ import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.musify.mu.playback.LocalMediaController
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
+import androidx.compose.material.DismissValue
+import androidx.compose.material.DismissDirection
 
 enum class SortType {
     TITLE, ARTIST, ALBUM, DATE_ADDED
@@ -112,23 +117,31 @@ fun LibraryScreen(
         } else if (tracks.isEmpty()) {
             EmptyLibrary()
         } else {
-            // Track list with animations
+            // Track list with improved interactions
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(
-                    items = tracks,
-                    key = { track -> track.mediaId }
-                ) { track ->
-                    val index = tracks.indexOf(track)
+                itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
+                    
+                    // Improved track item without aggressive swipe gestures
                     TrackItem(
                         track = track,
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onPlay(tracks, index)
+                        },
+                        onAddToQueue = { addToEnd ->
+                            // Only add to queue when explicitly requested (not while scrolling)
+                            if (addToEnd) {
+                                controller?.addMediaItem(track.toMediaItem())
+                            } else {
+                                val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
+                                    .coerceAtMost(controller?.mediaItemCount ?: 0)
+                                controller?.addMediaItem(insertIndex, track.toMediaItem())
+                            }
                         }
                     )
                 }
@@ -211,7 +224,8 @@ private fun LibraryHeader() {
 @Composable
 private fun TrackItem(
     track: Track,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onAddToQueue: (Boolean) -> Unit
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -281,13 +295,45 @@ private fun TrackItem(
                 )
             }
             
-            // Play indicator
-            Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = "Play",
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                modifier = Modifier.size(24.dp)
-            )
+            // Queue actions
+            var showMenu by remember { mutableStateOf(false) }
+            
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More options",
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Play next") },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
+                        },
+                        onClick = {
+                            onAddToQueue(false)
+                            showMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to queue") },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.QueueMusic, contentDescription = null)
+                        },
+                        onClick = {
+                            onAddToQueue(true)
+                            showMenu = false
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -360,6 +406,8 @@ private fun LoadingLibrary() {
         }
     }
 }
+
+
 
 @Composable
 private fun EmptyLibrary() {

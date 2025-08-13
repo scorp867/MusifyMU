@@ -51,12 +51,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Playlists preview state
-    data class PlaylistPreview(val id: Long, val name: String, val art: String?)
-    var playlistPreviews by remember { mutableStateOf<List<PlaylistPreview>>(emptyList()) }
-    var showNewPlaylistDialog by remember { mutableStateOf(false) }
-    var newPlaylistName by remember { mutableStateOf("") }
-
     // Function to refresh data
     val refreshData = {
         scope.launch {
@@ -64,14 +58,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 recentPlayed = repo.recentlyPlayed(12)
                 recentAdded = repo.recentlyAdded(12)
                 favorites = repo.favorites()
-                // Load playlists with first artwork
-                val pls = repo.playlists()
-                val previews = mutableListOf<PlaylistPreview>()
-                for (p in pls) {
-                    val tracks = repo.playlistTracks(p.id)
-                    previews.add(PlaylistPreview(p.id, p.name, tracks.firstOrNull()?.artUri))
-                }
-                playlistPreviews = previews
             } catch (e: Exception) {
                 android.util.Log.w("HomeScreen", "Failed to refresh data", e)
             }
@@ -84,13 +70,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 recentPlayed = repo.recentlyPlayed(12)
                 recentAdded = repo.recentlyAdded(12)
                 favorites = repo.favorites()
-                val pls = repo.playlists()
-                val previews = mutableListOf<PlaylistPreview>()
-                for (p in pls) {
-                    val tracks = repo.playlistTracks(p.id)
-                    previews.add(PlaylistPreview(p.id, p.name, tracks.firstOrNull()?.artUri))
-                }
-                playlistPreviews = previews
             } catch (e: Exception) {
                 // Handle error gracefully
             } finally {
@@ -200,81 +179,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     onSeeAll = { navController.navigate("see_all/favorites") }
                 )
             }
-
-            // Playlists carousel
-            if (playlistPreviews.isNotEmpty()) {
-                item {
-                    PlaylistCarousel(
-                        title = "Your Playlists",
-                        icon = Icons.Rounded.PlaylistPlay,
-                        data = playlistPreviews,
-                        onCreate = { showNewPlaylistDialog = true },
-                        onOpen = { id -> navController.navigate("playlist/$id") }
-                    )
-                }
-            } else {
-                item {
-                    // Header with create button even if none exist
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.PlaylistPlay,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Your Playlists",
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(onClick = { showNewPlaylistDialog = true }) { Text("New") }
-                    }
-                }
-            }
         }
-    }
-
-    if (showNewPlaylistDialog) {
-        AlertDialog(
-            onDismissRequest = { showNewPlaylistDialog = false },
-            title = { Text("New Playlist") },
-            text = {
-                OutlinedTextField(
-                    value = newPlaylistName,
-                    onValueChange = { newPlaylistName = it },
-                    label = { Text("Playlist Name") }
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    scope.launch {
-                        if (newPlaylistName.isNotBlank()) {
-                            repo.createPlaylist(newPlaylistName.trim())
-                            // Refresh playlists
-                            val pls = repo.playlists()
-                            val previews = mutableListOf<PlaylistPreview>()
-                            for (p in pls) {
-                                val tracks = repo.playlistTracks(p.id)
-                                previews.add(PlaylistPreview(p.id, p.name, tracks.firstOrNull()?.artUri))
-                            }
-                            playlistPreviews = previews
-                        }
-                        newPlaylistName = ""
-                        showNewPlaylistDialog = false
-                    }
-                }) { Text("Create") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showNewPlaylistDialog = false }) { Text("Cancel") }
-            }
-        )
     }
 }
 
@@ -342,6 +247,8 @@ private fun WelcomeHeader() {
         }
     }
 }
+
+
 
 @Composable
 private fun AnimatedCarousel(
@@ -555,93 +462,6 @@ private fun ShimmerCarousel() {
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun PlaylistCarousel(
-    title: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    data: List<PlaylistPreview>,
-    onCreate: () -> Unit,
-    onOpen: (Long) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f)
-            )
-            TextButton(onClick = onCreate) { Text("New") }
-        }
-
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp)
-        ) {
-            items(data.size) { index ->
-                val p = data[index]
-                PlaylistCard(name = p.name, art = p.art) { onOpen(p.id) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaylistCard(
-    name: String,
-    art: String?,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .width(150.dp)
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12.dp))
-            ) {
-                Artwork(
-                    data = art,
-                    contentDescription = name,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = name,
-                maxLines = 1,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontWeight = FontWeight.Medium
-                ),
-                color = MaterialTheme.colorScheme.onSurface
-            )
         }
     }
 }
