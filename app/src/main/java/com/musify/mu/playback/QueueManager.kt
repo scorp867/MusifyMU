@@ -36,9 +36,6 @@ class QueueManager(
         if (play) {
             player.play()
         }
-        
-        // Save queue state
-        saveQueueState()
     }
     
     /**
@@ -47,20 +44,6 @@ class QueueManager(
     fun getQueueIds(): List<String> {
         return (0 until player.mediaItemCount).mapNotNull { index ->
             player.getMediaItemAt(index)?.mediaId
-        }
-    }
-    
-    /**
-     * Save current queue state to storage
-     */
-    private fun saveQueueState() {
-        scope.launch(Dispatchers.IO) {
-            try {
-                val ids = getQueueIds()
-                queueStateStore?.save(ids)
-            } catch (e: Exception) {
-                // Ignore save errors
-            }
         }
     }
 }
