@@ -130,10 +130,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Track the current destination to hide bottom elements on player screen
+                // Track the current destination to hide bottom elements on player and queue screens
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
-                val isPlayerScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route
+                val isOverlayScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route ||
+                        currentRoute == com.musify.mu.ui.navigation.Screen.Queue.route
 
                 // Cleanup controller when activity is destroyed
                 DisposableEffect(Unit) {
@@ -151,7 +152,7 @@ class MainActivity : ComponentActivity() {
                         bottomBar = {
                             // Animated visibility for smoother transitions
                             AnimatedVisibility(
-                                visible = !isPlayerScreen,
+                                visible = !isOverlayScreen,
                                 enter = fadeIn(animationSpec = tween(300)),
                                 exit = fadeOut(animationSpec = tween(300))
                             ) {
@@ -183,7 +184,7 @@ class MainActivity : ComponentActivity() {
                     ) { paddingValues ->
                         MusifyNavGraph(
                             navController = navController,
-                            modifier = Modifier.padding(if (!isPlayerScreen) paddingValues else PaddingValues(0.dp)),
+                            modifier = Modifier.padding(if (!isOverlayScreen) paddingValues else PaddingValues(0.dp)),
                             onPlay = onPlay
                         )
                     }

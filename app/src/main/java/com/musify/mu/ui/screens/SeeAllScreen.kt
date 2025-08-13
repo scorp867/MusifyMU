@@ -12,6 +12,8 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DragHandle
 
 @Composable
 fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track>, Int) -> Unit) {
@@ -36,27 +38,20 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         }
     }
 
-    val reorderState = if (type == "favorites") rememberReorderableLazyListState(onMove = { from, to ->
-        tracks = tracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
-    }) else null
+    val reorderState = if (type == "favorites") rememberReorderableLazyListState(
+        onMove = { from, to ->
+            tracks = tracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
+        },
+        onDragEnd = { _, _ ->
+            // Persist order immediately
+            val order = tracks.mapIndexed { index, track -> com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index) }
+            scope.launch { repo.saveFavoritesOrder(order) }
+        }
+    ) else null
 
     Scaffold(
         topBar = {
             SmallTopAppBar(title = { Text(title) })
-        },
-        floatingActionButton = {
-            if (type == "favorites") {
-                ExtendedFloatingActionButton(
-                    text = { Text("Save order") },
-                    icon = {},
-                    onClick = {
-                        val order = tracks.mapIndexed { index, track -> com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index) }
-                        scope.launch {
-                            repo.saveFavoritesOrder(order)
-                        }
-                    }
-                )
-            }
         }
     ) { padding ->
         if (type == "favorites") {
@@ -65,8 +60,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize()
-                    .reorderable(reorderState)
-                    .detectReorder(reorderState),
+                    .reorderable(reorderState),
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -81,6 +75,14 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                     data = track.artUri,
                                     contentDescription = track.title,
                                     modifier = Modifier.size(48.dp)
+                                )
+                            },
+                            trailingContent = {
+                                // Drag handle only
+                                Icon(
+                                    imageVector = Icons.Rounded.DragHandle,
+                                    contentDescription = null,
+                                    modifier = Modifier.detectReorder(reorderState)
                                 )
                             },
                             modifier = Modifier.clickable { onPlay(tracks, idx) }

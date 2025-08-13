@@ -27,6 +27,9 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPlayHistory(entry: PlayHistory)
 
+    @Query("DELETE FROM play_history WHERE mediaId = :mediaId")
+    suspend fun clearPlayHistoryFor(mediaId: String)
+
     // Distinct recently played by latest play time per mediaId
     @Query(
         """
