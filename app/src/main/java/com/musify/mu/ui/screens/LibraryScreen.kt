@@ -116,7 +116,7 @@ fun LibraryScreen(
         } else if (tracks.isEmpty()) {
             EmptyLibrary()
         } else {
-            // Track list with animations
+            // Track list with improved interactions
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
@@ -128,66 +128,23 @@ fun LibraryScreen(
                     key = { track -> track.mediaId }
                 ) { track ->
                     val index = tracks.indexOf(track)
-                    val dismissState = rememberDismissState(confirmStateChange = { value ->
-                        when (value) {
-                            DismissValue.DismissedToStart -> {
-                                // Swipe left -> Add to end
+                    
+                    // Improved track item without aggressive swipe gestures
+                    TrackItem(
+                        track = track,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onPlay(tracks, index)
+                        },
+                        onAddToQueue = { addToEnd ->
+                            // Only add to queue when explicitly requested (not while scrolling)
+                            if (addToEnd) {
                                 controller?.addMediaItem(track.toMediaItem())
-                                true
-                            }
-                            DismissValue.DismissedToEnd -> {
-                                // Swipe right -> Play next
+                            } else {
                                 val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
                                     .coerceAtMost(controller?.mediaItemCount ?: 0)
                                 controller?.addMediaItem(insertIndex, track.toMediaItem())
-                                true
                             }
-                            else -> false
-                        }
-                    })
-                    SwipeToDismiss(
-                        state = dismissState,
-                        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
-                        background = {
-                            val direction = dismissState.dismissDirection
-                            val color = when (direction) {
-                                DismissDirection.StartToEnd -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                DismissDirection.EndToStart -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)
-                                null -> Color.Transparent
-                            }
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .height(72.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(color)
-                                    .padding(horizontal = 16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                // Left hint: Play Next
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Play next")
-                                }
-                                // Right hint: Add to End
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Add to end")
-                                    Spacer(Modifier.width(8.dp))
-                                    Icon(Icons.Rounded.QueueMusic, contentDescription = null)
-                                }
-                            }
-                        },
-                        dismissContent = {
-                            TrackItem(
-                                track = track,
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onPlay(tracks, index)
-                                    // Don't navigate to player screen - only play the song
-                                }
-                            )
                         }
                     )
                 }
@@ -270,7 +227,8 @@ private fun LibraryHeader() {
 @Composable
 private fun TrackItem(
     track: Track,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onAddToQueue: (Boolean) -> Unit
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -340,13 +298,45 @@ private fun TrackItem(
                 )
             }
             
-            // Play indicator
-            Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = "Play",
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                modifier = Modifier.size(24.dp)
-            )
+            // Queue actions
+            var showMenu by remember { mutableStateOf(false) }
+            
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More options",
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Play next") },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
+                        },
+                        onClick = {
+                            onAddToQueue(false)
+                            showMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to queue") },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.QueueMusic, contentDescription = null)
+                        },
+                        onClick = {
+                            onAddToQueue(true)
+                            showMenu = false
+                        }
+                    )
+                }
+            }
         }
     }
 }

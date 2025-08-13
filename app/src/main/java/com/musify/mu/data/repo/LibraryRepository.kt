@@ -37,7 +37,7 @@ class LibraryRepository private constructor(private val context: Context, privat
 
     suspend fun recentlyAdded(limit: Int = 20): List<Track> = db.dao().getRecentlyAdded(limit)
     suspend fun recentlyPlayed(limit: Int = 20): List<Track> = db.dao().getRecentlyPlayed(limit)
-    suspend fun recordPlayed(mediaId: String) = db.dao().insertPlayHistory(PlayHistory(mediaId = mediaId))
+    suspend fun recordPlayed(mediaId: String) = db.dao().insertPlayHistoryIfNotRecent(mediaId)
 
     companion object {
         @Volatile private var INSTANCE: LibraryRepository? = null

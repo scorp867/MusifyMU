@@ -43,7 +43,30 @@ fun MusifyNavGraph(
     ) {
         composable(Screen.Home.route) { HomeScreen(navController, onPlay) }
         composable(Screen.Library.route) { LibraryScreen(navController, onPlay) }
-        composable(Screen.Queue.route) { QueueScreen(navController) }
+        
+        // Queue screen as a modal overlay - only accessible from player screen
+        composable(
+            route = Screen.Queue.route,
+            enterTransition = {
+                slideInVertically(
+                    initialOffsetY = { it }, // Start from full screen height (bottom)
+                    animationSpec = tween(300)
+                ) + fadeIn(animationSpec = tween(300))
+            },
+            exitTransition = {
+                slideOutVertically(
+                    targetOffsetY = { it }, // Slide down to full screen height
+                    animationSpec = tween(300)
+                ) + fadeOut(animationSpec = tween(300))
+            }
+        ) { 
+            BackHandler(enabled = true) {
+                // Always go back to the previous screen (should be player)
+                navController.popBackStack()
+            }
+            QueueScreen(navController) 
+        }
+        
         composable(Screen.SeeAll.route) { backStackEntry ->
             val type = backStackEntry.arguments?.getString("type") ?: ""
             SeeAllScreen(navController = navController, type = type, onPlay = onPlay)

@@ -205,7 +205,7 @@ class PlayerService : MediaLibraryService() {
                                 val validPosMs = if (state.posMs > 0L) state.posMs else 0L
                                 val validIndex = state.index.coerceIn(0, items.size - 1)
                                 
-                                queue.setQueue(items, validIndex, play = false, startPosMs = validPosMs)
+                                launch { queue.setQueue(items, validIndex, play = false, startPosMs = validPosMs) }
                                 player.repeatMode = state.repeat
                                 player.shuffleModeEnabled = state.shuffle
                                 hasValidMedia = true
@@ -215,7 +215,7 @@ class PlayerService : MediaLibraryService() {
                                 }
                             } catch (e: Exception) {
                                 // If restoration fails, just set the queue without position
-                                queue.setQueue(items, 0, play = false, startPosMs = 0L)
+                                launch { queue.setQueue(items, 0, play = false, startPosMs = 0L) }
                                 hasValidMedia = true
                             }
                         }
@@ -294,7 +294,7 @@ class PlayerService : MediaLibraryService() {
                 if (items.isNotEmpty()) {
                     val validStartIndex = startIndex.coerceIn(0, items.size - 1)
                     val validStartPos = if (startPos > 0L) startPos else 0L
-                    queue.setQueue(items, validStartIndex, play = true, startPosMs = validStartPos)
+                    serviceScope.launch { queue.setQueue(items, validStartIndex, play = true, startPosMs = validStartPos) }
                     hasValidMedia = true
                 }
             } catch (e: Exception) {
