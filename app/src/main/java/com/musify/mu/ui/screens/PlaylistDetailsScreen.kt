@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 import com.musify.mu.ui.components.TrackPickerSheet
 import org.burnoutcrew.reorderable.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -50,7 +51,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
 
     Scaffold(
         topBar = {
-            SmallTopAppBar(title = { Text(title) }, actions = {
+            TopAppBar(title = { Text(title) }, actions = {
                 IconButton(onClick = { showPicker = true }) {
                     Icon(Icons.Default.Add, contentDescription = "Add")
                 }

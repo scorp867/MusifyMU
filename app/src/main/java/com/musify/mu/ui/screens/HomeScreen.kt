@@ -34,10 +34,6 @@ import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.Artwork
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.playback.LocalMediaController
-import com.musify.mu.data.db.entities.Playlist
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.layout.ContentScale
-import coil.compose.AsyncImage
 
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
@@ -49,7 +45,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var recentPlayed by remember { mutableStateOf<List<Track>>(emptyList()) }
     var recentAdded by remember { mutableStateOf<List<Track>>(emptyList()) }
     var favorites by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var customPlaylists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var refreshTrigger by remember { mutableStateOf(0) }
     
@@ -63,7 +58,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 recentPlayed = repo.recentlyPlayed(12)
                 recentAdded = repo.recentlyAdded(12)
                 favorites = repo.favorites()
-                customPlaylists = repo.playlists()
             } catch (e: Exception) {
                 android.util.Log.w("HomeScreen", "Failed to refresh data", e)
             }
@@ -76,7 +70,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 recentPlayed = repo.recentlyPlayed(12)
                 recentAdded = repo.recentlyAdded(12)
                 favorites = repo.favorites()
-                customPlaylists = repo.playlists()
             } catch (e: Exception) {
                 // Handle error gracefully
             } finally {
@@ -185,18 +178,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     haptic = haptic,
                     onSeeAll = { navController.navigate("see_all/favorites") }
                 )
-            }
-            
-            // Custom Playlists Carousel
-            if (customPlaylists.isNotEmpty()) {
-                item {
-                    CustomPlaylistsCarousel(
-                        playlists = customPlaylists,
-                        navController = navController,
-                        haptic = haptic,
-                        onRefresh = { refreshTrigger++ }
-                    )
-                }
             }
         }
     }
@@ -309,7 +290,7 @@ private fun AnimatedCarousel(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
-            items(data.size, key = { index -> "carousel_${title}_${index}_${data[index].mediaId}" }) { index ->
+            items(data.size) { index ->
                 val track = data[index]
                 TrackCard(
                     track = track,
@@ -481,184 +462,6 @@ private fun ShimmerCarousel() {
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun CustomPlaylistsCarousel(
-    playlists: List<Playlist>,
-    navController: NavController,
-    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
-    onRefresh: () -> Unit
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
-    val scope = rememberCoroutineScope()
-    
-    var showCreateDialog by remember { mutableStateOf(false) }
-    var playlistName by remember { mutableStateOf("") }
-    
-    if (showCreateDialog) {
-        AlertDialog(
-            onDismissRequest = { showCreateDialog = false },
-            title = { Text("Create New Playlist") },
-            text = {
-                OutlinedTextField(
-                    value = playlistName,
-                    onValueChange = { playlistName = it },
-                    label = { Text("Playlist Name") },
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (playlistName.isNotBlank()) {
-                            scope.launch {
-                                repo.createPlaylist(playlistName.trim())
-                                playlistName = ""
-                                showCreateDialog = false
-                                onRefresh()
-                            }
-                        }
-                    }
-                ) {
-                    Text("Create")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-    
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.PlaylistPlay,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Your Playlists",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f)
-            )
-            FilledTonalIconButton(
-                onClick = { 
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    showCreateDialog = true 
-                }
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = "Create Playlist")
-            }
-        }
-        
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp)
-        ) {
-            items(playlists, key = { playlist -> "playlist_card_${playlist.id}" }) { playlist ->
-                PlaylistCard(
-                    playlist = playlist,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        navController.navigate("playlist_details/${playlist.id}")
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlaylistCard(
-    playlist: Playlist,
-    onClick: () -> Unit
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
-    var trackCount by remember { mutableStateOf(0) }
-    var firstTrackArt by remember { mutableStateOf<String?>(null) }
-    
-    LaunchedEffect(playlist.id) {
-        val tracks = repo.playlistTracks(playlist.id)
-        trackCount = tracks.size
-        firstTrackArt = tracks.firstOrNull()?.artUri
-    }
-    
-    Card(
-        modifier = Modifier
-            .width(160.dp)
-            .clickable { onClick() },
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(120.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f)
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                if (firstTrackArt != null) {
-                    coil.compose.AsyncImage(
-                        model = firstTrackArt,
-                        contentDescription = playlist.name,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(12.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Rounded.MusicNote,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(48.dp)
-                    )
-                }
-            }
-            
-            Text(
-                text = playlist.name,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            
-            Text(
-                text = "$trackCount ${if (trackCount == 1) "song" else "songs"}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-            )
         }
     }
 }

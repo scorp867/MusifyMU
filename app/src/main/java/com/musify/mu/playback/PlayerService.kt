@@ -139,7 +139,8 @@ class PlayerService : MediaLibraryService() {
                 // Record the track as played when transitioning to it
                 mediaItem?.let { item ->
                     serviceScope.launch(Dispatchers.IO) {
-                        repo.recordPlayed(item.mediaId)
+                        // Record uniquely to avoid duplicates in recently played lists
+                        repo.recordPlayedUnique(item.mediaId)
                         // If we advanced to next item, decrement play-next count if needed
                         queueStateStore.decrementOnAdvance()
                     }
