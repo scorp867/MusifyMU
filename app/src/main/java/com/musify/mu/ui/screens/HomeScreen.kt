@@ -616,7 +616,7 @@ private fun PlaylistCard(
                     .size(120.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(
-                        brush = Brush.diagonalGradient(
+                        brush = Brush.linearGradient(
                             colors = listOf(
                                 MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
                                 MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f)
