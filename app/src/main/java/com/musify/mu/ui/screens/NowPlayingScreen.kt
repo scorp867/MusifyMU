@@ -33,6 +33,7 @@ import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.util.toTrack
 import kotlinx.coroutines.launch
 import com.musify.mu.data.repo.LibraryRepository
+import com.musify.mu.ui.navigation.Screen
 
 @Composable
 fun NowPlayingScreen(navController: NavController) {
@@ -82,7 +83,11 @@ fun NowPlayingScreen(navController: NavController) {
 
     // Extract colors from album artwork
     LaunchedEffect(currentTrack?.artUri) {
-        currentTrack?.artUri?.let { artUri ->
+        val artUri = currentTrack?.artUri
+        if (artUri.isNullOrBlank()) {
+            dominantColor = Color(0xFF6236FF)
+            vibrantColor = Color(0xFF38B6FF)
+        } else {
             coroutineScope.launch {
                 try {
                     val imageRequest = ImageRequest.Builder(context)
@@ -97,9 +102,13 @@ fun NowPlayingScreen(navController: NavController) {
                         val palette = Palette.from(it).generate()
                         dominantColor = Color(palette.getDominantColor(0xFF6236FF.toInt()))
                         vibrantColor = Color(palette.getVibrantColor(0xFF38B6FF.toInt()))
+                    } ?: run {
+                        dominantColor = Color(0xFF6236FF)
+                        vibrantColor = Color(0xFF38B6FF)
                     }
                 } catch (e: Exception) {
-                    // Use default colors if extraction fails
+                    dominantColor = Color(0xFF6236FF)
+                    vibrantColor = Color(0xFF38B6FF)
                 }
             }
         }
@@ -623,7 +632,7 @@ fun NowPlayingScreen(navController: NavController) {
                         
                         // Queue button (center)
                         IconButton(
-                            onClick = { /* Queue */ },
+                            onClick = { navController.navigate(Screen.Queue.route) },
                             modifier = Modifier.size(40.dp)
                         ) {
                             Icon(
