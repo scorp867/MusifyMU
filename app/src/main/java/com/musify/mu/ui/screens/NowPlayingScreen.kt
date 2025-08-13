@@ -32,11 +32,14 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.util.toTrack
 import kotlinx.coroutines.launch
+import com.musify.mu.data.repo.LibraryRepository
+import com.musify.mu.ui.navigation.Screen
 
 @Composable
 fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
+    val repo = remember { LibraryRepository.get(context) }
     
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -44,6 +47,7 @@ fun NowPlayingScreen(navController: NavController) {
     var repeatMode by remember { mutableStateOf(0) }
     var progress by remember { mutableStateOf(0f) }
     var duration by remember { mutableStateOf(0L) }
+    var isLiked by remember { mutableStateOf(false) }
     
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
@@ -79,7 +83,11 @@ fun NowPlayingScreen(navController: NavController) {
 
     // Extract colors from album artwork
     LaunchedEffect(currentTrack?.artUri) {
-        currentTrack?.artUri?.let { artUri ->
+        val artUri = currentTrack?.artUri
+        if (artUri.isNullOrBlank()) {
+            dominantColor = Color(0xFF6236FF)
+            vibrantColor = Color(0xFF38B6FF)
+        } else {
             coroutineScope.launch {
                 try {
                     val imageRequest = ImageRequest.Builder(context)
@@ -94,9 +102,13 @@ fun NowPlayingScreen(navController: NavController) {
                         val palette = Palette.from(it).generate()
                         dominantColor = Color(palette.getDominantColor(0xFF6236FF.toInt()))
                         vibrantColor = Color(palette.getVibrantColor(0xFF38B6FF.toInt()))
+                    } ?: run {
+                        dominantColor = Color(0xFF6236FF)
+                        vibrantColor = Color(0xFF38B6FF)
                     }
                 } catch (e: Exception) {
-                    // Use default colors if extraction fails
+                    dominantColor = Color(0xFF6236FF)
+                    vibrantColor = Color(0xFF38B6FF)
                 }
             }
         }
@@ -118,11 +130,19 @@ fun NowPlayingScreen(navController: NavController) {
                 mediaController.currentPosition.toFloat() / mediaController.duration.toFloat()
             } else 0f
             duration = mediaController.duration
+            // Load like state
+            currentTrack?.let { t ->
+                isLiked = repo.isLiked(t.mediaId)
+            }
             
             // Add listener for real-time updates
             val listener = object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                     currentTrack = mediaItem?.toTrack()
+                    currentTrack?.let { t ->
+                        // refresh like state on track change
+                        coroutineScope.launch { isLiked = repo.isLiked(t.mediaId) }
+                    }
                 }
                 
                 override fun onIsPlayingChanged(isPlayingNow: Boolean) {
@@ -503,7 +523,7 @@ fun NowPlayingScreen(navController: NavController) {
                                 .clickable {
                                     controller?.let {
                                         if (it.isPlaying) it.pause() else it.play()
-                                        isPlaying = !isPlaying
+                                        // rely on listener to update isPlaying
                                     }
                                 },
                             contentAlignment = Alignment.Center
@@ -612,7 +632,7 @@ fun NowPlayingScreen(navController: NavController) {
                         
                         // Queue button (center)
                         IconButton(
-                            onClick = { /* Queue */ },
+                            onClick = { navController.navigate(Screen.Queue.route) },
                             modifier = Modifier.size(40.dp)
                         ) {
                             Icon(
@@ -625,13 +645,19 @@ fun NowPlayingScreen(navController: NavController) {
                         
                         // Like button (right)
                         IconButton(
-                            onClick = { /* Like song */ },
+                            onClick = {
+                                val t = currentTrack ?: return@IconButton
+                                coroutineScope.launch {
+                                    if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
+                                    isLiked = !isLiked
+                                }
+                            },
                             modifier = Modifier.size(40.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.FavoriteBorder,
-                                contentDescription = "Like",
-                                tint = Color.White.copy(alpha = 0.8f),
+                                imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                contentDescription = if (isLiked) "Unlike" else "Like",
+                                tint = if (isLiked) vibrantTransition.value else Color.White.copy(alpha = 0.8f),
                                 modifier = Modifier.size(22.dp)
                             )
                         }

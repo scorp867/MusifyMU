@@ -61,10 +61,50 @@ class MainActivity : ComponentActivity() {
                 var isPlaying by remember { mutableStateOf(false) }
                 var hasPlayedBefore by remember { mutableStateOf(false) }
 
-                // Create controller only when we need to play
-                val createController = {
-                    val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
-                    MediaController.Builder(context, token).buildAsync()
+                // Build controller eagerly so miniplayer controls work after restart
+                LaunchedEffect(Unit) {
+                    try {
+                        val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
+                        val built = MediaController.Builder(context, token).buildAsync().await()
+                        controller = built
+                        // Attach listeners
+                        built.addListener(object : Player.Listener {
+                            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                                currentTrack = mediaItem?.toTrack()
+                                hasPlayedBefore = currentTrack != null
+                            }
+                            
+                            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                                isPlaying = isPlayingNow
+                            }
+                            
+                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                isPlaying = built.isPlaying
+                                if (playbackState == Player.STATE_READY) {
+                                    val item = built.currentMediaItem
+                                    if (item != null) {
+                                        currentTrack = item.toTrack()
+                                        hasPlayedBefore = true
+                                    }
+                                }
+                            }
+                        })
+                        // Initialize UI state from controller/session if available
+                        currentTrack = built.currentMediaItem?.toTrack()
+                        isPlaying = built.isPlaying
+                        hasPlayedBefore = currentTrack != null
+                        
+                        // If no media item yet, fallback to last recently played for showing bar
+                        if (currentTrack == null) {
+                            val recentTracks = repo.recentlyPlayed(1)
+                            if (recentTracks.isNotEmpty()) {
+                                currentTrack = recentTracks.first()
+                                hasPlayedBefore = true
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Failed to create controller", e)
+                    }
                 }
 
                 // Check if we should navigate to player from notification
@@ -74,54 +114,16 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Check for last played track on app start
-                LaunchedEffect(Unit) {
-                    try {
-                        val recentTracks = repo.recentlyPlayed(1)
-                        if (recentTracks.isNotEmpty()) {
-                            currentTrack = recentTracks.first()
-                            hasPlayedBefore = true
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.w("MainActivity", "Failed to load recent tracks", e)
-                    }
-                }
-
                 val onPlay: (List<Track>, Int) -> Unit = { tracks, index ->
                     scope.launch {
                         try {
-                            // Create controller only when we need to play
-                            if (controller == null) {
-                                controller = createController().await()
-                                controller?.addListener(object : Player.Listener {
-                                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                                        currentTrack = mediaItem?.toTrack()
-                                        hasPlayedBefore = true
-                                    }
-                                    
-                                    override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                                        isPlaying = isPlayingNow
-                                    }
-                                    
-                                    override fun onPlaybackStateChanged(playbackState: Int) {
-                                        isPlaying = controller?.isPlaying == true
-                                        // Update track info when ready
-                                        if (playbackState == Player.STATE_READY) {
-                                            val item = controller?.currentMediaItem
-                                            if (item != null) {
-                                                currentTrack = item.toTrack()
-                                                hasPlayedBefore = true
-                                            }
-                                        }
-                                    }
-                                })
+                            val c = controller ?: run {
+                                val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
+                                MediaController.Builder(context, token).buildAsync().await().also { controller = it }
                             }
-                            
-                            controller?.let { c ->
-                                c.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
-                                c.prepare()
-                                c.play()
-                            }
+                            c.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
+                            c.prepare()
+                            c.play()
                         } catch (e: Exception) {
                             android.util.Log.e("MainActivity", "Failed to start playback", e)
                         }
@@ -165,9 +167,7 @@ class MainActivity : ComponentActivity() {
                                             currentTrack = currentTrack,
                                             isPlaying = isPlaying,
                                             onPlayPause = { 
-                                                controller?.let { 
-                                                    if (it.isPlaying) it.pause() else it.play() 
-                                                } 
+                                                controller?.let { if (it.isPlaying) it.pause() else it.play() } 
                                             },
                                             onNext = { controller?.seekToNext() },
                                             onPrev = { controller?.seekToPrevious() },

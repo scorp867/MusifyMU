@@ -23,6 +23,7 @@ import com.musify.mu.ui.MainActivity
 import com.musify.mu.R
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.data.repo.PlaybackStateStore
+import com.musify.mu.data.repo.QueueStateStore
 import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,21 +40,21 @@ class PlayerService : MediaLibraryService() {
     private lateinit var queue: QueueManager
     private lateinit var repo: LibraryRepository
     private lateinit var stateStore: PlaybackStateStore
+    private lateinit var queueStateStore: QueueStateStore
     private lateinit var audioFocusManager: AudioFocusManager
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
-    private var isNotificationActive = false
     private var hasValidMedia = false
-    private var currentNotificationBuilder: NotificationCompat.Builder? = null
 
     override fun onCreate() {
         super.onCreate()
         
         repo = LibraryRepository.get(this)
         stateStore = PlaybackStateStore(this)
+        queueStateStore = QueueStateStore(this)
         player = ExoPlayer.Builder(this).build()
-        queue = QueueManager(player)
+        queue = QueueManager(player, queueStateStore)
         
         // Initialize audio focus manager
         audioFocusManager = AudioFocusManager(this) { focusChange ->
@@ -125,13 +126,11 @@ class PlayerService : MediaLibraryService() {
 
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying && hasValidMedia) {
-                    audioFocusManager.request()
-                    startForegroundService()
-                } else {
-                    audioFocusManager.abandon()
-                    if (isPlaying.not()) {
-                        stopForegroundService()
+                if (hasValidMedia) {
+                    if (isPlaying) {
+                        audioFocusManager.request()
+                    } else {
+                        audioFocusManager.abandon()
                     }
                 }
             }
@@ -141,13 +140,12 @@ class PlayerService : MediaLibraryService() {
                 mediaItem?.let { item ->
                     serviceScope.launch(Dispatchers.IO) {
                         repo.recordPlayed(item.mediaId)
+                        // If we advanced to next item, decrement play-next count if needed
+                        queueStateStore.decrementOnAdvance()
                     }
                 }
                 
-                // Update notification with new track info
-                if (isNotificationActive && hasValidMedia) {
-                    updateNotification()
-                }
+
             }
             
             override fun onEvents(player: Player, events: Player.Events) {
@@ -177,6 +175,8 @@ class PlayerService : MediaLibraryService() {
                 }
             }
         })
+
+        // We no longer show our own persistent notification; Android system may show media controls if the session is active.
 
         // Try to restore last session state
         serviceScope.launch(Dispatchers.IO) {
@@ -210,7 +210,6 @@ class PlayerService : MediaLibraryService() {
                                 player.shuffleModeEnabled = state.shuffle
                                 hasValidMedia = true
                                 
-                                // Only start playing if it was playing before
                                 if (state.play && items.isNotEmpty()) {
                                     player.play()
                                 }
@@ -250,14 +249,6 @@ class PlayerService : MediaLibraryService() {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
         player.pause()
-        stopForegroundService()
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                stateStore.clear()
-            } catch (e: Exception) {
-                android.util.Log.w("PlayerService", "Failed to clear state", e)
-            }
-        }
         stopSelf()
     }
 
@@ -325,65 +316,11 @@ class PlayerService : MediaLibraryService() {
         )
     }
     
-    private fun startForegroundService() {
-        if (!isNotificationActive && hasValidMedia) {
-            createNotificationChannel()
-            val notification = createNotification()
-            startForeground(NOTIFICATION_ID, notification)
-            isNotificationActive = true
-        }
-    }
-    
     private fun stopForegroundService() {
-        if (isNotificationActive) {
-            stopForeground(true)
-            isNotificationActive = false
-            currentNotificationBuilder = null
-        }
+        // No-op since we don't manage our own notification anymore
     }
     
-    private fun updateNotification() {
-        if (isNotificationActive && hasValidMedia) {
-            val notification = createNotification()
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.notify(NOTIFICATION_ID, notification)
-        }
-    }
-    
-    private fun createNotification(): Notification {
-        val currentItem = player.currentMediaItem
-        val title = currentItem?.mediaMetadata?.title?.toString() ?: "Musify MU"
-        val artist = currentItem?.mediaMetadata?.artist?.toString() ?: "Unknown Artist"
-        val artworkUri = currentItem?.mediaMetadata?.artworkUri
-        
-        // Create or reuse notification builder to prevent flickering
-        if (currentNotificationBuilder == null) {
-            currentNotificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_music_note)
-                .setContentIntent(createPlayerActivityIntent())
-                .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
-                    .setMediaSession(mediaLibrarySession?.sessionCompatToken))
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true)
-        }
-        
-        currentNotificationBuilder?.apply {
-            setContentTitle(title)
-            setContentText(artist)
-            
-            // Load and set artwork
-            artworkUri?.let { uri ->
-                try {
-                    val bitmap = loadArtworkBitmap(uri.toString())
-                    bitmap?.let { setLargeIcon(it) }
-                } catch (e: Exception) {
-                    android.util.Log.w("PlayerService", "Failed to load notification artwork", e)
-                }
-            }
-        }
-        
-        return currentNotificationBuilder!!.build()
-    }
+
     
     private fun loadArtworkBitmap(artworkUri: String): Bitmap? {
         return try {
@@ -410,21 +347,7 @@ class PlayerService : MediaLibraryService() {
         }
     }
     
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Music Playback",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Music playback controls"
-                setShowBadge(false)
-            }
-            
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager.createNotificationChannel(channel)
-        }
-    }
+    private fun createNotificationChannel() { /* no-op */ }
     
     companion object {
         private const val CHANNEL_ID = "PLAYBACK_CHANNEL"

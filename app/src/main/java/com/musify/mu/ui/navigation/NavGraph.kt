@@ -20,6 +20,8 @@ sealed class Screen(val route: String) {
     object Queue : Screen("queue")
     object NowPlaying : Screen("now_playing")
     object Lyrics : Screen("lyrics")
+    object SeeAll : Screen("see_all/{type}")
+    object PlaylistDetails : Screen("playlist/{id}")
 }
 
 @Composable
@@ -42,6 +44,14 @@ fun MusifyNavGraph(
         composable(Screen.Home.route) { HomeScreen(navController, onPlay) }
         composable(Screen.Library.route) { LibraryScreen(navController, onPlay) }
         composable(Screen.Queue.route) { QueueScreen(navController) }
+        composable(Screen.SeeAll.route) { backStackEntry ->
+            val type = backStackEntry.arguments?.getString("type") ?: ""
+            SeeAllScreen(navController = navController, type = type, onPlay = onPlay)
+        }
+        composable(Screen.PlaylistDetails.route) { backStackEntry ->
+            val id = backStackEntry.arguments?.getString("id")?.toLongOrNull() ?: -1L
+            PlaylistDetailsScreen(navController = navController, playlistId = id, onPlay = onPlay)
+        }
         
         // Player screen as a modal overlay - doesn't participate in bottom navigation
         composable(

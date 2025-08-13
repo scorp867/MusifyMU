@@ -18,8 +18,11 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun renamePlaylist(id: Long, name: String) = db.dao().renamePlaylist(id, name)
     suspend fun deletePlaylist(id: Long) = db.dao().deletePlaylist(id)
     suspend fun addToPlaylist(playlistId: Long, mediaIds: List<String>) {
+        val existing = db.dao().getPlaylistTracks(playlistId).map { it.mediaId }.toSet()
+        val toInsert = mediaIds.filter { it !in existing }
+        if (toInsert.isEmpty()) return
         val start = db.dao().getPlaylistTracks(playlistId).size
-        val items = mediaIds.mapIndexed { idx, id -> PlaylistItem(playlistId, id, start + idx) }
+        val items = toInsert.mapIndexed { idx, id -> PlaylistItem(playlistId, id, start + idx) }
         db.dao().addItems(items)
     }
     suspend fun removeFromPlaylist(playlistId: Long, mediaId: String) = db.dao().removeItem(playlistId, mediaId)
@@ -28,6 +31,7 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun unlike(mediaId: String) = db.dao().unlike(mediaId)
     suspend fun isLiked(mediaId: String): Boolean = db.dao().isLiked(mediaId)
     suspend fun favorites(): List<Track> = db.dao().getFavorites()
+    suspend fun saveFavoritesOrder(order: List<FavoritesOrder>) = db.dao().upsertFavoriteOrder(order)
 
     suspend fun getTrackByMediaId(mediaId: String): Track? = db.dao().getTrack(mediaId)
 

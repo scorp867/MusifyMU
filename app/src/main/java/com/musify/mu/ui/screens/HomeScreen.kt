@@ -33,12 +33,14 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.Artwork
 import com.musify.mu.ui.navigation.Screen
+import com.musify.mu.playback.LocalMediaController
 
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
+    val controller = LocalMediaController.current
     
     var recentPlayed by remember { mutableStateOf<List<Track>>(emptyList()) }
     var recentAdded by remember { mutableStateOf<List<Track>>(emptyList()) }
@@ -81,6 +83,15 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         if (refreshTrigger > 0) {
             refreshData()
         }
+    }
+
+    // Dynamically update recently played when the controller transitions
+    LaunchedEffect(controller) {
+        controller?.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                scope.launch { recentPlayed = repo.recentlyPlayed(12) }
+            }
+        })
     }
 
     // Refresh data when the screen becomes visible (simplified approach)
@@ -128,7 +139,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             refreshTrigger++
                         }
                     },
-                    haptic = haptic
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/recently_played") }
                 )
             }
             
@@ -145,7 +157,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             refreshTrigger++
                         }
                     },
-                    haptic = haptic
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/recently_added") }
                 )
             }
             
@@ -162,7 +175,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             refreshTrigger++
                         }
                     },
-                    haptic = haptic
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/favorites") }
                 )
             }
         }
@@ -242,7 +256,8 @@ private fun AnimatedCarousel(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     data: List<Track>,
     onPlay: (List<Track>, Int) -> Unit,
-    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onSeeAll: () -> Unit
 ) {
     if (data.isEmpty()) return
     
@@ -263,8 +278,12 @@ private fun AnimatedCarousel(
                 style = MaterialTheme.typography.titleLarge.copy(
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f)
             )
+            TextButton(onClick = onSeeAll) {
+                Text("See all")
+            }
         }
         
         LazyRow(
