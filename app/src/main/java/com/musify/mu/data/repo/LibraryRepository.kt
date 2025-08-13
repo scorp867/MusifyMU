@@ -5,12 +5,34 @@ import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.db.entities.*
 import com.musify.mu.data.media.MediaStoreScanner
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import android.util.Log
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
     private val scanner by lazy { MediaStoreScanner(context, db) }
 
     suspend fun refreshLibrary(): List<Track> = scanner.scanAndCache()
+    
+    fun refreshLibraryWithProgress(): Flow<LibraryRefreshState> = flow {
+        emit(LibraryRefreshState.Loading(0, 0))
+        
+        try {
+            val tracks = scanner.scanAndCache { processed, total ->
+                // This will be called from IO dispatcher, but that's fine for emit
+                kotlinx.coroutines.runBlocking {
+                    emit(LibraryRefreshState.Loading(processed, total))
+                }
+            }
+            
+            emit(LibraryRefreshState.Success(tracks))
+        } catch (e: Exception) {
+            Log.e("LibraryRepository", "Failed to refresh library", e)
+            emit(LibraryRefreshState.Error(e.message ?: "Unknown error"))
+        }
+    }
+    
     suspend fun getAllTracks(): List<Track> = db.dao().getAllTracks()
     suspend fun search(q: String): List<Track> = db.dao().searchTracks("%$q%")
     suspend fun playlists(): List<Playlist> = db.dao().getPlaylists()
@@ -47,4 +69,10 @@ class LibraryRepository private constructor(private val context: Context, privat
                 INSTANCE ?: LibraryRepository(context.applicationContext, db).also { INSTANCE = it }
             }
     }
+}
+
+sealed class LibraryRefreshState {
+    data class Loading(val processed: Int, val total: Int) : LibraryRefreshState()
+    data class Success(val tracks: List<Track>) : LibraryRefreshState()
+    data class Error(val message: String) : LibraryRefreshState()
 }

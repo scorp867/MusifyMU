@@ -1,96 +1,175 @@
 package com.musify.mu.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import coil.compose.AsyncImage
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
-import com.musify.mu.util.PermissionHelper
-import com.musify.mu.ui.navigation.Screen
-import com.musify.mu.util.toMediaItem
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import com.musify.mu.data.repo.LibraryRefreshState
 import com.musify.mu.playback.LocalMediaController
-import androidx.compose.material.SwipeToDismiss
-import androidx.compose.material.rememberDismissState
-import androidx.compose.material.DismissValue
-import androidx.compose.material.DismissDirection
+import com.musify.mu.util.PermissionHelper
+import com.musify.mu.util.toMediaItem
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
+import android.Manifest
+import android.os.Build
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 
 enum class SortType {
     TITLE, ARTIST, ALBUM, DATE_ADDED
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(
-    navController: NavController,
-    onPlay: (List<Track>, Int) -> Unit
-) {
+fun LibraryScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
     val context = LocalContext.current
+    val controller = LocalMediaController.current
+    val coroutineScope = rememberCoroutineScope()
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
-    val controller = LocalMediaController.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var isScanning by remember { mutableStateOf(false) }
+    var scanProgress by remember { mutableStateOf(0f) }
+    var scanMessage by remember { mutableStateOf("") }
     var permissionChecked by remember { mutableStateOf(false) }
+    var hasPermission by remember { mutableStateOf(false) }
+    var showPermissionRationale by remember { mutableStateOf(false) }
     
-    val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-
-    val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val granted = results.values.all { it }
+    
+    // Permission launcher with better handling
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        hasPermission = allGranted
         permissionChecked = true
-        if (granted) {
+        
+        if (allGranted) {
             coroutineScope.launch {
-                tracks = repo.refreshLibrary()
-                isLoading = false
+                isScanning = true
+                repo.refreshLibraryWithProgress().collectLatest { state ->
+                    when (state) {
+                        is LibraryRefreshState.Loading -> {
+                            if (state.total > 0) {
+                                scanProgress = state.processed.toFloat() / state.total
+                                scanMessage = "Scanning music library... ${state.processed}/${state.total}"
+                            } else {
+                                scanMessage = "Preparing to scan..."
+                            }
+                        }
+                        is LibraryRefreshState.Success -> {
+                            tracks = state.tracks
+                            isLoading = false
+                            isScanning = false
+                            scanMessage = ""
+                        }
+                        is LibraryRefreshState.Error -> {
+                            isLoading = false
+                            isScanning = false
+                            scanMessage = "Error: ${state.message}"
+                        }
+                    }
+                }
+            }
+        } else {
+            // Check if we should show rationale
+            val activity = context as? android.app.Activity
+            if (activity != null && PermissionHelper.shouldShowAudioRationale(activity)) {
+                showPermissionRationale = true
             }
         }
     }
 
+    // Check permissions and load library on launch
     LaunchedEffect(Unit) {
-        coroutineScope.launch {
-            val hasPermission = (context as? android.app.Activity)?.let { PermissionHelper.hasAudioPermission(it) } ?: true
-            if (!hasPermission && context is android.app.Activity) {
-                PermissionHelper.requestAudioPermission(audioPermissionLauncher)
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            val activity = context as? android.app.Activity
+            hasPermission = activity?.let { PermissionHelper.hasAudioPermission(it) } ?: true
+            
+            if (!hasPermission && activity != null) {
+                if (PermissionHelper.shouldShowAudioRationale(activity)) {
+                    showPermissionRationale = true
+                } else {
+                    PermissionHelper.requestAudioPermission(audioPermissionLauncher)
+                }
             } else {
+                permissionChecked = true
                 try {
+                    // First try to load from cache
                     tracks = repo.getAllTracks()
+                    
+                    // If no tracks, scan
                     if (tracks.isEmpty()) {
-                        tracks = repo.refreshLibrary()
+                        isScanning = true
+                        repo.refreshLibraryWithProgress().collectLatest { state ->
+                            when (state) {
+                                is LibraryRefreshState.Loading -> {
+                                    if (state.total > 0) {
+                                        scanProgress = state.processed.toFloat() / state.total
+                                        scanMessage = "Scanning music library... ${state.processed}/${state.total}"
+                                    } else {
+                                        scanMessage = "Preparing to scan..."
+                                    }
+                                }
+                                is LibraryRefreshState.Success -> {
+                                    tracks = state.tracks
+                                    isScanning = false
+                                }
+                                is LibraryRefreshState.Error -> {
+                                    isScanning = false
+                                    scanMessage = "Error: ${state.message}"
+                                }
+                            }
+                        }
                     }
                 } catch (e: Exception) {
-                    // Handle error gracefully
+                    android.util.Log.e("LibraryScreen", "Error loading library", e)
                 } finally {
                     isLoading = false
-                    permissionChecked = true
                 }
             }
         }
@@ -112,41 +191,111 @@ fun LibraryScreen(
         // Simple header
         LibraryHeader()
         
-        if (isLoading) {
-            LoadingLibrary()
-        } else if (tracks.isEmpty()) {
-            EmptyLibrary()
-        } else {
-            // Track list with improved interactions
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
-                    
-                    // Improved track item without aggressive swipe gestures
-                    TrackItem(
-                        track = track,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onPlay(tracks, index)
-                        },
-                        onAddToQueue = { addToEnd ->
-                            // Only add to queue when explicitly requested (not while scrolling)
-                            if (addToEnd) {
-                                controller?.addMediaItem(track.toMediaItem())
-                            } else {
-                                val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                                    .coerceAtMost(controller?.mediaItemCount ?: 0)
-                                controller?.addMediaItem(insertIndex, track.toMediaItem())
+        when {
+            !permissionChecked || isLoading -> {
+                LoadingLibrary()
+            }
+            !hasPermission -> {
+                PermissionRequest(
+                    onRequestPermission = {
+                        PermissionHelper.requestAudioPermission(audioPermissionLauncher)
+                    },
+                    showRationale = showPermissionRationale
+                )
+            }
+            isScanning -> {
+                ScanningProgress(
+                    progress = scanProgress,
+                    message = scanMessage
+                )
+            }
+            tracks.isEmpty() -> {
+                EmptyLibrary(
+                    onRefresh = {
+                        coroutineScope.launch {
+                            isScanning = true
+                            repo.refreshLibraryWithProgress().collectLatest { state ->
+                                when (state) {
+                                    is LibraryRefreshState.Loading -> {
+                                        if (state.total > 0) {
+                                            scanProgress = state.processed.toFloat() / state.total
+                                            scanMessage = "Scanning music library... ${state.processed}/${state.total}"
+                                        }
+                                    }
+                                    is LibraryRefreshState.Success -> {
+                                        tracks = state.tracks
+                                        isScanning = false
+                                    }
+                                    is LibraryRefreshState.Error -> {
+                                        isScanning = false
+                                    }
+                                }
                             }
                         }
-                    )
+                    }
+                )
+            }
+            else -> {
+                // Track list with improved interactions
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
+                        
+                        // Improved track item without aggressive swipe gestures
+                        TrackItem(
+                            track = track,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onPlay(tracks, index)
+                            },
+                            onAddToQueue = { addToEnd ->
+                                // Only add to queue when explicitly requested (not while scrolling)
+                                if (addToEnd) {
+                                    controller?.addMediaItem(track.toMediaItem())
+                                } else {
+                                    val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
+                                        .coerceAtMost(controller?.mediaItemCount ?: 0)
+                                    controller?.addMediaItem(insertIndex, track.toMediaItem())
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
+    }
+
+    // Permission rationale dialog
+    if (showPermissionRationale) {
+        AlertDialog(
+            onDismissRequest = { showPermissionRationale = false },
+            title = { Text("Permission Required") },
+            text = { 
+                Text(
+                    "Musify needs access to your music library to play songs. " +
+                    "Please grant the permission to continue."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showPermissionRationale = false
+                        PermissionHelper.requestAudioPermission(audioPermissionLauncher)
+                    }
+                ) {
+                    Text("Grant Permission")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionRationale = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -410,7 +559,7 @@ private fun LoadingLibrary() {
 
 
 @Composable
-private fun EmptyLibrary() {
+private fun EmptyLibrary(onRefresh: () -> Unit) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -438,6 +587,124 @@ private fun EmptyLibrary() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
             )
+
+            Button(onClick = onRefresh, modifier = Modifier.padding(top = 16.dp)) {
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = "Refresh",
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Scan Library")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScanningProgress(
+    progress: Float,
+    message: String
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(64.dp),
+                strokeWidth = 6.dp
+            )
+            
+            Text(
+                text = message,
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center
+            )
+            
+            if (progress > 0) {
+                LinearProgressIndicator(
+                    progress = progress,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                )
+                
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionRequest(
+    onRequestPermission: () -> Unit,
+    showRationale: Boolean
+) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.FolderOpen,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(80.dp)
+            )
+            
+            Text(
+                text = "Permission Required",
+                style = MaterialTheme.typography.headlineMedium,
+                textAlign = TextAlign.Center
+            )
+            
+            Text(
+                text = if (showRationale) {
+                    "Musify needs permission to access your music library. Without this permission, the app cannot play your local music files."
+                } else {
+                    "To play your music, Musify needs access to your device's music library."
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+            
+            Button(
+                onClick = onRequestPermission,
+                modifier = Modifier.padding(top = 8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Grant Permission")
+            }
+            
+            if (showRationale) {
+                Text(
+                    text = "If you denied the permission, you may need to enable it in your device settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
         }
     }
 }

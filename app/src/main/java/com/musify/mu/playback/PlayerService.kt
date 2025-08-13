@@ -54,7 +54,10 @@ class PlayerService : MediaLibraryService() {
         stateStore = PlaybackStateStore(this)
         queueStateStore = QueueStateStore(this)
         player = ExoPlayer.Builder(this).build()
-        queue = QueueManager(player, queueStateStore)
+        queue = QueueManager(player, queueStateStore, serviceScope)
+        
+        // Initialize the QueueManagerProvider
+        QueueManagerProvider.initialize(queue)
         
         // Initialize audio focus manager
         audioFocusManager = AudioFocusManager(this) { focusChange ->
@@ -348,6 +351,16 @@ class PlayerService : MediaLibraryService() {
     }
     
     private fun createNotificationChannel() { /* no-op */ }
+    
+    override fun onDestroy() {
+        serviceScope.cancel()
+        mediaLibrarySession?.release()
+        mediaLibrarySession = null
+        player.release()
+        audioFocusManager.abandon()
+        QueueManagerProvider.clear()
+        super.onDestroy()
+    }
     
     companion object {
         private const val CHANNEL_ID = "PLAYBACK_CHANNEL"

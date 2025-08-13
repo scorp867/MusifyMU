@@ -11,12 +11,19 @@ import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.entities.Track
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.io.File
 import java.io.FileOutputStream
+import android.os.Build
 
 class MediaStoreScanner(private val context: Context, private val db: AppDatabase) {
 
-    suspend fun scanAndCache(): List<Track> = withContext(Dispatchers.IO) {
+    companion object {
+        private const val CHUNK_SIZE = 100 // Load songs in chunks of 100
+        private const val TAG = "MediaStoreScanner"
+    }
+
+    suspend fun scanAndCache(onProgress: ((Int, Int) -> Unit)? = null): List<Track> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
@@ -24,49 +31,175 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.ALBUM_ID,
-            MediaStore.Audio.Media.DATE_ADDED
+            MediaStore.Audio.Media.DATE_ADDED,
+            MediaStore.Audio.Media.DATA // Add DATA field for file path
         )
-        val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        val tracks = mutableListOf<Track>()
-        context.contentResolver.query(
-            collection,
-            projection,
-            "${MediaStore.Audio.Media.IS_MUSIC} = 1",
-            null,
-            "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-            val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-            val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-            val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-            val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-            val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-            val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
-
-            while (cursor.moveToNext()) {
-                val id = cursor.getLong(idCol)
-                val contentUri = ContentUris.withAppendedId(collection, id)
-                val title = cursor.getString(titleCol) ?: "Unknown"
-                val artist = cursor.getString(artistCol) ?: "Unknown"
-                val album = cursor.getString(albumCol) ?: "Unknown"
-                val duration = cursor.getLong(durationCol)
-                val albumId = cursor.getLong(albumIdCol)
-                val artUri = getOrCreateTrackArtwork(contentUri.toString(), albumId, title, artist, album)
-                val dateAdded = cursor.getLong(dateAddedCol)
-
-                tracks += Track(
-                    mediaId = contentUri.toString(),
-                    title = title,
-                    artist = artist,
-                    album = album,
-                    durationMs = duration,
-                    artUri = artUri,
-                    albumId = albumId,
-                    dateAddedSec = dateAdded
-                )
-            }
+        
+        // Use different URIs based on Android version
+        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
+        } else {
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
         }
-        db.dao().upsertTracks(tracks)
+        
+        val tracks = mutableListOf<Track>()
+        var totalCount = 0
+        
+        try {
+            // Build selection criteria
+            val selection = buildString {
+                append("${MediaStore.Audio.Media.IS_MUSIC} != 0")
+                // Also include files that might not be marked as music but are audio files
+                append(" OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%'")
+                // Exclude very short files
+                append(" AND ${MediaStore.Audio.Media.DURATION} > 10000")
+            }
+            
+            // First, get the total count
+            context.contentResolver.query(
+                collection,
+                arrayOf(MediaStore.Audio.Media._ID),
+                selection,
+                null,
+                null
+            )?.use { cursor ->
+                totalCount = cursor.count
+            }
+            
+            // Now scan in chunks
+            var offset = 0
+            while (offset < totalCount) {
+                val chunkTracks = mutableListOf<Track>()
+                
+                // Build sort order with LIMIT and OFFSET for chunking
+                val sortOrder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC LIMIT $CHUNK_SIZE OFFSET $offset"
+                } else {
+                    // For older versions, we'll process all at once but yield periodically
+                    "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+                }
+                
+                context.contentResolver.query(
+                    collection,
+                    projection,
+                    selection,
+                    null,
+                    sortOrder
+                )?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                    val dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+                    
+                    var processedInChunk = 0
+                    while (cursor.moveToNext()) {
+                        try {
+                            val id = cursor.getLong(idCol)
+                            val contentUri = ContentUris.withAppendedId(
+                                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, 
+                                id
+                            )
+                            val title = cursor.getString(titleCol) ?: "Unknown"
+                            val artist = cursor.getString(artistCol) ?: "Unknown"
+                            val album = cursor.getString(albumCol) ?: "Unknown"
+                            val duration = cursor.getLong(durationCol)
+                            val albumId = cursor.getLong(albumIdCol)
+                            val dateAdded = cursor.getLong(dateAddedCol)
+                            
+                            // Skip very short files (less than 10 seconds) as they might be ringtones
+                            if (duration < 10000) continue
+                            
+                            // For older Android versions, check if file exists
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && dataCol >= 0) {
+                                val filePath = cursor.getString(dataCol)
+                                if (filePath != null) {
+                                    // Skip files in system directories
+                                    if (filePath.contains("/Android/", ignoreCase = true) ||
+                                        filePath.contains("/ringtones/", ignoreCase = true) ||
+                                        filePath.contains("/notifications/", ignoreCase = true) ||
+                                        filePath.contains("/alarms/", ignoreCase = true)) {
+                                        continue
+                                    }
+                                    
+                                    // Check if file exists
+                                    if (!File(filePath).exists()) {
+                                        continue
+                                    }
+                                }
+                            }
+                            
+                            val artUri = try {
+                                getOrCreateTrackArtwork(contentUri.toString(), albumId, title, artist, album)
+                            } catch (e: Exception) {
+                                android.util.Log.w(TAG, "Failed to load artwork for $title", e)
+                                null
+                            }
+                            
+                            chunkTracks += Track(
+                                mediaId = contentUri.toString(),
+                                title = title,
+                                artist = artist,
+                                album = album,
+                                durationMs = duration,
+                                artUri = artUri,
+                                albumId = albumId,
+                                dateAddedSec = dateAdded
+                            )
+                            
+                            processedInChunk++
+                            
+                            // For older Android versions, break manually after CHUNK_SIZE
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R && processedInChunk >= CHUNK_SIZE) {
+                                break
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e(TAG, "Error processing track", e)
+                        }
+                        
+                        // Allow other coroutines to run
+                        if (processedInChunk % 10 == 0) {
+                            yield()
+                        }
+                    }
+                }
+                
+                // Save chunk to database
+                if (chunkTracks.isNotEmpty()) {
+                    try {
+                        db.dao().upsertTracks(chunkTracks)
+                        tracks.addAll(chunkTracks)
+                        
+                        // Report progress
+                        onProgress?.invoke(tracks.size, totalCount)
+                    } catch (e: Exception) {
+                        android.util.Log.e(TAG, "Failed to save tracks to database", e)
+                    }
+                }
+                
+                // For older Android versions, we processed everything in one go
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                    break
+                }
+                
+                offset += CHUNK_SIZE
+                
+                // Allow other coroutines to run between chunks
+                yield()
+            }
+        } catch (e: SecurityException) {
+            android.util.Log.e(TAG, "Permission denied while scanning media", e)
+            // Return what we have from the database
+            return@withContext db.dao().getAllTracks()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Error scanning media store", e)
+            // Return what we have from the database
+            return@withContext db.dao().getAllTracks()
+        }
+        
         tracks
     }
     
