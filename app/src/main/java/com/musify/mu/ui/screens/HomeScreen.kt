@@ -497,89 +497,32 @@ private fun CustomPlaylistsCarousel(
     val scope = rememberCoroutineScope()
     
     var showCreateDialog by remember { mutableStateOf(false) }
-    var playlistName by remember { mutableStateOf("") }
     
-    if (showCreateDialog) {
-        AlertDialog(
-            onDismissRequest = { showCreateDialog = false },
-            title = { Text("Create New Playlist") },
-            text = {
-                OutlinedTextField(
-                    value = playlistName,
-                    onValueChange = { playlistName = it },
-                    label = { Text("Playlist Name") },
-                    singleLine = true
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (playlistName.isNotBlank()) {
-                            scope.launch {
-                                repo.createPlaylist(playlistName.trim())
-                                playlistName = ""
-                                showCreateDialog = false
-                                onRefresh()
-                            }
-                        }
-                    }
-                ) {
-                    Text("Create")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCreateDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-    
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.PlaylistPlay,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(24.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Your Playlists",
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f)
-            )
-            FilledTonalIconButton(
-                onClick = { 
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    showCreateDialog = true 
-                }
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = "Create Playlist")
+    // Enhanced playlist creation dialog
+    com.musify.mu.ui.components.PlaylistCreationDialog(
+        isVisible = showCreateDialog,
+        onDismiss = { showCreateDialog = false },
+        onCreatePlaylist = { name, imageUri ->
+            scope.launch {
+                repo.createPlaylist(name, imageUri)
+                showCreateDialog = false
+                onRefresh()
             }
         }
-        
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp)
-        ) {
-            items(playlists, key = { playlist -> "playlist_card_${playlist.id}" }) { playlist ->
-                PlaylistCard(
-                    playlist = playlist,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        navController.navigate("playlist_details/${playlist.id}")
-                    }
-                )
-            }
+    )
+    
+    // Enhanced playlist carousel
+    com.musify.mu.ui.components.PlaylistCarousel(
+        playlists = playlists,
+        onPlaylistClick = { playlist ->
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            navController.navigate("playlist_details/${playlist.id}")
+        },
+        onCreatePlaylistClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            showCreateDialog = true
         }
-    }
+    )
 }
 
 @Composable

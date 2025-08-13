@@ -69,29 +69,7 @@ class QueueViewModel : ViewModel() {
         }
     }
     
-    fun setSmartQueueEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            try {
-                queueManager?.setSmartQueueEnabled(enabled)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    error = "Failed to toggle smart queue: ${e.message}"
-                )
-            }
-        }
-    }
-    
-    fun setRadioMode(enabled: Boolean) {
-        viewModelScope.launch {
-            try {
-                queueManager?.setRadioMode(enabled)
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    error = "Failed to toggle radio mode: ${e.message}"
-                )
-            }
-        }
-    }
+
     
     fun moveQueueItem(from: Int, to: Int) {
         viewModelScope.launch {

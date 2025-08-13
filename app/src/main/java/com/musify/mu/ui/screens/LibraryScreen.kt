@@ -33,6 +33,9 @@ import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.util.PermissionHelper
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.util.toMediaItem
+import com.musify.mu.ui.components.AlphabeticalScrollBar
+import com.musify.mu.ui.components.generateAlphabet
+import com.musify.mu.ui.components.getFirstLetter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.musify.mu.playback.LocalMediaController
@@ -117,34 +120,54 @@ fun LibraryScreen(
         } else if (tracks.isEmpty()) {
             EmptyLibrary()
         } else {
-            // Track list with improved interactions
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
-                    
-                    // Improved track item without aggressive swipe gestures
-                    TrackItem(
-                        track = track,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onPlay(tracks, index)
-                        },
-                        onAddToQueue = { addToEnd ->
-                            // Only add to queue when explicitly requested (not while scrolling)
-                            if (addToEnd) {
-                                controller?.addMediaItem(track.toMediaItem())
-                            } else {
-                                val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                                    .coerceAtMost(controller?.mediaItemCount ?: 0)
-                                controller?.addMediaItem(insertIndex, track.toMediaItem())
+            // Track list with alphabetical scroll bar
+            Box(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 44.dp, top = 8.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
+                        
+                        // Improved track item without aggressive swipe gestures
+                        TrackItem(
+                            track = track,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onPlay(tracks, index)
+                            },
+                            onAddToQueue = { addToEnd ->
+                                // Only add to queue when explicitly requested (not while scrolling)
+                                if (addToEnd) {
+                                    controller?.addMediaItem(track.toMediaItem())
+                                } else {
+                                    val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
+                                        .coerceAtMost(controller?.mediaItemCount ?: 0)
+                                    controller?.addMediaItem(insertIndex, track.toMediaItem())
+                                }
+                            }
+                        )
+                    }
+                }
+                
+                // Alphabetical scroll bar
+                AlphabeticalScrollBar(
+                    letters = generateAlphabet(),
+                    onLetterSelected = { letter ->
+                        coroutineScope.launch {
+                            val targetIndex = tracks.indexOfFirst { track ->
+                                getFirstLetter(track.title) == letter
+                            }
+                            if (targetIndex >= 0) {
+                                listState.animateScrollToItem(targetIndex)
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             }
                         }
-                    )
-                }
+                    },
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    isVisible = tracks.size > 20 // Only show for larger lists
+                )
             }
         }
     }

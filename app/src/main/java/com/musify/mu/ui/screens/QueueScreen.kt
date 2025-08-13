@@ -12,8 +12,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Shuffle
-import androidx.compose.material.icons.rounded.Radio
-import androidx.compose.material.icons.rounded.SmartQueue
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -144,18 +142,7 @@ fun QueueScreen(navController: NavController) {
                 queueState = queueState,
                 onShuffleToggle = { enabled ->
                     scope.launch {
-                        // TODO: Implement shuffle toggle with QueueManager
                         controller?.shuffleModeEnabled = enabled
-                    }
-                },
-                onSmartQueueToggle = { enabled ->
-                    scope.launch {
-                        // TODO: Connect to QueueManager smart queue
-                    }
-                },
-                onRadioModeToggle = { enabled ->
-                    scope.launch {
-                        // TODO: Connect to QueueManager radio mode
                     }
                 }
             )
@@ -262,9 +249,7 @@ private fun EnhancedQueueHeader(
     queueSize: Int,
     currentIndex: Int,
     queueState: com.musify.mu.playback.QueueManager.QueueState,
-    onShuffleToggle: (Boolean) -> Unit,
-    onSmartQueueToggle: (Boolean) -> Unit,
-    onRadioModeToggle: (Boolean) -> Unit
+    onShuffleToggle: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -334,34 +319,6 @@ private fun EnhancedQueueHeader(
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Rounded.Shuffle,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    )
-                    
-                    // Smart Queue toggle
-                    FilterChip(
-                        onClick = { onSmartQueueToggle(!queueState.smartQueueEnabled) },
-                        label = { Text("Smart") },
-                        selected = queueState.smartQueueEnabled,
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.SmartQueue,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    )
-                    
-                    // Radio mode toggle
-                    FilterChip(
-                        onClick = { onRadioModeToggle(!queueState.radioModeEnabled) },
-                        label = { Text("Radio") },
-                        selected = queueState.radioModeEnabled,
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Rounded.Radio,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )

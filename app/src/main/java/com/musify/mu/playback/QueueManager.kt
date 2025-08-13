@@ -18,14 +18,13 @@ import kotlin.collections.ArrayDeque
 import kotlin.random.Random
 
 /**
- * Advanced Spotify-like Queue Manager with hybrid data structures for optimal performance
+ * Advanced Queue Manager with hybrid data structures for optimal performance
  * Features:
- * - Smart Queue: Automatically fills queue with similar songs
- * - Radio Mode: Continuous playback with algorithm-generated suggestions
+ * - Play-next queue similar to Spotify's "Add to Queue"
  * - Context-aware playback: Remembers play context (album, playlist, etc.)
  * - Real-time UI updates with LiveData and StateFlow
  * - Advanced shuffle with anti-repetition algorithms
- * - Play-next queue similar to Spotify's "Add to Queue"
+ * - Efficient queue operations with proper data structures
  */
 class QueueManager(private val player: ExoPlayer, private val queueState: QueueStateStore? = null) {
 
@@ -34,12 +33,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     
     // Play-next queue for songs to be played immediately after current
     private val playNextQueue = ArrayDeque<QueueItem>()
-    
-    // Smart queue for automatic recommendations
-    private val smartQueue = ArrayDeque<QueueItem>()
-    
-    // Radio queue for continuous discovery
-    private val radioQueue = ArrayDeque<QueueItem>()
     
     // Fast lookup map for duplicate detection and quick access
     private val queueLookup = LinkedHashMap<String, QueueItem>()
@@ -56,8 +49,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     // Queue metadata
     private var shuffleEnabled = false
     private var repeatMode = 0 // 0: none, 1: all, 2: one
-    private var smartQueueEnabled = true
-    private var radioModeEnabled = false
     
     // Original order backup for shuffle
     private val originalOrder = ArrayDeque<QueueItem>()
@@ -66,7 +57,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     private val shuffleHistory = ArrayDeque<String>()
     private val maxShuffleHistory = 50
     
-    // Play context for smart recommendations
+    // Play context for recommendations
     private var currentContext: PlayContext? = null
     
     // LiveData for real-time UI updates
@@ -91,12 +82,11 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         val addedAt: Long = System.currentTimeMillis(),
         val source: QueueSource = QueueSource.USER_ADDED,
         var position: Int = -1,
-        val context: PlayContext? = null,
-        val confidence: Float = 1.0f // For smart recommendations
+        val context: PlayContext? = null
     )
     
     enum class QueueSource {
-        USER_ADDED, PLAY_NEXT, ALBUM, PLAYLIST, RADIO, SHUFFLE, SMART_QUEUE, AUTOPLAY, LIKED_SONGS
+        USER_ADDED, PLAY_NEXT, ALBUM, PLAYLIST, SHUFFLE, LIKED_SONGS
     }
     
     data class PlayContext(
@@ -107,7 +97,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     )
     
     enum class ContextType {
-        ALBUM, PLAYLIST, ARTIST, GENRE, LIKED_SONGS, RADIO, SEARCH, DISCOVER
+        ALBUM, PLAYLIST, ARTIST, GENRE, LIKED_SONGS, SEARCH, DISCOVER
     }
     
     data class QueueState(
@@ -117,8 +107,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         val hasPrevious: Boolean = false,
         val shuffleEnabled: Boolean = false,
         val repeatMode: Int = 0,
-        val smartQueueEnabled: Boolean = true,
-        val radioModeEnabled: Boolean = false,
         val playNextCount: Int = 0,
         val context: PlayContext? = null
     )
@@ -138,8 +126,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         data class Move(val from: Int, val to: Int) : QueueOperation()
         data class Clear(val keepCurrent: Boolean = false) : QueueOperation()
         data class Shuffle(val enabled: Boolean) : QueueOperation()
-        data class SetSmartQueue(val enabled: Boolean) : QueueOperation()
-        data class SetRadioMode(val enabled: Boolean) : QueueOperation()
     }
 
     init {
@@ -158,8 +144,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             // Clear existing queue
             mainQueue.clear()
             playNextQueue.clear()
-            smartQueue.clear()
-            radioQueue.clear()
             queueLookup.clear()
             originalOrder.clear()
             shuffleHistory.clear()
@@ -228,11 +212,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             // Update UI
             updateUIState()
             _queueChanges.postValue(QueueChangeEvent.QueueReordered(getCombinedQueue()))
-            
-            // Start smart queue if enabled
-            if (smartQueueEnabled) {
-                generateSmartQueue()
-            }
             
         } catch (e: Exception) {
             android.util.Log.e("QueueManager", "Error setting queue", e)
@@ -373,12 +352,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                         }
                     }
                 }
-                QueueSource.SMART_QUEUE -> {
-                    smartQueue.remove(item)
-                }
-                QueueSource.RADIO -> {
-                    radioQueue.remove(item)
-                }
                 else -> mainQueue.remove(item)
             }
             
@@ -412,8 +385,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                 // Clear everything
                 mainQueue.clear()
                 playNextQueue.clear()
-                smartQueue.clear()
-                radioQueue.clear()
                 queueLookup.clear()
                 
                 // Keep only current item
@@ -426,8 +397,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             } else {
                 mainQueue.clear()
                 playNextQueue.clear()
-                smartQueue.clear()
-                radioQueue.clear()
                 queueLookup.clear()
                 currentIndex = 0
             }
@@ -487,28 +456,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             android.util.Log.e("QueueManager", "Error setting shuffle", e)
         }
     }
-    
-    suspend fun setSmartQueueEnabled(enabled: Boolean) = queueMutex.withLock {
-        smartQueueEnabled = enabled
-        updateUIState()
-        
-        if (enabled) {
-            generateSmartQueue()
-        } else {
-            smartQueue.clear()
-        }
-    }
-    
-    suspend fun setRadioMode(enabled: Boolean) = queueMutex.withLock {
-        radioModeEnabled = enabled
-        updateUIState()
-        
-        if (enabled) {
-            generateRadioQueue()
-        } else {
-            radioQueue.clear()
-        }
-    }
 
     fun snapshotIds(): List<String> = try {
         getCombinedQueue().map { it.id }
@@ -517,11 +464,11 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         emptyList()
     }
 
-    fun getQueueSize(): Int = mainQueue.size + playNextQueue.size + smartQueue.size + radioQueue.size
+    fun getQueueSize(): Int = mainQueue.size + playNextQueue.size
 
     fun getCurrentIndex(): Int = currentIndex
 
-    fun hasNext(): Boolean = currentIndex < getQueueSize() - 1 || radioModeEnabled
+    fun hasNext(): Boolean = currentIndex < getQueueSize() - 1
 
     fun hasPrevious(): Boolean = currentIndex > 0
 
@@ -532,7 +479,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     }
     
     fun getVisibleQueue(): List<QueueItem> {
-        // Return the main user-visible queue (excluding smart queue and radio)
+        // Return the main user-visible queue
         val visible = mutableListOf<QueueItem>()
         visible.addAll(mainQueue.take(currentIndex + 1))
         visible.addAll(playNextQueue)
@@ -561,16 +508,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             combined.addAll(mainQueue.drop(currentInMain + 1))
         }
         
-        // Add smart queue if enabled and near end
-        if (smartQueueEnabled && combined.size - currentIndex <= 3) {
-            combined.addAll(smartQueue.take(10)) // Add next 10 smart suggestions
-        }
-        
-        // Add radio queue if enabled and at end
-        if (radioModeEnabled && currentIndex >= combined.size - 2) {
-            combined.addAll(radioQueue.take(5)) // Add next 5 radio tracks
-        }
-        
         return combined
     }
     
@@ -588,14 +525,10 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     private fun rebuildQueuesFromCombined(combinedQueue: List<QueueItem>) {
         mainQueue.clear()
         playNextQueue.clear()
-        smartQueue.clear()
-        radioQueue.clear()
         
         combinedQueue.forEach { item ->
             when (item.source) {
                 QueueSource.PLAY_NEXT -> playNextQueue.addLast(item)
-                QueueSource.SMART_QUEUE -> smartQueue.addLast(item)
-                QueueSource.RADIO -> radioQueue.addLast(item)
                 else -> mainQueue.addLast(item)
             }
         }
@@ -660,14 +593,10 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         
         mainQueue.clear()
         playNextQueue.clear()
-        smartQueue.clear()
-        radioQueue.clear()
         
         originalOrder.forEach { item ->
             when (item.source) {
                 QueueSource.PLAY_NEXT -> playNextQueue.addLast(item)
-                QueueSource.SMART_QUEUE -> smartQueue.addLast(item)
-                QueueSource.RADIO -> radioQueue.addLast(item)
                 else -> mainQueue.addLast(item)
             }
         }
@@ -678,22 +607,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             .coerceAtLeast(0)
     }
     
-    private fun generateSmartQueue() {
-        // TODO: Implement smart queue generation based on current context
-        // This would analyze listening history, current track, and generate similar recommendations
-        CoroutineScope(Dispatchers.IO).launch {
-            // Placeholder for smart queue generation
-            // In a real implementation, this would use ML algorithms or music databases
-        }
-    }
-    
-    private fun generateRadioQueue() {
-        // TODO: Implement radio queue generation
-        CoroutineScope(Dispatchers.IO).launch {
-            // Placeholder for radio queue generation
-        }
-    }
-    
     private fun updateUIState() {
         val state = QueueState(
             totalItems = getQueueSize(),
@@ -702,8 +615,6 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             hasPrevious = hasPrevious(),
             shuffleEnabled = shuffleEnabled,
             repeatMode = repeatMode,
-            smartQueueEnabled = smartQueueEnabled,
-            radioModeEnabled = radioModeEnabled,
             playNextCount = playNextQueue.size,
             context = currentContext
         )

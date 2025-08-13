@@ -20,7 +20,7 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun getAllTracks(): List<Track> = db.dao().getAllTracks()
     suspend fun search(q: String): List<Track> = db.dao().searchTracks("%$q%")
     suspend fun playlists(): List<Playlist> = db.dao().getPlaylists()
-    suspend fun createPlaylist(name: String): Long = db.dao().createPlaylist(Playlist(name = name))
+    suspend fun createPlaylist(name: String, imageUri: String? = null): Long = db.dao().createPlaylist(Playlist(name = name, imageUri = imageUri))
     suspend fun renamePlaylist(id: Long, name: String) = db.dao().renamePlaylist(id, name)
     suspend fun deletePlaylist(id: Long) = db.dao().deletePlaylist(id)
     suspend fun addToPlaylist(playlistId: Long, mediaIds: List<String>) {
