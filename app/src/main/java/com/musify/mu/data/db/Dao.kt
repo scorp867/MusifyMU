@@ -24,6 +24,18 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY dateAddedSec DESC LIMIT :limit")
     suspend fun getRecentlyAdded(limit: Int): List<Track>
 
+    // Smart play history insertion - only record if not played recently (within 30 seconds)
+    @Query("""
+        INSERT OR IGNORE INTO play_history (mediaId, playedAt) 
+        SELECT :mediaId, :playedAt 
+        WHERE NOT EXISTS (
+            SELECT 1 FROM play_history 
+            WHERE mediaId = :mediaId 
+            AND playedAt > :playedAt - 30000
+        )
+    """)
+    suspend fun insertPlayHistoryIfNotRecent(mediaId: String, playedAt: Long = System.currentTimeMillis())
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPlayHistory(entry: PlayHistory)
 
