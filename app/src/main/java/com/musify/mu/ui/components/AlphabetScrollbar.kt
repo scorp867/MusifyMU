@@ -135,8 +135,8 @@ fun AlphabetScrollbar(
                             onDragEnd = {
                                 isDragging = false
                             },
-                            onDrag = { _, dragAmount ->
-                                val currentY = density.run { dragAmount.toPx() }
+                            onVerticalDrag = { change, _ ->
+                                val currentY = change.position.y
                                 val index = calculateIndex(currentY, scrollbarHeight, alphabets.size)
                                 if (index in alphabets.indices) {
                                     val letter = alphabets[index]

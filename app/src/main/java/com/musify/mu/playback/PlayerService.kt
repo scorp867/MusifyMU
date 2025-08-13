@@ -56,9 +56,6 @@ class PlayerService : MediaLibraryService() {
         player = ExoPlayer.Builder(this).build()
         queue = QueueManager(player, queueStateStore, serviceScope)
         
-        // Initialize the QueueManagerProvider
-        QueueManagerProvider.initialize(queue)
-        
         // Initialize audio focus manager
         audioFocusManager = AudioFocusManager(this) { focusChange ->
             when (focusChange) {
@@ -261,7 +258,6 @@ class PlayerService : MediaLibraryService() {
         mediaLibrarySession?.release()
         mediaLibrarySession = null
         player.release()
-        QueueManagerProvider.clear()
         serviceScope.cancel()
         
         // Clear state on destroy

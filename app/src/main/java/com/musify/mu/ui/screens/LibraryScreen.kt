@@ -381,7 +381,7 @@ private fun TrackItem(
             Box {
                 IconButton(onClick = { showMenu = true }) {
                     Icon(
-                        imageVector = Icons.Rounded.MoreVert,
+                        imageVector = Icons.Filled.MoreVert,
                         contentDescription = "More options",
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                         modifier = Modifier.size(20.dp)

@@ -38,13 +38,7 @@ import androidx.compose.material.DismissDirection
 import androidx.compose.material.DismissValue
 import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.launch
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.musify.mu.playback.PlayerService
-import com.musify.mu.playback.QueueManager
-import com.musify.mu.playback.QueueManagerProvider
-import androidx.compose.foundation.lazy.items
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.lazy.itemsIndexed
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
