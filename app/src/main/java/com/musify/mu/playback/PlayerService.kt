@@ -49,13 +49,13 @@ class PlayerService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
-
+        
         repo = LibraryRepository.get(this)
         stateStore = PlaybackStateStore(this)
         queueStateStore = QueueStateStore(this)
         player = ExoPlayer.Builder(this).build()
         queue = QueueManager(player, queueStateStore)
-
+        
         // Initialize audio focus manager
         audioFocusManager = AudioFocusManager(this) { focusChange ->
             when (focusChange) {
@@ -134,7 +134,7 @@ class PlayerService : MediaLibraryService() {
                     }
                 }
             }
-
+            
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 // Record the track as played when transitioning to it
                 mediaItem?.let { item ->
@@ -144,10 +144,10 @@ class PlayerService : MediaLibraryService() {
                         queueStateStore.decrementOnAdvance()
                     }
                 }
-
+                
 
             }
-
+            
             override fun onEvents(player: Player, events: Player.Events) {
                 // Save playback state
                 serviceScope.launch {
@@ -161,10 +161,10 @@ class PlayerService : MediaLibraryService() {
                         stateStore.save(ids, index, pos, repeat, shuffle, play)
                     }
                 }
-
+                
                 // Check if we have valid media
                 hasValidMedia = player.mediaItemCount > 0
-
+                
                 // Handle service lifecycle
                 if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
                     if (player.mediaItemCount == 0) {
@@ -184,7 +184,7 @@ class PlayerService : MediaLibraryService() {
                 val state = stateStore.load()
                 if (state != null && state.mediaIds.isNotEmpty()) {
                     // Validate that media files still exist
-                    val validTracks = state.mediaIds.mapNotNull { id ->
+                    val validTracks = state.mediaIds.mapNotNull { id -> 
                         repo.getTrackByMediaId(id)?.let { track ->
                             try {
                                 val uri = Uri.parse(track.mediaId)
@@ -197,41 +197,25 @@ class PlayerService : MediaLibraryService() {
                             }
                         }
                     }
-
+                    
                     if (validTracks.isNotEmpty()) {
                         val items = validTracks.map { it.toMediaItem() }
                         launch(Dispatchers.Main) {
                             try {
                                 val validPosMs = if (state.posMs > 0L) state.posMs else 0L
                                 val validIndex = state.index.coerceIn(0, items.size - 1)
-
-                                launch {
-                                    val context = QueueManager.QueueContext(
-                                        type = QueueManager.ContextType.QUEUE,
-                                        id = "restored_queue",
-                                        name = "Queue",
-                                        originalOrder = items.map { QueueManager.QueueItem(it, source = QueueManager.QueueSource.CONTEXT) }
-                                    )
-                                    queue.playFromContext(context, validIndex, play = false)
-                                }
+                                
+                                launch { queue.setQueue(items, validIndex, play = false, startPosMs = validPosMs) }
                                 player.repeatMode = state.repeat
                                 player.shuffleModeEnabled = state.shuffle
                                 hasValidMedia = true
-
+                                
                                 if (state.play && items.isNotEmpty()) {
                                     player.play()
                                 }
                             } catch (e: Exception) {
                                 // If restoration fails, just set the queue without position
-                                launch {
-                                    val context = QueueManager.QueueContext(
-                                        type = QueueManager.ContextType.QUEUE,
-                                        id = "fallback_queue",
-                                        name = "Queue",
-                                        originalOrder = items.map { QueueManager.QueueItem(it, source = QueueManager.QueueSource.CONTEXT) }
-                                    )
-                                    queue.playFromContext(context, 0, play = false)
-                                }
+                                launch { queue.setQueue(items, 0, play = false, startPosMs = 0L) }
                                 hasValidMedia = true
                             }
                         }
@@ -274,7 +258,7 @@ class PlayerService : MediaLibraryService() {
         mediaLibrarySession?.release()
         player.release()
         serviceScope.cancel()
-
+        
         // Clear state on destroy
         serviceScope.launch(Dispatchers.IO) {
             try {
@@ -283,7 +267,7 @@ class PlayerService : MediaLibraryService() {
                 android.util.Log.w("PlayerService", "Failed to clear state on destroy", e)
             }
         }
-
+        
         super.onDestroy()
     }
 
@@ -292,7 +276,7 @@ class PlayerService : MediaLibraryService() {
         serviceScope.launch {
             try {
                 val tracks = repo.getAllTracks().filter { ids.contains(it.mediaId) }
-
+                
                 // Validate that media files exist
                 val validTracks = tracks.filter { track ->
                     try {
@@ -305,20 +289,12 @@ class PlayerService : MediaLibraryService() {
                         false
                     }
                 }
-
+                
                 val items = validTracks.map { it.toMediaItem() }
                 if (items.isNotEmpty()) {
                     val validStartIndex = startIndex.coerceIn(0, items.size - 1)
                     val validStartPos = if (startPos > 0L) startPos else 0L
-                    serviceScope.launch {
-                        val context = QueueManager.QueueContext(
-                            type = QueueManager.ContextType.QUEUE,
-                            id = "media_ids_${System.currentTimeMillis()}",
-                            name = "Playing Queue",
-                            originalOrder = items.map { QueueManager.QueueItem(it, source = QueueManager.QueueSource.CONTEXT) }
-                        )
-                        queue.playFromContext(context, validStartIndex, play = true)
-                    }
+                    serviceScope.launch { queue.setQueue(items, validStartIndex, play = true, startPosMs = validStartPos) }
                     hasValidMedia = true
                 }
             } catch (e: Exception) {
@@ -326,7 +302,7 @@ class PlayerService : MediaLibraryService() {
             }
         }
     }
-
+    
     private fun createPlayerActivityIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -339,13 +315,13 @@ class PlayerService : MediaLibraryService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
-
+    
     private fun stopForegroundService() {
         // No-op since we don't manage our own notification anymore
     }
+    
 
-
-
+    
     private fun loadArtworkBitmap(artworkUri: String): Bitmap? {
         return try {
             val uri = Uri.parse(artworkUri)
@@ -370,9 +346,9 @@ class PlayerService : MediaLibraryService() {
             null
         }
     }
-
+    
     private fun createNotificationChannel() { /* no-op */ }
-
+    
     companion object {
         private const val CHANNEL_ID = "PLAYBACK_CHANNEL"
         private const val NOTIFICATION_ID = 1001

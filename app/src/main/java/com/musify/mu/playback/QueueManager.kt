@@ -10,471 +10,439 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.collections.ArrayDeque
-import kotlin.random.Random
 
 /**
- * Spotify-like Advanced Queue Manager with context-aware queue management
- * Phase 1 Implementation: Context switching, Smart shuffle, Visual feedback
+ * Advanced Queue Manager with hybrid data structures for optimal performance
+ * Combines multiple data structures for different use cases:
+ * - ArrayDeque for main queue operations (O(1) add/remove at ends)
+ * - LinkedHashMap for fast lookups and duplicate detection (O(1))
+ * - ConcurrentLinkedQueue for thread-safe operations
+ * - Separate play-next queue for immediate playback
  */
 class QueueManager(private val player: ExoPlayer, private val queueState: QueueStateStore? = null) {
 
-    // Multi-layered queue system like Spotify
-    private val userQueue = ArrayDeque<QueueItem>()           // "Play Next" items
-    private val contextQueue = ArrayDeque<QueueItem>()        // Current album/playlist context
-    private val radioQueue = ArrayDeque<QueueItem>()          // Auto-generated similar songs
-
-    // Queue context tracking
-    private var currentContext: QueueContext? = null
-    private var shuffleHistory = mutableListOf<String>()
-    private var shuffleUpcoming = ArrayDeque<QueueItem>()
-
-    // Smart shuffle state
-    private var originalContextOrder = ArrayDeque<QueueItem>()
-    private var isSmartShuffleEnabled = false
-    private val smartShuffle = SmartShuffleAlgorithm()
-
-    // Thread safety
+    // Main queue using ArrayDeque for efficient operations
+    private val mainQueue = ArrayDeque<QueueItem>()
+    
+    // Play-next queue for songs to be played immediately after current
+    private val playNextQueue = ArrayDeque<QueueItem>()
+    
+    // Fast lookup map for duplicate detection and quick access
+    private val queueLookup = LinkedHashMap<String, QueueItem>()
+    
+    // Thread-safe queue for concurrent operations
+    private val operationQueue = ConcurrentLinkedQueue<QueueOperation>()
+    
+    // Mutex for thread-safe queue operations
     private val queueMutex = Mutex()
-
-    // Visual feedback state
-    private var draggedItemIndex: Int? = null
-    private var isDragging = false
-
+    
+    // Current playing index in the combined queue
+    private var currentIndex = 0
+    
+    // Queue metadata
+    private var shuffleEnabled = false
+    private var repeatMode = 0 // 0: none, 1: all, 2: one
+    
+    // Original order backup for shuffle
+    private val originalOrder = ArrayDeque<QueueItem>()
+    
     data class QueueItem(
         val mediaItem: MediaItem,
         val id: String = mediaItem.mediaId,
         val addedAt: Long = System.currentTimeMillis(),
-        val source: QueueSource = QueueSource.CONTEXT,
-        var position: Int = -1,
-        val contextId: String? = null,
-        val isUserAdded: Boolean = false
+        val source: QueueSource = QueueSource.USER_ADDED,
+        var position: Int = -1
     )
-
-    data class QueueContext(
-        val type: ContextType,
-        val id: String,
-        val name: String,
-        val originalOrder: List<QueueItem>,
-        val startIndex: Int = 0
-    )
-
-    enum class ContextType {
-        ALBUM, PLAYLIST, ARTIST, LIKED_SONGS, SEARCH, QUEUE, RADIO
-    }
-
+    
     enum class QueueSource {
-        CONTEXT,        // From album/playlist
-        USER_NEXT,      // User added "Play Next"
-        USER_QUEUE,     // User added "Add to Queue"
-        RADIO,          // Auto-generated
-        SHUFFLE         // Shuffled items
+        USER_ADDED, PLAY_NEXT, ALBUM, PLAYLIST, RADIO, SHUFFLE
+    }
+    
+    sealed class QueueOperation {
+        data class Add(val items: List<QueueItem>, val position: Int = -1) : QueueOperation()
+        data class Remove(val id: String) : QueueOperation()
+        data class Move(val from: Int, val to: Int) : QueueOperation()
+        data class Clear(val keepCurrent: Boolean = false) : QueueOperation()
+        data class Shuffle(val enabled: Boolean) : QueueOperation()
     }
 
-    // Visual feedback data class
-    data class QueueVisualState(
-        val isDragging: Boolean = false,
-        val draggedIndex: Int? = null,
-        val dragOffset: Float = 0f,
-        val targetIndex: Int? = null
-    )
-
-    private var visualState = QueueVisualState()
-
-    /**
-     * Play from a specific context (album, playlist, etc.) - Spotify-like behavior
-     */
-    suspend fun playFromContext(
-        context: QueueContext,
+    suspend fun setQueue(
+        items: List<MediaItem>,
         startIndex: Int = 0,
         play: Boolean = true,
-        shuffle: Boolean = false
+        startPosMs: Long = 0L
     ) = queueMutex.withLock {
         try {
-            // Clear existing state
-            userQueue.clear()
-            contextQueue.clear()
-            radioQueue.clear()
-            shuffleHistory.clear()
-            shuffleUpcoming.clear()
-
-            // Set new context
-            currentContext = context
-            originalContextOrder.clear()
-            originalContextOrder.addAll(context.originalOrder)
-
-            if (shuffle) {
-                enableSmartShuffle(context.originalOrder, startIndex)
-            } else {
-                contextQueue.addAll(context.originalOrder)
-                isSmartShuffleEnabled = false
-            }
-
-            // Build combined queue for player
-            val combinedQueue = buildCombinedQueue()
-            val playerStartIndex = if (shuffle) 0 else startIndex
-
-            // Set media items in player
-            player.setMediaItems(combinedQueue.map { it.mediaItem }, playerStartIndex, 0L)
-            player.prepare()
-
-            if (play) player.play()
-
-            // Update state store
-            queueState?.let { qs ->
-                CoroutineScope(Dispatchers.IO).launch {
-                    qs.setPlayNextCount(userQueue.size)
-                }
-            }
-
-        } catch (e: Exception) {
-            android.util.Log.e("QueueManager", "Error playing from context", e)
-        }
-    }
-
-    /**
-     * Add items to user queue (Play Next) - these take priority
-     */
-    suspend fun addToUserQueue(items: List<MediaItem>, playNext: Boolean = true) = queueMutex.withLock {
-        try {
-            val queueItems = items.map { mediaItem ->
+            // Clear existing queue
+            mainQueue.clear()
+            playNextQueue.clear()
+            queueLookup.clear()
+            originalOrder.clear()
+            
+            // Validate input
+            if (items.isEmpty()) return@withLock
+            
+            val validStartIndex = startIndex.coerceIn(0, items.size - 1)
+            
+            // Create queue items with proper positioning
+            val queueItems = items.mapIndexed { index, mediaItem ->
                 QueueItem(
                     mediaItem = mediaItem,
-                    source = if (playNext) QueueSource.USER_NEXT else QueueSource.USER_QUEUE,
-                    isUserAdded = true,
-                    contextId = currentContext?.id
+                    position = index,
+                    source = QueueSource.USER_ADDED
                 )
             }
-
-            if (playNext) {
-                // Add to front of user queue (LIFO for multiple items)
-                queueItems.reversed().forEach { userQueue.addFirst(it) }
-            } else {
-                // Add to end of user queue
-                queueItems.forEach { userQueue.addLast(it) }
+            
+            // Add to main queue and lookup
+            queueItems.forEach { item ->
+                mainQueue.addLast(item)
+                queueLookup[item.id] = item
+                originalOrder.addLast(item.copy())
             }
-
-            // Rebuild player queue
-            updatePlayerQueue()
-
+            
+            // Set media items in player
+            player.setMediaItems(items, validStartIndex, 0L)
+            player.prepare()
+            
+            currentIndex = validStartIndex
+            
+            // Handle start position
+            if (startPosMs > 0L) {
+                player.addListener(object : androidx.media3.common.Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                            val duration = player.duration
+                            if (duration != androidx.media3.common.C.TIME_UNSET && startPosMs < duration) {
+                                player.seekTo(startPosMs)
+                            }
+                            player.removeListener(this)
+                        }
+                    }
+                })
+            }
+            
+            if (play) player.play()
+            
+            // Reset play-next count
             queueState?.let { qs ->
-                CoroutineScope(Dispatchers.IO).launch {
-                    qs.setPlayNextCount(userQueue.size)
+                CoroutineScope(Dispatchers.IO).launch { qs.setPlayNextCount(0) }
+            }
+            
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error setting queue", e)
+        }
+    }
+
+    suspend fun addToEnd(items: List<MediaItem>) = queueMutex.withLock {
+        try {
+            val queueItems = items.mapNotNull { mediaItem ->
+                // Prevent duplicates
+                if (queueLookup.containsKey(mediaItem.mediaId)) {
+                    null
+                } else {
+                    QueueItem(
+                        mediaItem = mediaItem,
+                        position = mainQueue.size + playNextQueue.size,
+                        source = QueueSource.USER_ADDED
+                    )
                 }
             }
-
+            
+            if (queueItems.isEmpty()) return@withLock
+            
+            // Add to main queue
+            queueItems.forEach { item ->
+                mainQueue.addLast(item)
+                queueLookup[item.id] = item
+            }
+            
+            // Add to player
+            player.addMediaItems(queueItems.map { it.mediaItem })
+            
         } catch (e: Exception) {
-            android.util.Log.e("QueueManager", "Error adding to user queue", e)
+            android.util.Log.e("QueueManager", "Error adding to end", e)
         }
     }
 
-    /**
-     * Smart shuffle implementation - avoids recently played, spreads artists
-     */
-    private suspend fun enableSmartShuffle(items: List<QueueItem>, currentIndex: Int) {
-        isSmartShuffleEnabled = true
-        val shuffledItems = smartShuffle.generateSmartShuffle(
-            items = items,
-            currentIndex = currentIndex,
-            recentlyPlayed = shuffleHistory
-        )
-
-        contextQueue.clear()
-        contextQueue.addAll(shuffledItems)
-
-        // Track shuffle history
-        shuffleHistory.clear()
-        shuffleUpcoming.clear()
-        shuffleUpcoming.addAll(shuffledItems.drop(1)) // All except current
-    }
-
-    /**
-     * Enhanced move with visual feedback
-     */
-    suspend fun moveWithVisualFeedback(
-        from: Int,
-        to: Int,
-        onVisualUpdate: (QueueVisualState) -> Unit
-    ) = queueMutex.withLock {
+    suspend fun playNext(items: List<MediaItem>) = queueMutex.withLock {
         try {
-            // Update visual state
-            visualState = visualState.copy(
-                isDragging = true,
-                draggedIndex = from,
-                targetIndex = to
-            )
-            onVisualUpdate(visualState)
-
-            // Perform the actual move
-            move(from, to)
-
-            // Reset visual state
-            visualState = QueueVisualState()
-            onVisualUpdate(visualState)
-
+            val queueItems = items.mapNotNull { mediaItem ->
+                // Remove from main queue if exists, we'll add to play-next
+                queueLookup.remove(mediaItem.mediaId)?.let { existing ->
+                    mainQueue.remove(existing)
+                }
+                
+                QueueItem(
+                    mediaItem = mediaItem,
+                    source = QueueSource.PLAY_NEXT
+                )
+            }
+            
+            if (queueItems.isEmpty()) return@withLock
+            
+            // Add to play-next queue (LIFO for multiple items)
+            queueItems.reversed().forEach { item ->
+                playNextQueue.addFirst(item)
+                queueLookup[item.id] = item
+            }
+            
+            // Insert after current item in player
+            val insertIndex = (player.currentMediaItemIndex + 1)
+                .coerceAtMost(player.mediaItemCount)
+            player.addMediaItems(insertIndex, queueItems.map { it.mediaItem })
+            
+            // Update play-next count
+            queueState?.let { qs ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    val current = qs.getPlayNextCount()
+                    qs.setPlayNextCount(current + queueItems.size)
+                }
+            }
+            
         } catch (e: Exception) {
-            android.util.Log.e("QueueManager", "Error moving with visual feedback", e)
-            visualState = QueueVisualState()
-            onVisualUpdate(visualState)
+            android.util.Log.e("QueueManager", "Error adding play next", e)
         }
     }
 
-    /**
-     * Standard move operation
-     */
     suspend fun move(from: Int, to: Int) = queueMutex.withLock {
         try {
             if (from == to || from < 0 || to < 0) return@withLock
-
-            val combinedQueue = buildCombinedQueue().toMutableList()
-            if (from >= combinedQueue.size || to >= combinedQueue.size) return@withLock
-
-            val item = combinedQueue.removeAt(from)
-            combinedQueue.add(to, item)
-
-            // Rebuild internal queues
-            rebuildQueuesFromCombined(combinedQueue)
-
-            // Move in player
-            if (from < player.mediaItemCount && to < player.mediaItemCount) {
+            
+            val totalSize = mainQueue.size + playNextQueue.size
+            if (from >= totalSize || to >= totalSize) return@withLock
+            
+            // Get the combined queue for position calculations
+            val combinedQueue = getCombinedQueue()
+            
+            if (from < combinedQueue.size && to < combinedQueue.size) {
+                val item = combinedQueue[from]
+                
+                // Update internal structures
+                updateQueueAfterMove(from, to)
+                
+                // Move in player
                 player.moveMediaItem(from, to)
+                
+                // Update current index if needed
+                when {
+                    from == currentIndex -> currentIndex = to
+                    from < currentIndex && to >= currentIndex -> currentIndex--
+                    from > currentIndex && to <= currentIndex -> currentIndex++
+                }
             }
-
+            
         } catch (e: Exception) {
             android.util.Log.e("QueueManager", "Error moving item", e)
         }
     }
 
-    /**
-     * Remove item with context awareness
-     */
     suspend fun removeAt(index: Int) = queueMutex.withLock {
         try {
-            val combinedQueue = buildCombinedQueue()
+            val combinedQueue = getCombinedQueue()
             if (index < 0 || index >= combinedQueue.size) return@withLock
-
+            
             val item = combinedQueue[index]
-
+            
             // Remove from appropriate queue
-            when {
-                userQueue.contains(item) -> userQueue.remove(item)
-                contextQueue.contains(item) -> {
-                    contextQueue.remove(item)
-                    // If removing from context, might need to add more items
-                    if (contextQueue.size < 5 && radioQueue.isNotEmpty()) {
-                        // Move some radio items to context
-                        repeat(minOf(3, radioQueue.size)) {
-                            radioQueue.removeFirstOrNull()?.let { contextQueue.addLast(it) }
+            when (item.source) {
+                QueueSource.PLAY_NEXT -> {
+                    playNextQueue.remove(item)
+                    queueState?.let { qs ->
+                        CoroutineScope(Dispatchers.IO).launch {
+                            val current = qs.getPlayNextCount()
+                            qs.setPlayNextCount((current - 1).coerceAtLeast(0))
                         }
                     }
                 }
-                radioQueue.contains(item) -> radioQueue.remove(item)
+                else -> mainQueue.remove(item)
             }
-
+            
+            // Remove from lookup
+            queueLookup.remove(item.id)
+            
             // Remove from player
             if (index < player.mediaItemCount) {
                 player.removeMediaItem(index)
             }
-
-            updateStateStore()
-
+            
+            // Update current index
+            if (index < currentIndex) {
+                currentIndex--
+            }
+            
         } catch (e: Exception) {
             android.util.Log.e("QueueManager", "Error removing item", e)
         }
     }
 
-    /**
-     * Get queue sections for UI display
-     */
-    fun getQueueSections(): QueueSections {
-        return QueueSections(
-            nowPlaying = getCurrentItem(),
-            userQueue = userQueue.toList(),
-            contextQueue = contextQueue.take(10), // Limit preview
-            contextName = currentContext?.name ?: "Queue",
-            hasMoreInContext = contextQueue.size > 10,
-            radioQueue = radioQueue.take(5)
-        )
-    }
-
-    /**
-     * Build combined queue in priority order
-     */
-    private fun buildCombinedQueue(): List<QueueItem> {
-        val combined = mutableListOf<QueueItem>()
-
-        // Add user queue first (highest priority)
-        combined.addAll(userQueue)
-
-        // Add context queue
-        combined.addAll(contextQueue)
-
-        // Add radio queue if context is empty
-        if (contextQueue.isEmpty()) {
-            combined.addAll(radioQueue)
-        }
-
-        return combined
-    }
-
-    /**
-     * Update player queue after internal changes
-     */
-    private suspend fun updatePlayerQueue() {
-        val combinedQueue = buildCombinedQueue()
-        val currentIndex = player.currentMediaItemIndex
-
-        // Clear and rebuild player queue
-        player.clearMediaItems()
-        if (combinedQueue.isNotEmpty()) {
-            player.setMediaItems(
-                combinedQueue.map { it.mediaItem },
-                currentIndex.coerceIn(0, combinedQueue.size - 1),
-                player.currentPosition
-            )
-        }
-    }
-
-    /**
-     * Rebuild internal queues from combined list
-     */
-    private fun rebuildQueuesFromCombined(combinedQueue: List<QueueItem>) {
-        userQueue.clear()
-        contextQueue.clear()
-        radioQueue.clear()
-
-        combinedQueue.forEach { item ->
-            when (item.source) {
-                QueueSource.USER_NEXT, QueueSource.USER_QUEUE -> userQueue.addLast(item)
-                QueueSource.CONTEXT, QueueSource.SHUFFLE -> contextQueue.addLast(item)
-                QueueSource.RADIO -> radioQueue.addLast(item)
+    suspend fun clearQueue(keepCurrent: Boolean = false) = queueMutex.withLock {
+        try {
+            if (keepCurrent && currentIndex >= 0) {
+                val currentItem = getCombinedQueue().getOrNull(currentIndex)
+                
+                // Clear everything
+                mainQueue.clear()
+                playNextQueue.clear()
+                queueLookup.clear()
+                
+                // Keep only current item
+                currentItem?.let { item ->
+                    mainQueue.addLast(item)
+                    queueLookup[item.id] = item
+                }
+                
+                currentIndex = 0
+            } else {
+                mainQueue.clear()
+                playNextQueue.clear()
+                queueLookup.clear()
+                currentIndex = 0
             }
-        }
-    }
-
-    private fun updateStateStore() {
-        queueState?.let { qs ->
-            CoroutineScope(Dispatchers.IO).launch {
-                qs.setPlayNextCount(userQueue.size)
+            
+            // Clear player queue
+            if (!keepCurrent) {
+                player.clearMediaItems()
+            } else {
+                // Keep only current item
+                val currentMediaItem = player.currentMediaItem
+                player.clearMediaItems()
+                currentMediaItem?.let { player.setMediaItem(it) }
             }
+            
+            queueState?.let { qs ->
+                CoroutineScope(Dispatchers.IO).launch { qs.setPlayNextCount(0) }
+            }
+            
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error clearing queue", e)
         }
     }
-
-    // Existing methods with improvements
-    fun getCurrentItem(): QueueItem? =
-        buildCombinedQueue().getOrNull(player.currentMediaItemIndex)
-
-    fun getQueueSize(): Int = buildCombinedQueue().size
-
-    fun hasNext(): Boolean = player.currentMediaItemIndex < getQueueSize() - 1
-
-    fun hasPrevious(): Boolean = player.currentMediaItemIndex > 0
-
-    fun snapshotIds(): List<String> = buildCombinedQueue().map { it.id }
 
     fun setRepeat(mode: Int) {
+        repeatMode = mode
         player.repeatMode = mode
     }
 
     suspend fun setShuffle(enabled: Boolean) = queueMutex.withLock {
-        currentContext?.let { context ->
-            if (enabled && !isSmartShuffleEnabled) {
-                enableSmartShuffle(context.originalOrder, player.currentMediaItemIndex)
-                updatePlayerQueue()
-            } else if (!enabled && isSmartShuffleEnabled) {
+        try {
+            if (shuffleEnabled == enabled) return@withLock
+            
+            shuffleEnabled = enabled
+            player.shuffleModeEnabled = enabled
+            
+            if (enabled) {
+                // Save current order
+                originalOrder.clear()
+                getCombinedQueue().forEach { originalOrder.addLast(it.copy()) }
+                
+                // Shuffle the queue
+                shuffleQueue()
+            } else {
                 // Restore original order
-                contextQueue.clear()
-                contextQueue.addAll(originalContextOrder)
-                isSmartShuffleEnabled = false
-                updatePlayerQueue()
+                restoreOriginalOrder()
             }
-        }
-        player.shuffleModeEnabled = enabled
-    }
-
-    data class QueueSections(
-        val nowPlaying: QueueItem?,
-        val userQueue: List<QueueItem>,
-        val contextQueue: List<QueueItem>,
-        val contextName: String,
-        val hasMoreInContext: Boolean,
-        val radioQueue: List<QueueItem>
-    )
-}
-
-/**
- * Smart Shuffle Algorithm - avoids repetition and creates better flow
- */
-class SmartShuffleAlgorithm {
-    fun generateSmartShuffle(
-        items: List<QueueManager.QueueItem>,
-        currentIndex: Int,
-        recentlyPlayed: List<String>
-    ): List<QueueManager.QueueItem> {
-        if (items.size <= 1) return items
-
-        val current = items.getOrNull(currentIndex)
-        val remaining = items.toMutableList()
-        current?.let { remaining.remove(it) }
-
-        // Shuffle with smart distribution
-        val shuffled = remaining.shuffled().toMutableList()
-
-        // Optimize order to avoid artist/album clustering
-        optimizeArtistDistribution(shuffled)
-
-        // Avoid recently played songs in next few positions
-        avoidRecentlyPlayed(shuffled, recentlyPlayed)
-
-        // Build final list with current item first
-        return listOfNotNull(current) + shuffled
-    }
-
-    private fun optimizeArtistDistribution(items: MutableList<QueueManager.QueueItem>) {
-        // Spread out songs from same artist
-        val artistGroups = items.groupBy { extractArtist(it.mediaItem) }
-
-        artistGroups.values.filter { it.size > 1 }.forEach { artistSongs ->
-            // Redistribute songs from same artist
-            val indices = artistSongs.map { items.indexOf(it) }.sorted()
-            val redistributed = redistributeEvenly(indices, items.size)
-
-            redistributed.forEachIndexed { i, newIndex ->
-                val oldIndex = indices[i]
-                if (oldIndex != newIndex && newIndex < items.size) {
-                    val item = items.removeAt(oldIndex)
-                    items.add(newIndex.coerceIn(0, items.size), item)
-                }
-            }
+            
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error setting shuffle", e)
         }
     }
 
-    private fun avoidRecentlyPlayed(
-        items: MutableList<QueueManager.QueueItem>,
-        recentlyPlayed: List<String>
-    ) {
-        val recentIds = recentlyPlayed.take(5).toSet()
+    fun snapshotIds(): List<String> = try {
+        getCombinedQueue().map { it.id }
+    } catch (e: Exception) {
+        android.util.Log.e("QueueManager", "Error getting snapshot", e)
+        emptyList()
+    }
 
-        // Move recently played songs away from the beginning
-        items.filter { it.id in recentIds }.forEach { recentItem ->
-            val currentIndex = items.indexOf(recentItem)
-            if (currentIndex < 3) { // If in first 3 positions
-                items.removeAt(currentIndex)
-                val newIndex = (items.size * 0.3).toInt().coerceAtLeast(3)
-                items.add(newIndex.coerceIn(3, items.size), recentItem)
+    fun getQueueSize(): Int = mainQueue.size + playNextQueue.size
+
+    fun getCurrentIndex(): Int = currentIndex
+
+    fun hasNext(): Boolean = currentIndex < getQueueSize() - 1
+
+    fun hasPrevious(): Boolean = currentIndex > 0
+
+    fun getCurrentItem(): QueueItem? = getCombinedQueue().getOrNull(currentIndex)
+
+    // Private helper methods
+    
+    private fun getCombinedQueue(): List<QueueItem> {
+        val combined = mutableListOf<QueueItem>()
+        
+        // Add items up to current index from main queue
+        val currentInMain = currentIndex.coerceAtMost(mainQueue.size - 1)
+        if (currentInMain >= 0) {
+            combined.addAll(mainQueue.take(currentInMain + 1))
+        }
+        
+        // Add play-next queue
+        combined.addAll(playNextQueue)
+        
+        // Add remaining main queue items
+        if (currentInMain + 1 < mainQueue.size) {
+            combined.addAll(mainQueue.drop(currentInMain + 1))
+        }
+        
+        return combined
+    }
+    
+    private fun updateQueueAfterMove(from: Int, to: Int) {
+        val combinedQueue = getCombinedQueue().toMutableList()
+        if (from < combinedQueue.size && to < combinedQueue.size) {
+            val item = combinedQueue.removeAt(from)
+            combinedQueue.add(to, item)
+            
+            // Rebuild queues based on new order
+            rebuildQueuesFromCombined(combinedQueue)
+        }
+    }
+    
+    private fun rebuildQueuesFromCombined(combinedQueue: List<QueueItem>) {
+        mainQueue.clear()
+        playNextQueue.clear()
+        
+        combinedQueue.forEach { item ->
+            when (item.source) {
+                QueueSource.PLAY_NEXT -> playNextQueue.addLast(item)
+                else -> mainQueue.addLast(item)
             }
         }
     }
-
-    private fun redistributeEvenly(indices: List<Int>, totalSize: Int): List<Int> {
-        if (indices.size <= 1) return indices
-
-        val step = totalSize / indices.size
-        return indices.mapIndexed { i, _ ->
-            (i * step + Random.nextInt(step / 2)).coerceIn(0, totalSize - 1)
-        }
+    
+    private fun shuffleQueue() {
+        val allItems = getCombinedQueue().toMutableList()
+        val currentItem = allItems.getOrNull(currentIndex)
+        
+        // Remove current item temporarily
+        currentItem?.let { allItems.remove(it) }
+        
+        // Shuffle remaining items
+        allItems.shuffle()
+        
+        // Put current item back at the beginning
+        currentItem?.let { allItems.add(0, it) }
+        
+        // Rebuild queues
+        rebuildQueuesFromCombined(allItems)
+        currentIndex = 0
     }
-
-    private fun extractArtist(mediaItem: MediaItem): String {
-        return mediaItem.mediaMetadata.artist?.toString() ?: "Unknown"
+    
+    private fun restoreOriginalOrder() {
+        if (originalOrder.isEmpty()) return
+        
+        mainQueue.clear()
+        playNextQueue.clear()
+        
+        originalOrder.forEach { item ->
+            when (item.source) {
+                QueueSource.PLAY_NEXT -> playNextQueue.addLast(item)
+                else -> mainQueue.addLast(item)
+            }
+        }
+        
+        // Find current item position in original order
+        val currentItem = getCurrentItem()
+        currentIndex = originalOrder.indexOfFirst { it.id == currentItem?.id }
+            .coerceAtLeast(0)
     }
 }

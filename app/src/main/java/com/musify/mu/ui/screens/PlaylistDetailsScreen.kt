@@ -20,7 +20,6 @@ import kotlinx.coroutines.launch
 import com.musify.mu.ui.components.TrackPickerSheet
 import org.burnoutcrew.reorderable.*
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -51,7 +50,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(title) }, actions = {
+            SmallTopAppBar(title = { Text(title) }, actions = {
                 IconButton(onClick = { showPicker = true }) {
                     Icon(Icons.Default.Add, contentDescription = "Add")
                 }
@@ -70,7 +69,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
             items(tracks.size, key = { idx -> "playlist_${playlistId}_${idx}_${tracks[idx].mediaId}" }) { idx ->
                 val track = tracks[idx]
                 var showMenu by remember { mutableStateOf(false) }
-
+                
                 ReorderableItem(reorderState, key = "playlist_${playlistId}_${idx}_${track.mediaId}") { isDragging ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -78,9 +77,9 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                             defaultElevation = if (isDragging) 8.dp else 2.dp
                         ),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isDragging)
+                            containerColor = if (isDragging) 
                                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            else
+                            else 
                                 MaterialTheme.colorScheme.surface
                         )
                     ) {
@@ -96,9 +95,9 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                 contentDescription = track.title,
                                 modifier = Modifier.size(48.dp)
                             )
-
+                            
                             Spacer(modifier = Modifier.width(12.dp))
-
+                            
                             Column(
                                 modifier = Modifier.weight(1f)
                             ) {
@@ -112,7 +111,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                 )
                             }
-
+                            
                             Box {
                                 IconButton(onClick = { showMenu = true }) {
                                     Icon(Icons.Default.MoreVert, contentDescription = "More")
@@ -127,7 +126,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                     })
                                 }
                             }
-
+                            
                             IconButton(
                                 onClick = { },
                                 modifier = Modifier.detectReorderAfterLongPress(reorderState)

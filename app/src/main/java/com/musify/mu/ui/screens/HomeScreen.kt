@@ -45,14 +45,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
     val controller = LocalMediaController.current
-
+    
     var recentPlayed by remember { mutableStateOf<List<Track>>(emptyList()) }
     var recentAdded by remember { mutableStateOf<List<Track>>(emptyList()) }
     var favorites by remember { mutableStateOf<List<Track>>(emptyList()) }
     var customPlaylists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var refreshTrigger by remember { mutableStateOf(0) }
-
+    
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -127,7 +127,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         item {
             WelcomeHeader()
         }
-
+        
         if (isLoading) {
             items(3) {
                 ShimmerCarousel()
@@ -150,7 +150,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     onSeeAll = { navController.navigate("see_all/recently_played") }
                 )
             }
-
+            
             item {
                 AnimatedCarousel(
                     title = "Recently Added",
@@ -168,7 +168,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     onSeeAll = { navController.navigate("see_all/recently_added") }
                 )
             }
-
+            
             item {
                 AnimatedCarousel(
                     title = "Favourites",
@@ -186,7 +186,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     onSeeAll = { navController.navigate("see_all/favorites") }
                 )
             }
-
+            
             // Custom Playlists Carousel
             if (customPlaylists.isNotEmpty()) {
                 item {
@@ -214,7 +214,7 @@ private fun WelcomeHeader() {
         ),
         label = "shimmer"
     )
-
+    
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -279,7 +279,7 @@ private fun AnimatedCarousel(
     onSeeAll: () -> Unit
 ) {
     if (data.isEmpty()) return
-
+    
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -304,7 +304,7 @@ private fun AnimatedCarousel(
                 Text("See all")
             }
         }
-
+        
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(horizontal = 4.dp)
@@ -334,7 +334,7 @@ private fun TrackCard(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "scale"
     )
-
+    
     Card(
         modifier = Modifier
             .width(150.dp)
@@ -358,12 +358,12 @@ private fun TrackCard(
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(12.dp))
             ) {
-                Artwork(
-                    data = track.artUri,
-                    contentDescription = track.title,
+                    Artwork(
+                        data = track.artUri,
+                        contentDescription = track.title,
                     modifier = Modifier.fillMaxSize()
                 )
-
+                
                 // Play overlay
                 Box(
                     modifier = Modifier
@@ -386,9 +386,9 @@ private fun TrackCard(
                     )
                 }
             }
-
+            
             Spacer(modifier = Modifier.height(8.dp))
-
+            
             Text(
                 text = track.title,
                 maxLines = 1,
@@ -397,7 +397,7 @@ private fun TrackCard(
                 ),
                 color = MaterialTheme.colorScheme.onSurface
             )
-
+            
             Text(
                 text = track.artist,
                 maxLines = 1,
@@ -420,7 +420,7 @@ private fun ShimmerCarousel() {
         ),
         label = "shimmer"
     )
-
+    
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Title shimmer
         Box(
@@ -432,7 +432,7 @@ private fun ShimmerCarousel() {
                     shape = RoundedCornerShape(8.dp)
                 )
         )
-
+        
         // Cards shimmer
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -446,17 +446,17 @@ private fun ShimmerCarousel() {
                         modifier = Modifier.padding(12.dp)
                     ) {
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(1f)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
                                 .background(
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f + shimmer * 0.1f),
                                     shape = RoundedCornerShape(12.dp)
                                 )
                         )
-
+                        
                         Spacer(modifier = Modifier.height(8.dp))
-
+                        
                         Box(
                             modifier = Modifier
                                 .height(16.dp)
@@ -466,9 +466,9 @@ private fun ShimmerCarousel() {
                                     shape = RoundedCornerShape(4.dp)
                                 )
                         )
-
+                        
                         Spacer(modifier = Modifier.height(4.dp))
-
+                        
                         Box(
                             modifier = Modifier
                                 .height(14.dp)
@@ -495,10 +495,10 @@ private fun CustomPlaylistsCarousel(
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     val scope = rememberCoroutineScope()
-
+    
     var showCreateDialog by remember { mutableStateOf(false) }
     var playlistName by remember { mutableStateOf("") }
-
+    
     if (showCreateDialog) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
@@ -534,7 +534,7 @@ private fun CustomPlaylistsCarousel(
             }
         )
     }
-
+    
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -556,15 +556,15 @@ private fun CustomPlaylistsCarousel(
                 modifier = Modifier.weight(1f)
             )
             FilledTonalIconButton(
-                onClick = {
+                onClick = { 
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    showCreateDialog = true
+                    showCreateDialog = true 
                 }
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = "Create Playlist")
             }
         }
-
+        
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(horizontal = 4.dp)
@@ -591,13 +591,13 @@ private fun PlaylistCard(
     val repo = remember { LibraryRepository.get(context) }
     var trackCount by remember { mutableStateOf(0) }
     var firstTrackArt by remember { mutableStateOf<String?>(null) }
-
+    
     LaunchedEffect(playlist.id) {
         val tracks = repo.playlistTracks(playlist.id)
         trackCount = tracks.size
         firstTrackArt = tracks.firstOrNull()?.artUri
     }
-
+    
     Card(
         modifier = Modifier
             .width(160.dp)
@@ -643,7 +643,7 @@ private fun PlaylistCard(
                     )
                 }
             }
-
+            
             Text(
                 text = playlist.name,
                 style = MaterialTheme.typography.titleMedium.copy(
@@ -653,7 +653,7 @@ private fun PlaylistCard(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
-
+            
             Text(
                 text = "$trackCount ${if (trackCount == 1) "song" else "songs"}",
                 style = MaterialTheme.typography.bodySmall,

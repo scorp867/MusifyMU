@@ -69,7 +69,7 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
         db.dao().upsertTracks(tracks)
         tracks
     }
-
+    
     private suspend fun getOrCreateTrackArtwork(trackUri: String, albumId: Long, title: String, artist: String, album: String): String? {
         return withContext(Dispatchers.IO) {
             try {
@@ -77,19 +77,19 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                 val trackKey = "${trackUri.hashCode()}_${title.trim()}_${artist.trim()}"
                 val hashKey = trackKey.hashCode().toString()
                 val filename = "track_art_${hashKey}.jpg"
-
+                
                 val artDir = File(context.filesDir, "track_artwork")
                 if (!artDir.exists()) {
                     artDir.mkdirs()
                 }
-
+                
                 val artFile = File(artDir, filename)
-
+                
                 // If file already exists, return its URI
                 if (artFile.exists()) {
                     return@withContext Uri.fromFile(artFile).toString()
                 }
-
+                
                 // Try to get artwork from the individual track first
                 val bitmap = try {
                     val uri = Uri.parse(trackUri)
@@ -157,7 +157,7 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                         }
                     } else null
                 }
-
+                
                 // Save bitmap to file
                 bitmap?.let {
                     FileOutputStream(artFile).use { out ->

@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
@@ -44,12 +43,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install splash screen for better app launch experience
         installSplashScreen()
-
+        
         // Enable edge-to-edge display for modern look
         enableEdgeToEdge()
-
+        
         super.onCreate(savedInstanceState)
-
+        
         setContent {
             MusifyTheme {
                 val navController = rememberNavController()
@@ -74,11 +73,11 @@ class MainActivity : ComponentActivity() {
                                 currentTrack = mediaItem?.toTrack()
                                 hasPlayedBefore = currentTrack != null
                             }
-
+                            
                             override fun onIsPlayingChanged(isPlayingNow: Boolean) {
                                 isPlaying = isPlayingNow
                             }
-
+                            
                             override fun onPlaybackStateChanged(playbackState: Int) {
                                 isPlaying = built.isPlaying
                                 if (playbackState == Player.STATE_READY) {
@@ -94,7 +93,7 @@ class MainActivity : ComponentActivity() {
                         currentTrack = built.currentMediaItem?.toTrack()
                         isPlaying = built.isPlaying
                         hasPlayedBefore = currentTrack != null
-
+                        
                         // If no media item yet, fallback to last recently played for showing bar
                         if (currentTrack == null) {
                             val recentTracks = repo.recentlyPlayed(1)
@@ -146,51 +145,51 @@ class MainActivity : ComponentActivity() {
                 }
 
                 androidx.compose.runtime.CompositionLocalProvider(com.musify.mu.playback.LocalMediaController provides controller) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background
-                    ) {
-                        Scaffold(
-                            bottomBar = {
-                                // Animated visibility for smoother transitions
-                                AnimatedVisibility(
-                                    visible = !shouldHideBottomBar,
-                                    enter = fadeIn(animationSpec = tween(300)),
-                                    exit = fadeOut(animationSpec = tween(300))
-                                ) {
-                                    Column {
-                                        // Show now playing bar only when there's a current track and we've played before
-                                        AnimatedVisibility(
-                                            visible = currentTrack != null && hasPlayedBefore,
-                                            enter = fadeIn(animationSpec = tween(300)),
-                                            exit = fadeOut(animationSpec = tween(300))
-                                        ) {
-                                            NowPlayingBar(
-                                                navController = navController,
-                                                currentTrack = currentTrack,
-                                                isPlaying = isPlaying,
-                                                onPlayPause = {
-                                                    controller?.let { if (it.isPlaying) it.pause() else it.play() }
-                                                },
-                                                onNext = { controller?.seekToNext() },
-                                                onPrev = { controller?.seekToPrevious() },
-                                                onExpand = {
-                                                    navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route)
-                                                }
-                                            )
-                                        }
-                                        com.musify.mu.ui.components.BottomBar(navController)
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.background
+                ) {
+                    Scaffold(
+                        bottomBar = {
+                            // Animated visibility for smoother transitions
+                            AnimatedVisibility(
+                                visible = !shouldHideBottomBar,
+                                enter = fadeIn(animationSpec = tween(300)),
+                                exit = fadeOut(animationSpec = tween(300))
+                            ) {
+                                Column {
+                                    // Show now playing bar only when there's a current track and we've played before
+                                    AnimatedVisibility(
+                                        visible = currentTrack != null && hasPlayedBefore,
+                                        enter = fadeIn(animationSpec = tween(300)),
+                                        exit = fadeOut(animationSpec = tween(300))
+                                    ) {
+                                        NowPlayingBar(
+                                            navController = navController,
+                                            currentTrack = currentTrack,
+                                            isPlaying = isPlaying,
+                                            onPlayPause = { 
+                                                controller?.let { if (it.isPlaying) it.pause() else it.play() } 
+                                            },
+                                            onNext = { controller?.seekToNext() },
+                                            onPrev = { controller?.seekToPrevious() },
+                                            onExpand = { 
+                                                navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route) 
+                                            }
+                                        )
                                     }
+                                    com.musify.mu.ui.components.BottomBar(navController)
                                 }
                             }
-                        ) { paddingValues ->
-                            MusifyNavGraph(
-                                navController = navController,
-                                modifier = Modifier.padding(if (!shouldHideBottomBar) paddingValues else PaddingValues(0.dp)),
-                                onPlay = onPlay
-                            )
                         }
+                    ) { paddingValues ->
+                        MusifyNavGraph(
+                            navController = navController,
+                            modifier = Modifier.padding(if (!shouldHideBottomBar) paddingValues else PaddingValues(0.dp)),
+                            onPlay = onPlay
+                        )
                     }
+                }
                 }
             }
         }

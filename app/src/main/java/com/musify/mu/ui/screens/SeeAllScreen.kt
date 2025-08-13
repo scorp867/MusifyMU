@@ -16,7 +16,6 @@ import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -44,8 +43,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         tracks = tracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
         // Auto-save the new order immediately
         scope.launch {
-            val order = tracks.mapIndexed { index, track ->
-                com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index)
+            val order = tracks.mapIndexed { index, track -> 
+                com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index) 
             }
             repo.saveFavoritesOrder(order)
         }
@@ -53,7 +52,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(title) })
+            SmallTopAppBar(title = { Text(title) })
         }
     ) { padding ->
         if (type == "favorites") {
@@ -75,9 +74,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                 defaultElevation = if (isDragging) 8.dp else 2.dp
                             ),
                             colors = CardDefaults.cardColors(
-                                containerColor = if (isDragging)
+                                containerColor = if (isDragging) 
                                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                else
+                                else 
                                     MaterialTheme.colorScheme.surface
                             )
                         ) {
@@ -93,9 +92,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                     contentDescription = track.title,
                                     modifier = Modifier.size(48.dp)
                                 )
-
+                                
                                 Spacer(modifier = Modifier.width(12.dp))
-
+                                
                                 Column(
                                     modifier = Modifier.weight(1f)
                                 ) {
@@ -109,7 +108,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                     )
                                 }
-
+                                
                                 IconButton(
                                     onClick = { },
                                     modifier = Modifier.detectReorderAfterLongPress(reorderState)
@@ -151,9 +150,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                 contentDescription = track.title,
                                 modifier = Modifier.size(48.dp)
                             )
-
+                            
                             Spacer(modifier = Modifier.width(12.dp))
-
+                            
                             Column(
                                 modifier = Modifier.weight(1f)
                             ) {
