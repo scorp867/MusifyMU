@@ -29,7 +29,7 @@ import coil.compose.AsyncImage
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.navigation.Screen
-import com.musify.mu.ui.components.TopBar
+
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
@@ -96,10 +96,26 @@ fun SearchScreen(
 
     Scaffold(
         topBar = {
-            TopBar(
-                title = "Search Music",
-                showBackButton = true,
-                onBackClick = { navController.popBackStack() }
+            TopAppBar(
+                title = { 
+                    Text(
+                        text = "Search Music",
+                        style = MaterialTheme.typography.headlineSmall.copy(
+                            fontWeight = FontWeight.Bold
+                        )
+                    ) 
+                },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(
+                            imageVector = Icons.Rounded.ArrowBack,
+                            contentDescription = "Back"
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                )
             )
         }
     ) { paddingValues ->

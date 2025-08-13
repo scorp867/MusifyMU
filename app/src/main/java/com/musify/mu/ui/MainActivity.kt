@@ -37,191 +37,163 @@ import com.musify.mu.ui.theme.MusifyTheme
 import com.musify.mu.util.toMediaItem
 import com.musify.mu.util.PermissionManager
 import com.musify.mu.util.RequestPermissionsEffect
-import com.musify.mu.data.media.MediaScanWorker
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.await
 
 class MainActivity : ComponentActivity() {
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        
-        if (requestCode == PermissionManager.REQUEST_CODE_MEDIA_PERMISSIONS) {
-            val granted = grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
-            if (granted) {
-                // Permissions granted, trigger media scan
-                MediaScanWorker.scanNow(this)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        setContent {
+            val context = this@MainActivity
+            var mediaController by remember { mutableStateOf<MediaController?>(null) }
+
+            // Check and request permissions
+            RequestPermissionsEffect { granted, deniedPermissions ->
+                if (!granted) {
+                    android.util.Log.w("MainActivity", "Missing permissions: $deniedPermissions")
+                }
+            }
+
+            // Connect to media service
+            LaunchedEffect(Unit) {
+                val sessionToken = SessionToken(
+                    context,
+                    ComponentName(context, PlayerService::class.java)
+                )
+                val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+                mediaController = controllerFuture.await()
+            }
+
+            MusifyTheme {
+                Surface {
+                    AppContent(mediaController = mediaController)
+                }
             }
         }
     }
+}
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        // Install splash screen for better app launch experience
-        installSplashScreen()
-        
-        // Enable edge-to-edge display for modern look
-        enableEdgeToEdge()
-        
-        super.onCreate(savedInstanceState)
-        
-        setContent {
-            MusifyTheme {
-                val navController = rememberNavController()
-                val scope = rememberCoroutineScope()
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val repo = remember { LibraryRepository.get(context) }
-
-                var controller by remember { mutableStateOf<MediaController?>(null) }
-                var currentTrack by remember { mutableStateOf<Track?>(null) }
-                var isPlaying by remember { mutableStateOf(false) }
-                var hasPlayedBefore by remember { mutableStateOf(false) }
-                var hasPermissions by remember { mutableStateOf(false) }
+@Composable
+private fun AppContent(mediaController: MediaController?) {
+    val navController = rememberNavController()
+    val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val repo = remember { LibraryRepository.get(context) }
+    
+    var currentTrack by remember { mutableStateOf<Track?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var hasPlayedBefore by remember { mutableStateOf(false) }
+    
+    // Listen to media controller changes
+    LaunchedEffect(mediaController) {
+        mediaController?.let { controller ->
+            controller.addListener(object : Player.Listener {
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    currentTrack = mediaItem?.toTrack()
+                    hasPlayedBefore = currentTrack != null
+                }
                 
-                // Check and request permissions
-                RequestPermissionsEffect { granted, deniedPermissions ->
-                    hasPermissions = granted
-                    if (granted) {
-                        // Trigger immediate media scan if permissions are granted
-                        MediaScanWorker.scanNow(context)
-                    } else {
-                        android.util.Log.w("MainActivity", "Missing permissions: $deniedPermissions")
-                    }
+                override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                    isPlaying = isPlayingNow
                 }
-
-                // Build controller eagerly so miniplayer controls work after restart
-                LaunchedEffect(Unit) {
-                    try {
-                        val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
-                        val built = MediaController.Builder(context, token).buildAsync().await()
-                        controller = built
-                        // Attach listeners
-                        built.addListener(object : Player.Listener {
-                            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                                currentTrack = mediaItem?.toTrack()
-                                hasPlayedBefore = currentTrack != null
-                            }
-                            
-                            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                                isPlaying = isPlayingNow
-                            }
-                            
-                            override fun onPlaybackStateChanged(playbackState: Int) {
-                                isPlaying = built.isPlaying
-                                if (playbackState == Player.STATE_READY) {
-                                    val item = built.currentMediaItem
-                                    if (item != null) {
-                                        currentTrack = item.toTrack()
-                                        hasPlayedBefore = true
-                                    }
-                                }
-                            }
-                        })
-                        // Initialize UI state from controller/session if available
-                        currentTrack = built.currentMediaItem?.toTrack()
-                        isPlaying = built.isPlaying
-                        hasPlayedBefore = currentTrack != null
-                        
-                        // If no media item yet, fallback to last recently played for showing bar
-                        if (currentTrack == null) {
-                            val recentTracks = repo.recentlyPlayed(1)
-                            if (recentTracks.isNotEmpty()) {
-                                currentTrack = recentTracks.first()
-                                hasPlayedBefore = true
-                            }
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Failed to create controller", e)
-                    }
-                }
-
-                // Check if we should navigate to player from notification
-                LaunchedEffect(intent?.getStringExtra("navigate_to")) {
-                    if (intent?.getStringExtra("navigate_to") == "player") {
-                        navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route)
-                    }
-                }
-
-                val onPlay: (List<Track>, Int) -> Unit = { tracks, index ->
-                    scope.launch {
-                        try {
-                            val c = controller ?: run {
-                                val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
-                                MediaController.Builder(context, token).buildAsync().await().also { controller = it }
-                            }
-                            c.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
-                            c.prepare()
-                            c.play()
-                        } catch (e: Exception) {
-                            android.util.Log.e("MainActivity", "Failed to start playback", e)
+                
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    isPlaying = controller.isPlaying
+                    if (playbackState == Player.STATE_READY) {
+                        val item = controller.currentMediaItem
+                        if (item != null) {
+                            currentTrack = item.toTrack()
+                            hasPlayedBefore = true
                         }
                     }
                 }
-
-                // Track the current destination to hide bottom elements on player screen
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentRoute = navBackStackEntry?.destination?.route
-                val isPlayerScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route
-                val isQueueScreen = currentRoute == com.musify.mu.ui.navigation.Screen.Queue.route
-                val shouldHideBottomBar = isPlayerScreen || isQueueScreen
-
-                // Cleanup controller when activity is destroyed
-                DisposableEffect(Unit) {
-                    onDispose {
-                        controller?.release()
-                    }
+            })
+            
+            // Initialize UI state
+            currentTrack = controller.currentMediaItem?.toTrack()
+            isPlaying = controller.isPlaying
+            hasPlayedBefore = currentTrack != null
+            
+            // If no media item yet, fallback to recent tracks
+            if (currentTrack == null) {
+                val recentTracks = repo.recentlyPlayed(1)
+                if (recentTracks.isNotEmpty()) {
+                    currentTrack = recentTracks.first()
+                    hasPlayedBefore = true
                 }
-
-                androidx.compose.runtime.CompositionLocalProvider(com.musify.mu.playback.LocalMediaController provides controller) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.background
-                ) {
-                    Scaffold(
-                        bottomBar = {
-                            // Animated visibility for smoother transitions
+            }
+        }
+    }
+    
+    val onPlay: (List<Track>, Int) -> Unit = { tracks, index ->
+        scope.launch {
+            try {
+                mediaController?.let { controller ->
+                    controller.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
+                    controller.prepare()
+                    controller.play()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Failed to start playback", e)
+            }
+        }
+    }
+    
+    // Track the current destination to hide bottom elements on player screen
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+    val isPlayerScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route
+    val isQueueScreen = currentRoute == com.musify.mu.ui.navigation.Screen.Queue.route
+    val shouldHideBottomBar = isPlayerScreen || isQueueScreen
+    
+    androidx.compose.runtime.CompositionLocalProvider(com.musify.mu.playback.LocalMediaController provides mediaController) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = androidx.compose.material3.MaterialTheme.colorScheme.background
+        ) {
+            Scaffold(
+                bottomBar = {
+                    // Animated visibility for smoother transitions
+                    AnimatedVisibility(
+                        visible = !shouldHideBottomBar,
+                        enter = fadeIn(animationSpec = tween(300)),
+                        exit = fadeOut(animationSpec = tween(300))
+                    ) {
+                        Column {
+                            // Show now playing bar only when there's a current track and we've played before
                             AnimatedVisibility(
-                                visible = !shouldHideBottomBar,
+                                visible = currentTrack != null && hasPlayedBefore,
                                 enter = fadeIn(animationSpec = tween(300)),
                                 exit = fadeOut(animationSpec = tween(300))
                             ) {
-                                Column {
-                                    // Show now playing bar only when there's a current track and we've played before
-                                    AnimatedVisibility(
-                                        visible = currentTrack != null && hasPlayedBefore,
-                                        enter = fadeIn(animationSpec = tween(300)),
-                                        exit = fadeOut(animationSpec = tween(300))
-                                    ) {
-                                        NowPlayingBar(
-                                            navController = navController,
-                                            currentTrack = currentTrack,
-                                            isPlaying = isPlaying,
-                                            onPlayPause = { 
-                                                controller?.let { if (it.isPlaying) it.pause() else it.play() } 
-                                            },
-                                            onNext = { controller?.seekToNext() },
-                                            onPrev = { controller?.seekToPrevious() },
-                                            onExpand = { 
-                                                navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route) 
-                                            }
-                                        )
+                                NowPlayingBar(
+                                    navController = navController,
+                                    currentTrack = currentTrack,
+                                    isPlaying = isPlaying,
+                                    onPlayPause = { 
+                                        mediaController?.let { if (it.isPlaying) it.pause() else it.play() } 
+                                    },
+                                    onNext = { mediaController?.seekToNext() },
+                                    onPrev = { mediaController?.seekToPrevious() },
+                                    onExpand = { 
+                                        navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route) 
                                     }
-                                    com.musify.mu.ui.components.BottomBar(navController)
-                                }
+                                )
                             }
+                            com.musify.mu.ui.components.BottomBar(navController)
                         }
-                    ) { paddingValues ->
-                        MusifyNavGraph(
-                            navController = navController,
-                            modifier = Modifier.padding(if (!shouldHideBottomBar) paddingValues else PaddingValues(0.dp)),
-                            onPlay = onPlay
-                        )
                     }
                 }
-                }
+            ) { paddingValues ->
+                MusifyNavGraph(
+                    navController = navController,
+                    modifier = Modifier.padding(if (!shouldHideBottomBar) paddingValues else PaddingValues(0.dp)),
+                    onPlay = onPlay
+                )
             }
         }
     }

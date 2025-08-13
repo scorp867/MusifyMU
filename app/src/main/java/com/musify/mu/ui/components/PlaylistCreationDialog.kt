@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -55,7 +56,7 @@ fun PlaylistCreationDialog(
     
     var playlistName by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<String?>(null) }
-    var selectedColor by remember { mutableStateOf<Color?>(null) }
+    var selectedColor by remember { mutableStateOf<List<Color>?>(null) }
     var isCreating by remember { mutableStateOf(false) }
     
     // Image picker launcher
@@ -264,7 +265,7 @@ fun PlaylistCreationDialog(
 @Composable
 private fun PlaylistImageSelector(
     selectedImageUri: String?,
-    selectedColor: Color?,
+    selectedColor: List<Color>?,
     onImageClick: () -> Unit,
     onColorSelected: (List<Color>) -> Unit,
     predefinedColors: List<List<Color>>
@@ -331,7 +332,7 @@ private fun PlaylistImageSelector(
 @Composable
 private fun PlaylistImagePreview(
     imageUri: String?,
-    selectedColor: Color?,
+    selectedColor: List<Color>?,
     predefinedColors: List<List<Color>>,
     onImageClick: () -> Unit
 ) {
@@ -360,11 +361,7 @@ private fun PlaylistImagePreview(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(
-                                Brush.linearGradient(
-                                    if (selectedColor is List<*>) selectedColor as List<Color> else listOf(selectedColor, selectedColor)
-                                )
-                            )
+                            .background(Brush.linearGradient(selectedColor))
                     )
                 }
                 else -> {

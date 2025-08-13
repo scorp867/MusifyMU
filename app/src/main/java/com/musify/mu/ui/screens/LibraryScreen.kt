@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
-import com.musify.mu.util.PermissionHelper
+import com.musify.mu.util.PermissionManager
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.util.toMediaItem
 import com.musify.mu.ui.components.AlphabeticalScrollBar
@@ -80,9 +80,9 @@ fun LibraryScreen(
 
     LaunchedEffect(Unit) {
         coroutineScope.launch {
-            val hasPermission = (context as? android.app.Activity)?.let { PermissionHelper.hasAudioPermission(it) } ?: true
+            val hasPermission = PermissionManager.checkMediaPermissions(context)
             if (!hasPermission && context is android.app.Activity) {
-                PermissionHelper.requestAudioPermission(audioPermissionLauncher)
+                PermissionManager.requestMediaPermissions(context)
             } else {
                 try {
                     tracks = repo.getAllTracks()
