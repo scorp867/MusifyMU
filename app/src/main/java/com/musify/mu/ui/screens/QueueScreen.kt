@@ -10,7 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,11 +18,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.musify.mu.ui.components.TopBar
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -38,21 +41,36 @@ import kotlinx.coroutines.launch
 @Composable
 fun QueueScreen(navController: NavController) {
     val controller = LocalMediaController.current
+    val haptic = LocalHapticFeedback.current
     var queue by remember { mutableStateOf<List<Track>>(emptyList()) }
     var currentIndex by remember { mutableStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    val state = rememberReorderableLazyListState(onMove = { from, to ->
-        queue = queue.toMutableList().apply {
-            add(to.index, removeAt(from.index))
+    // Visual drag state
+    var dragVisualState by remember { mutableStateOf<DragVisualState?>(null) }
+
+    val state = rememberReorderableLazyListState(
+        onMove = { from, to ->
+            // Immediate visual feedback
+            dragVisualState = DragVisualState(from.index, to.index, true)
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            
+            queue = queue.toMutableList().apply {
+                add(to.index, removeAt(from.index))
+            }
+            
+            val fromIdx = from.index
+            val toIdx = to.index
+            if (fromIdx != toIdx) {
+                controller?.moveMediaItem(fromIdx, toIdx)
+            }
+        },
+        onDragEnd = { _, _ ->
+            // Reset visual state after drag ends
+            dragVisualState = null
         }
-        val fromIdx = from.index
-        val toIdx = to.index
-        if (fromIdx != toIdx) {
-            controller?.moveMediaItem(fromIdx, toIdx)
-        }
-    })
+    )
 
     LaunchedEffect(controller) {
         controller?.let { c ->
@@ -69,28 +87,28 @@ fun QueueScreen(navController: NavController) {
         }
     }
 
-    // Background gradient
+    // Modern gradient background
     val backgroundGradient = Brush.verticalGradient(
         colors = listOf(
-            MaterialTheme.colorScheme.background,
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+            MaterialTheme.colorScheme.surface,
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
         )
     )
 
-    Scaffold(
-        topBar = {
-            TopBar(title = "Queue")
-        },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
-    ) { paddingValues ->
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundGradient)
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(backgroundGradient)
-                .padding(paddingValues)
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Queue header with stats
-            QueueHeader(queueSize = queue.size, currentIndex = currentIndex)
+            // Compact header
+            QueueHeader(
+                queueSize = queue.size, 
+                currentIndex = currentIndex,
+                onClose = { navController.popBackStack() }
+            )
             
             if (queue.isEmpty()) {
                 EmptyQueueMessage()
@@ -100,13 +118,14 @@ fun QueueScreen(navController: NavController) {
                     modifier = Modifier
                         .fillMaxSize()
                         .reorderable(state),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     itemsIndexed(queue, key = { idx, item -> "queue_${idx}_${item.mediaId}" }) { idx, track ->
                         val dismissState = rememberDismissState(confirmStateChange = { value ->
                             when (value) {
                                 DismissValue.DismissedToEnd -> {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
                                         .coerceAtMost(controller?.mediaItemCount ?: 0)
                                     controller?.removeMediaItem(idx)
@@ -114,6 +133,7 @@ fun QueueScreen(navController: NavController) {
                                     true
                                 }
                                 DismissValue.DismissedToStart -> {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     controller?.removeMediaItem(idx)
                                     val removed = track
                                     scope.launch {
@@ -144,7 +164,11 @@ fun QueueScreen(navController: NavController) {
                                         track = track,
                                         isCurrentlyPlaying = idx == currentIndex,
                                         isDragging = isDragging,
-                                        onClick = { controller?.seekToDefaultPosition(idx) },
+                                        dragVisualState = if (dragVisualState?.fromIndex == idx || dragVisualState?.toIndex == idx) dragVisualState else null,
+                                        onClick = { 
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            controller?.seekToDefaultPosition(idx) 
+                                        },
                                         reorderState = state
                                     )
                                 }
@@ -154,47 +178,77 @@ fun QueueScreen(navController: NavController) {
                 }
             }
         }
+        
+        // Snackbar
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 
+data class DragVisualState(
+    val fromIndex: Int,
+    val toIndex: Int,
+    val isDragging: Boolean
+)
+
 @Composable
-private fun QueueHeader(queueSize: Int, currentIndex: Int) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+private fun QueueHeader(
+    queueSize: Int, 
+    currentIndex: Int,
+    onClose: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+        shadowElevation = 4.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(20.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = Icons.Rounded.QueueMusic,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+            // Close button
+            IconButton(
+                onClick = onClose,
                 modifier = Modifier.size(32.dp)
-            )
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = "Close",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
             
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Now Playing Queue",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold
+                    text = "Playing Queue",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
                     ),
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "$queueSize ${if (queueSize == 1) "song" else "songs"} • Position ${currentIndex + 1}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                    text = "$queueSize songs • Now playing ${currentIndex + 1}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
+            
+            // Queue actions
+            IconButton(
+                onClick = { /* TODO: Clear queue */ },
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.ClearAll,
+                    contentDescription = "Clear queue",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
             }
         }
@@ -214,16 +268,16 @@ private fun EmptyQueueMessage() {
             Icon(
                 imageVector = Icons.Rounded.QueueMusic,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                modifier = Modifier.size(64.dp)
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                modifier = Modifier.size(48.dp)
             )
             Text(
-                text = "Queue is empty",
-                style = MaterialTheme.typography.headlineSmall,
+                text = "Your queue is empty",
+                style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
             Text(
-                text = "Add songs to start building your queue",
+                text = "Add songs to see them here",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
             )
@@ -234,14 +288,14 @@ private fun EmptyQueueMessage() {
 @Composable
 private fun SwipeBackground(dismissDirection: DismissDirection?) {
     val color = when (dismissDirection) {
-        DismissDirection.StartToEnd -> MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
-        DismissDirection.EndToStart -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-        null -> androidx.compose.ui.graphics.Color.Transparent
+        DismissDirection.StartToEnd -> MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+        DismissDirection.EndToStart -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+        null -> Color.Transparent
     }
     
     val icon = when (dismissDirection) {
         DismissDirection.StartToEnd -> Icons.Default.Delete
-        DismissDirection.EndToStart -> Icons.Rounded.QueueMusic
+        DismissDirection.EndToStart -> Icons.Rounded.PlaylistPlay
         null -> null
     }
     
@@ -254,9 +308,9 @@ private fun SwipeBackground(dismissDirection: DismissDirection?) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(8.dp))
             .background(color)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 16.dp),
         contentAlignment = if (dismissDirection == DismissDirection.StartToEnd) 
             Alignment.CenterStart else Alignment.CenterEnd
     ) {
@@ -269,12 +323,13 @@ private fun SwipeBackground(dismissDirection: DismissDirection?) {
                     imageVector = it,
                     contentDescription = null,
                     tint = if (dismissDirection == DismissDirection.StartToEnd) 
-                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
                 )
             }
             Text(
                 text = text,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
                 color = if (dismissDirection == DismissDirection.StartToEnd) 
                     MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             )
@@ -287,37 +342,52 @@ private fun QueueTrackItem(
     track: Track,
     isCurrentlyPlaying: Boolean,
     isDragging: Boolean,
+    dragVisualState: DragVisualState?,
     onClick: () -> Unit,
     reorderState: ReorderableLazyListState
 ) {
+    // Enhanced visual feedback
+    val elevation by animateDpAsState(
+        targetValue = when {
+            isDragging -> 12.dp
+            dragVisualState?.isDragging == true -> 6.dp
+            else -> 1.dp
+        },
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "elevation"
+    )
+    
+    val scale by animateFloatAsState(
+        targetValue = if (isDragging) 1.02f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "scale"
+    )
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(
-                elevation = if (isDragging) 12.dp else 2.dp,
-                shape = RoundedCornerShape(12.dp)
-            )
+            .shadow(elevation, RoundedCornerShape(8.dp))
             .clickable { onClick() },
         colors = CardDefaults.cardColors(
             containerColor = when {
-                isCurrentlyPlaying -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                isDragging -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+                isCurrentlyPlaying -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                isDragging -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
                 else -> MaterialTheme.colorScheme.surface
             }
         ),
-        shape = RoundedCornerShape(12.dp)
+        shape = RoundedCornerShape(8.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Album artwork
+            // Compact album artwork
             Card(
-                modifier = Modifier.size(56.dp),
-                shape = RoundedCornerShape(8.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                modifier = Modifier.size(44.dp),
+                shape = RoundedCornerShape(6.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 AsyncImage(
                     model = track.artUri,
@@ -326,48 +396,56 @@ private fun QueueTrackItem(
                 )
             }
             
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             
             Column(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
                     text = track.title,
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = if (isCurrentlyPlaying) FontWeight.Bold else FontWeight.Medium
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = if (isCurrentlyPlaying) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 15.sp
                     ),
                     color = if (isCurrentlyPlaying) 
                         MaterialTheme.colorScheme.primary 
                     else 
-                        MaterialTheme.colorScheme.onSurface
+                        MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
                 )
                 Text(
                     text = track.artist,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    maxLines = 1
                 )
             }
             
             // Current playing indicator
             if (isCurrentlyPlaying) {
                 Icon(
-                    imageVector = Icons.Rounded.QueueMusic,
-                    contentDescription = "Currently playing",
+                    imageVector = Icons.Rounded.GraphicEq,
+                    contentDescription = "Now playing",
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
             }
             
-            // Drag handle
+            // Drag handle with better visual feedback
             IconButton(
                 onClick = { },
-                modifier = Modifier.detectReorderAfterLongPress(reorderState)
+                modifier = Modifier
+                    .size(32.dp)
+                    .detectReorderAfterLongPress(reorderState)
             ) {
                 Icon(
                     imageVector = Icons.Default.DragHandle,
                     contentDescription = "Drag to reorder",
-                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    tint = MaterialTheme.colorScheme.onSurface.copy(
+                        alpha = if (isDragging) 0.9f else 0.5f
+                    ),
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }

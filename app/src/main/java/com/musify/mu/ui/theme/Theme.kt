@@ -34,8 +34,8 @@ fun MusifyTheme(dynamic: DynamicColors? = null, content: @Composable () -> Unit)
             if (bitmap != null) {
                 val palette = Palette.from(bitmap).generate()
                 // Enhanced palette extraction for more vibrant colors
-                val primary = Color(palette.getVibrantColor(DeepPurple.toArgb()))
-                val secondary = Color(palette.getLightVibrantColor(NeonBlue.toArgb()))
+                val primary = Color(palette.getVibrantColor(SpotifyGreen.toArgb()))
+                val secondary = Color(palette.getLightVibrantColor(ElectricBlue.toArgb()))
                 val surface = Color(palette.getDarkMutedColor(DarkSurface.toArgb()))
                 dynamicFromArt.value = DynamicColors(primary, secondary, surface)
             }
@@ -51,43 +51,51 @@ fun MusifyTheme(dynamic: DynamicColors? = null, content: @Composable () -> Unit)
                 tertiary = NeonPink,
                 background = DarkBackground,
                 surface = appliedDynamic.surface,
-                surfaceVariant = DarkBlue,
-                onPrimary = LightBackground,
-                onSecondary = LightBackground,
-                onTertiary = LightBackground
+                surfaceVariant = DarkSurfaceVariant,
+                onPrimary = SpotifyWhite,
+                onSecondary = SpotifyWhite,
+                onTertiary = SpotifyWhite,
+                outline = DarkOutline
             ) else lightColorScheme(
                 primary = appliedDynamic.primary,
                 secondary = appliedDynamic.secondary,
                 tertiary = NeonPink,
-                background = LightBackground,
+                background = ModernBackground,
                 surface = appliedDynamic.surface,
-                surfaceVariant = LightCyan,
-                onPrimary = DarkBackground,
-                onSecondary = DarkBackground,
-                onTertiary = DarkBackground
+                surfaceVariant = ModernSurfaceVariant,
+                onPrimary = SpotifyWhite,
+                onSecondary = SpotifyWhite,
+                onTertiary = SpotifyWhite,
+                outline = ModernOutline
             )
         }
         darkTheme -> darkColorScheme(
-            primary = DeepPurple,
-            secondary = NeonBlue,
-            tertiary = NeonPink,
+            primary = SpotifyGreen,
+            secondary = ElectricBlue,
+            tertiary = VibrantPurple,
             background = DarkBackground,
             surface = DarkSurface,
-            surfaceVariant = DarkBlue,
-            onPrimary = LightBackground,
-            onSecondary = LightBackground,
-            onTertiary = LightBackground
+            surfaceVariant = DarkSurfaceVariant,
+            onPrimary = SpotifyWhite,
+            onSecondary = SpotifyWhite,
+            onTertiary = SpotifyWhite,
+            onBackground = SpotifyWhite,
+            onSurface = SpotifyWhite,
+            outline = DarkOutline
         )
         else -> lightColorScheme(
-            primary = ElectricBlue,
-            secondary = SteelBlue,
-            tertiary = NeonPink,
-            background = LightBackground,
-            surface = LightSurface,
-            surfaceVariant = LightCyan,
-            onPrimary = DarkBackground,
-            onSecondary = DarkBackground,
-            onTertiary = DarkBackground
+            primary = SpotifyGreen,
+            secondary = ElectricBlue,
+            tertiary = VibrantPurple,
+            background = ModernBackground,
+            surface = ModernSurface,
+            surfaceVariant = ModernSurfaceVariant,
+            onPrimary = SpotifyWhite,
+            onSecondary = SpotifyWhite,
+            onTertiary = SpotifyWhite,
+            onBackground = SpotifyBlack,
+            onSurface = SpotifyBlack,
+            outline = ModernOutline
         )
     }
     
