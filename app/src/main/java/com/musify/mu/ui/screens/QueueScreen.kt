@@ -57,7 +57,7 @@ fun QueueScreen(navController: NavController) {
     val queueManager = remember { QueueManagerProvider.get() }
     
     // Observe queue state for real-time updates
-    val queueState by (queueManager?.queueState ?: remember { 
+    val queueState by (queueManager?.queueStateFlow ?: remember { 
         kotlinx.coroutines.flow.MutableStateFlow(QueueManager.QueueState()) 
     }).collectAsStateWithLifecycle()
     

@@ -154,7 +154,7 @@ class PlayerService : MediaLibraryService() {
             override fun onEvents(player: Player, events: Player.Events) {
                 // Save playback state
                 serviceScope.launch {
-                    val ids = queue.snapshotIds()
+                    val ids = queue.getQueueIds()
                     val index = player.currentMediaItemIndex
                     val pos = player.currentPosition
                     val repeat = player.repeatMode
@@ -259,7 +259,9 @@ class PlayerService : MediaLibraryService() {
         audioFocusManager.abandon()
         stopForegroundService()
         mediaLibrarySession?.release()
+        mediaLibrarySession = null
         player.release()
+        QueueManagerProvider.clear()
         serviceScope.cancel()
         
         // Clear state on destroy
@@ -351,16 +353,6 @@ class PlayerService : MediaLibraryService() {
     }
     
     private fun createNotificationChannel() { /* no-op */ }
-    
-    override fun onDestroy() {
-        serviceScope.cancel()
-        mediaLibrarySession?.release()
-        mediaLibrarySession = null
-        player.release()
-        audioFocusManager.abandon()
-        QueueManagerProvider.clear()
-        super.onDestroy()
-    }
     
     companion object {
         private const val CHANNEL_ID = "PLAYBACK_CHANNEL"

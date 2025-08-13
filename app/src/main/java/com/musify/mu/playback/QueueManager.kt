@@ -26,7 +26,7 @@ import kotlin.random.Random
  */
 class QueueManager(
     private val player: ExoPlayer, 
-    private val queueState: QueueStateStore? = null,
+    private val queueStateStore: QueueStateStore? = null,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main)
 ) {
 
@@ -66,7 +66,7 @@ class QueueManager(
     
     // StateFlow for real-time UI updates
     private val _queueState = MutableStateFlow(QueueState())
-    val queueState: StateFlow<QueueState> = _queueState.asStateFlow()
+    val queueStateFlow: StateFlow<QueueState> = _queueState.asStateFlow()
     
     // Smart queue learning data
     private val listeningPatterns = mutableMapOf<String, MutableList<String>>() // artist -> next artists
@@ -674,4 +674,6 @@ class QueueManager(
     fun getQueueSize(): Int = getCombinedQueue().size
     
     fun getCurrentIndex(): Int = currentIndex
+    
+    fun getQueueIds(): List<String> = getCombinedQueue().map { it.id }
 }
