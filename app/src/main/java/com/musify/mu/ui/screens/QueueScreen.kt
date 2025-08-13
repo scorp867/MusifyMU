@@ -103,7 +103,7 @@ fun QueueScreen(navController: NavController) {
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    itemsIndexed(queue, key = { idx, item -> item.mediaId }) { idx, track ->
+                    itemsIndexed(queue, key = { idx, item -> "queue_${idx}_${item.mediaId}" }) { idx, track ->
                         val dismissState = rememberDismissState(confirmStateChange = { value ->
                             when (value) {
                                 DismissValue.DismissedToEnd -> {
@@ -139,7 +139,7 @@ fun QueueScreen(navController: NavController) {
                                 SwipeBackground(dismissState.dismissDirection)
                             },
                             dismissContent = {
-                                ReorderableItem(state, key = track.mediaId) { isDragging ->
+                                ReorderableItem(state, key = "queue_${idx}_${track.mediaId}") { isDragging ->
                                     QueueTrackItem(
                                         track = track,
                                         isCurrentlyPlaying = idx == currentIndex,

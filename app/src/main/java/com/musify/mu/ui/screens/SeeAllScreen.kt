@@ -65,9 +65,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(tracks.size, key = { idx -> tracks[idx].mediaId }) { idx ->
+                items(tracks.size, key = { idx -> "seeall_${type}_${idx}_${tracks[idx].mediaId}" }) { idx ->
                     val track = tracks[idx]
-                    ReorderableItem(reorderState, key = track.mediaId) { isDragging ->
+                    ReorderableItem(reorderState, key = "seeall_${type}_${idx}_${track.mediaId}") { isDragging ->
                         Card(
                             modifier = Modifier.fillMaxWidth(),
                             elevation = CardDefaults.cardElevation(

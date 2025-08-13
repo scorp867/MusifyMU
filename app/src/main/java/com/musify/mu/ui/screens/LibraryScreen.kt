@@ -123,11 +123,10 @@ fun LibraryScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(
+                itemsIndexed(
                     items = tracks,
-                    key = { track -> track.mediaId }
-                ) { track ->
-                    val index = tracks.indexOf(track)
+                    key = { index, track -> "library_${index}_${track.mediaId}" }
+                ) { index, track ->
                     
                     // Improved track item without aggressive swipe gestures
                     TrackItem(

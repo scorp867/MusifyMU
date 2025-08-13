@@ -66,11 +66,11 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(tracks.size, key = { idx -> tracks[idx].mediaId }) { idx ->
+            items(tracks.size, key = { idx -> "playlist_${playlistId}_${idx}_${tracks[idx].mediaId}" }) { idx ->
                 val track = tracks[idx]
                 var showMenu by remember { mutableStateOf(false) }
                 
-                ReorderableItem(reorderState, key = track.mediaId) { isDragging ->
+                ReorderableItem(reorderState, key = "playlist_${playlistId}_${idx}_${track.mediaId}") { isDragging ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         elevation = CardDefaults.cardElevation(

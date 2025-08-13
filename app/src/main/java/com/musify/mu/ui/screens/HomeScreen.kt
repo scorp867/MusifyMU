@@ -309,7 +309,7 @@ private fun AnimatedCarousel(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
-            items(data.size) { index ->
+            items(data.size, key = { index -> "carousel_${title}_${index}_${data[index].mediaId}" }) { index ->
                 val track = data[index]
                 TrackCard(
                     track = track,
@@ -569,7 +569,7 @@ private fun CustomPlaylistsCarousel(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
-            items(playlists) { playlist ->
+            items(playlists, key = { playlist -> "playlist_card_${playlist.id}" }) { playlist ->
                 PlaylistCard(
                     playlist = playlist,
                     onClick = {
