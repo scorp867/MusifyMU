@@ -32,9 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.musify.mu.ui.navigation.Screen
-import com.musify.mu.ui.theme.DeepPurple
+import com.musify.mu.ui.theme.VibrantPurple
 import com.musify.mu.ui.theme.ElectricBlue
-import com.musify.mu.ui.theme.NeonBlue
+import com.musify.mu.ui.theme.SpotifyGreen
 
 data class BottomNavItem(
     val route: String,

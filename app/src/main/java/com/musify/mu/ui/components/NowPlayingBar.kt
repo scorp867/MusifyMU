@@ -25,7 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
-import com.musify.mu.ui.theme.NeonBlue
+import com.musify.mu.ui.theme.ElectricBlue
 import com.musify.mu.ui.theme.NeonPink
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
