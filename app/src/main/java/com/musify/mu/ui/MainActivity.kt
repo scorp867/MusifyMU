@@ -35,10 +35,29 @@ import com.musify.mu.ui.components.NowPlayingBar
 import com.musify.mu.ui.navigation.MusifyNavGraph
 import com.musify.mu.ui.theme.MusifyTheme
 import com.musify.mu.util.toMediaItem
+import com.musify.mu.util.PermissionManager
+import com.musify.mu.util.RequestPermissionsEffect
+import com.musify.mu.data.media.MediaScanWorker
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.await
 
 class MainActivity : ComponentActivity() {
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        
+        if (requestCode == PermissionManager.REQUEST_CODE_MEDIA_PERMISSIONS) {
+            val granted = grantResults.all { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
+            if (granted) {
+                // Permissions granted, trigger media scan
+                MediaScanWorker.scanNow(this)
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install splash screen for better app launch experience
@@ -60,6 +79,18 @@ class MainActivity : ComponentActivity() {
                 var currentTrack by remember { mutableStateOf<Track?>(null) }
                 var isPlaying by remember { mutableStateOf(false) }
                 var hasPlayedBefore by remember { mutableStateOf(false) }
+                var hasPermissions by remember { mutableStateOf(false) }
+                
+                // Check and request permissions
+                RequestPermissionsEffect { granted, deniedPermissions ->
+                    hasPermissions = granted
+                    if (granted) {
+                        // Trigger immediate media scan if permissions are granted
+                        MediaScanWorker.scanNow(context)
+                    } else {
+                        android.util.Log.w("MainActivity", "Missing permissions: $deniedPermissions")
+                    }
+                }
 
                 // Build controller eagerly so miniplayer controls work after restart
                 LaunchedEffect(Unit) {
