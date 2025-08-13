@@ -32,23 +32,27 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.util.toTrack
 import kotlinx.coroutines.launch
+import com.musify.mu.data.repo.LibraryRepository
+import com.musify.mu.ui.navigation.Screen
 
 @Composable
 fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
-    
+    val repo = remember { LibraryRepository.get(context) }
+
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var shuffleOn by remember { mutableStateOf(false) }
     var repeatMode by remember { mutableStateOf(0) }
     var progress by remember { mutableStateOf(0f) }
     var duration by remember { mutableStateOf(0L) }
-    
+    var isLiked by remember { mutableStateOf(false) }
+
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
     var vibrantColor by remember { mutableStateOf(Color(0xFF38B6FF)) }
-    
+
     // Animation states for enhanced visual experience
     val colorTransition = animateColorAsState(
         targetValue = dominantColor,
@@ -60,7 +64,7 @@ fun NowPlayingScreen(navController: NavController) {
         animationSpec = tween(1000, easing = FastOutSlowInEasing),
         label = "vibrantTransition"
     )
-    
+
     // Pulsing animation for when music is playing
     val pulseAnimation = rememberInfiniteTransition(label = "pulse")
     val pulseScale by pulseAnimation.animateFloat(
@@ -72,31 +76,39 @@ fun NowPlayingScreen(navController: NavController) {
         ),
         label = "pulseScale"
     )
-    
 
-    
+
+
     val coroutineScope = rememberCoroutineScope()
 
     // Extract colors from album artwork
     LaunchedEffect(currentTrack?.artUri) {
-        currentTrack?.artUri?.let { artUri ->
+        val artUri = currentTrack?.artUri
+        if (artUri.isNullOrBlank()) {
+            dominantColor = Color(0xFF6236FF)
+            vibrantColor = Color(0xFF38B6FF)
+        } else {
             coroutineScope.launch {
                 try {
                     val imageRequest = ImageRequest.Builder(context)
                         .data(artUri)
                         .allowHardware(false)
                         .build()
-                    
+
                     val drawable = ImageLoader(context).execute(imageRequest).drawable
                     val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                    
+
                     bitmap?.let {
                         val palette = Palette.from(it).generate()
                         dominantColor = Color(palette.getDominantColor(0xFF6236FF.toInt()))
                         vibrantColor = Color(palette.getVibrantColor(0xFF38B6FF.toInt()))
+                    } ?: run {
+                        dominantColor = Color(0xFF6236FF)
+                        vibrantColor = Color(0xFF38B6FF)
                     }
                 } catch (e: Exception) {
-                    // Use default colors if extraction fails
+                    dominantColor = Color(0xFF6236FF)
+                    vibrantColor = Color(0xFF38B6FF)
                 }
             }
         }
@@ -118,21 +130,29 @@ fun NowPlayingScreen(navController: NavController) {
                 mediaController.currentPosition.toFloat() / mediaController.duration.toFloat()
             } else 0f
             duration = mediaController.duration
-            
+            // Load like state
+            currentTrack?.let { t ->
+                isLiked = repo.isLiked(t.mediaId)
+            }
+
             // Add listener for real-time updates
             val listener = object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
                     currentTrack = mediaItem?.toTrack()
+                    currentTrack?.let { t ->
+                        // refresh like state on track change
+                        coroutineScope.launch { isLiked = repo.isLiked(t.mediaId) }
+                    }
                 }
-                
+
                 override fun onIsPlayingChanged(isPlayingNow: Boolean) {
                     isPlaying = isPlayingNow
                 }
-                
+
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
                     shuffleOn = shuffleModeEnabled
                 }
-                
+
                 override fun onRepeatModeChanged(repeatModeValue: Int) {
                     repeatMode = when(repeatModeValue) {
                         Player.REPEAT_MODE_ONE -> 1
@@ -140,16 +160,16 @@ fun NowPlayingScreen(navController: NavController) {
                         else -> 0
                     }
                 }
-                
+
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
                         duration = mediaController.duration
                     }
                 }
             }
-            
+
             mediaController.addListener(listener)
-            
+
             // Update progress periodically
             while (true) {
                 if (mediaController.isPlaying && mediaController.duration > 0) {
@@ -183,164 +203,179 @@ fun NowPlayingScreen(navController: NavController) {
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top bar with back button and menu
-            Row(
+            // Top section with album art and track info
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 20.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .weight(1f)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                IconButton(
-                    onClick = { navController.navigateUp() },
+                // Top bar with back button and menu
+                Row(
                     modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            Color.White.copy(alpha = 0.2f),
-                            CircleShape
-                        )
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = "Back",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-                
-                IconButton(
-                    onClick = { /* More options */ },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            Color.White.copy(alpha = 0.2f),
-                            CircleShape
+                    IconButton(
+                        onClick = { navController.navigateUp() },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(
+                                Color.White.copy(alpha = 0.2f),
+                                CircleShape
+                            )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.KeyboardArrowDown,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
                         )
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.MoreVert,
-                        contentDescription = "More",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
+                    }
+
+                    IconButton(
+                        onClick = { /* More options */ },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(
+                                Color.White.copy(alpha = 0.2f),
+                                CircleShape
+                            )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "More",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
-            }
-            
-            Spacer(modifier = Modifier.height(20.dp))
-            
-                        // Album artwork - large and prominent with animations
-            currentTrack?.let { track ->
-                Box(
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Album artwork - large and prominent with animations
+                currentTrack?.let { track ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.85f)
+                            .aspectRatio(1f)
+                            .graphicsLayer {
+                                scaleX = pulseScale
+                                scaleY = pulseScale
+                            }
+                            .shadow(
+                                elevation = 24.dp,
+                                shape = RoundedCornerShape(20.dp),
+                                spotColor = colorTransition.value.copy(alpha = 0.6f),
+                                ambientColor = vibrantTransition.value.copy(alpha = 0.3f)
+                            )
+                            .clip(RoundedCornerShape(20.dp))
+                            .border(
+                                width = 2.dp,
+                                brush = Brush.linearGradient(
+                                    colors = listOf(
+                                        Color.White.copy(alpha = 0.3f),
+                                        colorTransition.value.copy(alpha = 0.2f),
+                                        vibrantTransition.value.copy(alpha = 0.2f)
+                                    )
+                                ),
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                    ) {
+                        com.musify.mu.ui.components.Artwork(
+                            data = track.artUri,
+                            contentDescription = track.title,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        // Subtle overlay for depth
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            Color.Black.copy(alpha = 0.1f)
+                                        ),
+                                        radius = 300f
+                                    )
+                                )
+                        )
+                    }
+                } ?: Box(
                     modifier = Modifier
                         .fillMaxWidth(0.85f)
                         .aspectRatio(1f)
-                        .graphicsLayer {
-                            scaleX = pulseScale
-                            scaleY = pulseScale
-                        }
-                        .shadow(
-                            elevation = 24.dp,
-                            shape = RoundedCornerShape(20.dp),
-                            spotColor = colorTransition.value.copy(alpha = 0.6f),
-                            ambientColor = vibrantTransition.value.copy(alpha = 0.3f)
-                        )
                         .clip(RoundedCornerShape(20.dp))
-                        .border(
-                            width = 2.dp,
-                            brush = Brush.linearGradient(
+                        .background(
+                            brush = Brush.radialGradient(
                                 colors = listOf(
-                                    Color.White.copy(alpha = 0.3f),
-                                    colorTransition.value.copy(alpha = 0.2f),
-                                    vibrantTransition.value.copy(alpha = 0.2f)
+                                    Color.White.copy(alpha = 0.2f),
+                                    Color.White.copy(alpha = 0.05f)
                                 )
-                            ),
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = Color.White.copy(alpha = 0.2f),
                             shape = RoundedCornerShape(20.dp)
                         )
                 ) {
-                    com.musify.mu.ui.components.Artwork(
-                        data = track.artUri,
-                        contentDescription = track.title,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    
-                    // Subtle overlay for depth
-                    Box(
+                    Icon(
+                        imageVector = Icons.Rounded.MusicNote,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
                         modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        Color.Black.copy(alpha = 0.1f)
-                                    ),
-                                    radius = 300f
-                                )
-                            )
+                            .size(80.dp)
+                            .align(Alignment.Center)
                     )
                 }
-            } ?: Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.85f)
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.2f),
-                                Color.White.copy(alpha = 0.05f)
-                            )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Song info
+                currentTrack?.let { track ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = track.title,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 28.sp
+                            ),
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = 0.2f),
-                        shape = RoundedCornerShape(20.dp)
-                    )
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.MusicNote,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .size(80.dp)
-                        .align(Alignment.Center)
-                )
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            // Song info
-            currentTrack?.let { track ->
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = track.title,
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 28.sp
-                        ),
-                        color = Color.White,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = track.artist,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White.copy(alpha = 0.8f),
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = track.artist,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
+
             }
-            
-            Spacer(modifier = Modifier.height(40.dp))
-            
+        }
+
+        // Fixed bottom section with controls
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp)
+        ) {
             // Progress bar with glassmorphism
             Column(
                 modifier = Modifier
@@ -369,9 +404,9 @@ fun NowPlayingScreen(navController: NavController) {
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
+
                 // Time indicators
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -382,7 +417,7 @@ fun NowPlayingScreen(navController: NavController) {
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.8f)
                     )
-                    
+
                     Text(
                         text = formatDuration(duration),
                         style = MaterialTheme.typography.bodySmall,
@@ -390,10 +425,10 @@ fun NowPlayingScreen(navController: NavController) {
                     )
                 }
             }
-            
-            Spacer(modifier = Modifier.height(40.dp))
-            
-            // Glassmorphism control panel
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Glassmorphism control panel - FIXED POSITION
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -443,7 +478,7 @@ fun NowPlayingScreen(navController: NavController) {
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                    
+
                     // Previous
                     IconButton(
                         onClick = { controller?.seekToPrevious() },
@@ -456,54 +491,54 @@ fun NowPlayingScreen(navController: NavController) {
                             modifier = Modifier.size(32.dp)
                         )
                     }
-                    
+
                     // Play/Pause - Main button
-                                            Box(
-                            modifier = Modifier
-                                .size(72.dp)
-                                .background(
-                                    brush = Brush.radialGradient(
-                                        colors = listOf(
-                                            Color.White,
-                                            Color.White.copy(alpha = 0.9f)
-                                        )
-                                    ),
-                                    shape = CircleShape
-                                )
-                                .border(
-                                    width = 2.dp,
-                                    brush = Brush.radialGradient(
-                                        colors = listOf(
-                                            colorTransition.value.copy(alpha = 0.3f),
-                                            vibrantTransition.value.copy(alpha = 0.2f)
-                                        )
-                                    ),
-                                    shape = CircleShape
-                                )
-                                .shadow(
-                                    elevation = 8.dp,
-                                    shape = CircleShape,
-                                    spotColor = colorTransition.value.copy(alpha = 0.4f)
-                                )
-                                .clickable {
-                                    controller?.let {
-                                        if (it.isPlaying) it.pause() else it.play()
-                                        isPlaying = !isPlaying
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isPlaying) 
-                                    Icons.Rounded.Pause 
-                                else 
-                                    Icons.Rounded.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                tint = colorTransition.value,
-                                modifier = Modifier.size(36.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(72.dp)
+                            .background(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        Color.White,
+                                        Color.White.copy(alpha = 0.9f)
+                                    )
+                                ),
+                                shape = CircleShape
                             )
-                        }
-                    
+                            .border(
+                                width = 2.dp,
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        colorTransition.value.copy(alpha = 0.3f),
+                                        vibrantTransition.value.copy(alpha = 0.2f)
+                                    )
+                                ),
+                                shape = CircleShape
+                            )
+                            .shadow(
+                                elevation = 8.dp,
+                                shape = CircleShape,
+                                spotColor = colorTransition.value.copy(alpha = 0.4f)
+                            )
+                            .clickable {
+                                controller?.let {
+                                    if (it.isPlaying) it.pause() else it.play()
+                                    // rely on listener to update isPlaying
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isPlaying)
+                                Icons.Rounded.Pause
+                            else
+                                Icons.Rounded.PlayArrow,
+                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            tint = colorTransition.value,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+
                     // Next
                     IconButton(
                         onClick = { controller?.seekToNext() },
@@ -516,16 +551,16 @@ fun NowPlayingScreen(navController: NavController) {
                             modifier = Modifier.size(32.dp)
                         )
                     }
-                    
+
                     // Repeat
                     IconButton(
                         onClick = {
-                repeatMode = (repeatMode + 1) % 3
-                controller?.repeatMode = when (repeatMode) {
-                    1 -> Player.REPEAT_MODE_ONE
-                    2 -> Player.REPEAT_MODE_ALL
-                    else -> Player.REPEAT_MODE_OFF
-                }
+                            repeatMode = (repeatMode + 1) % 3
+                            controller?.repeatMode = when (repeatMode) {
+                                1 -> Player.REPEAT_MODE_ONE
+                                2 -> Player.REPEAT_MODE_ALL
+                                else -> Player.REPEAT_MODE_OFF
+                            }
                         },
                         modifier = Modifier.size(48.dp)
                     ) {
@@ -541,11 +576,9 @@ fun NowPlayingScreen(navController: NavController) {
                     }
                 }
             }
-            
-            Spacer(modifier = Modifier.height(24.dp))
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             // Bottom action buttons - pill shaped with requested layout
             Box(
                 modifier = Modifier
@@ -596,10 +629,10 @@ fun NowPlayingScreen(navController: NavController) {
                                 modifier = Modifier.size(22.dp)
                             )
                         }
-                        
+
                         // Queue button (center)
                         IconButton(
-                            onClick = { /* Queue */ },
+                            onClick = { navController.navigate(Screen.Queue.route) },
                             modifier = Modifier.size(40.dp)
                         ) {
                             Icon(
@@ -609,16 +642,22 @@ fun NowPlayingScreen(navController: NavController) {
                                 modifier = Modifier.size(22.dp)
                             )
                         }
-                        
+
                         // Like button (right)
                         IconButton(
-                            onClick = { /* Like song */ },
+                            onClick = {
+                                val t = currentTrack ?: return@IconButton
+                                coroutineScope.launch {
+                                    if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
+                                    isLiked = !isLiked
+                                }
+                            },
                             modifier = Modifier.size(40.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.FavoriteBorder,
-                                contentDescription = "Like",
-                                tint = Color.White.copy(alpha = 0.8f),
+                                imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                contentDescription = if (isLiked) "Unlike" else "Like",
+                                tint = if (isLiked) vibrantTransition.value else Color.White.copy(alpha = 0.8f),
                                 modifier = Modifier.size(22.dp)
                             )
                         }

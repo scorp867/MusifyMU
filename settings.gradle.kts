@@ -20,5 +20,12 @@ dependencyResolutionManagement {
     }
 }
 
+// Enable toolchain auto-provisioning repositories for JDK download
+@OptIn(org.gradle.toolchains.foojay.FoojayToolchainsResolverPlugin::class)
+
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
+}
+
 rootProject.name = "MusifyMU"
 include(":app")

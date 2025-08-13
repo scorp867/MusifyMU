@@ -32,9 +32,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.musify.mu.ui.navigation.Screen
-import com.musify.mu.ui.theme.DeepPurple
+import com.musify.mu.ui.theme.VibrantPurple
 import com.musify.mu.ui.theme.ElectricBlue
-import com.musify.mu.ui.theme.NeonBlue
+import com.musify.mu.ui.theme.SpotifyGreen
 
 data class BottomNavItem(
     val route: String,
@@ -75,7 +75,7 @@ fun BottomBar(navController: NavController) {
                 animationSpec = tween(300, easing = FastOutSlowInEasing),
                 label = "weight"
             )
-            
+
             Box(
                 modifier = Modifier
                     .weight(animatedWeight)
@@ -111,7 +111,7 @@ fun BottomBar(navController: NavController) {
                     } else {
                         Spacer(modifier = Modifier.height(10.dp))
                     }
-                    
+
                     // Icon - changes between filled and outlined based on selection
                     Icon(
                         imageVector = if (selected) item.filledIcon else item.outlinedIcon,
@@ -119,7 +119,7 @@ fun BottomBar(navController: NavController) {
                         tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(24.dp)
                     )
-                    
+
                     // Animated label visibility
                     AnimatedVisibility(
                         visible = selected,

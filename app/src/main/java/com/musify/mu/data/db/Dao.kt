@@ -24,10 +24,35 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY dateAddedSec DESC LIMIT :limit")
     suspend fun getRecentlyAdded(limit: Int): List<Track>
 
-    @Insert
+    // Smart play history insertion - only record if not played recently (within 30 seconds)
+    @Query("""
+        INSERT OR IGNORE INTO play_history (mediaId, playedAt) 
+        SELECT :mediaId, :playedAt 
+        WHERE NOT EXISTS (
+            SELECT 1 FROM play_history 
+            WHERE mediaId = :mediaId 
+            AND playedAt > :playedAt - 30000
+        )
+    """)
+    suspend fun insertPlayHistoryIfNotRecent(mediaId: String, playedAt: Long = System.currentTimeMillis())
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPlayHistory(entry: PlayHistory)
 
-    @Query("SELECT t.* FROM track t JOIN play_history h ON t.mediaId = h.mediaId ORDER BY h.playedAt DESC LIMIT :limit")
+    // Distinct recently played by latest play time per mediaId
+    @Query(
+        """
+        SELECT t.* FROM track t
+        JOIN (
+            SELECT mediaId, MAX(playedAt) AS lastPlayed
+            FROM play_history
+            GROUP BY mediaId
+            ORDER BY lastPlayed DESC
+            LIMIT :limit
+        ) h ON t.mediaId = h.mediaId
+        ORDER BY h.lastPlayed DESC
+        """
+    )
     suspend fun getRecentlyPlayed(limit: Int): List<Track>
 
     // Playlists
@@ -62,8 +87,22 @@ interface AppDao {
     @Query("SELECT EXISTS(SELECT 1 FROM likes WHERE mediaId = :mediaId)")
     suspend fun isLiked(mediaId: String): Boolean
 
-    @Query("SELECT t.* FROM track t JOIN likes l ON t.mediaId = l.mediaId ORDER BY l.likedAt DESC")
+    // Favorites with optional manual order
+    @Query(
+        """
+        SELECT t.* FROM track t
+        JOIN likes l ON t.mediaId = l.mediaId
+        LEFT JOIN favorites_order fo ON fo.mediaId = t.mediaId
+        ORDER BY CASE WHEN fo.position IS NULL THEN 1 ELSE 0 END, fo.position ASC, l.likedAt DESC
+        """
+    )
     suspend fun getFavorites(): List<Track>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertFavoriteOrder(order: List<FavoritesOrder>)
+
+    @Query("DELETE FROM favorites_order WHERE mediaId = :mediaId")
+    suspend fun clearFavoriteOrderFor(mediaId: String)
 
     // Lyrics mapping
     @Insert(onConflict = OnConflictStrategy.REPLACE)

@@ -25,7 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
-import com.musify.mu.ui.theme.NeonBlue
+import com.musify.mu.ui.theme.ElectricBlue
 import com.musify.mu.ui.theme.NeonPink
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -58,7 +58,7 @@ fun NowPlayingBar(
     // Animation for text scrolling if long text
     val coroutineScope = rememberCoroutineScope()
     val textScrollOffset = remember { Animatable(0f) }
-    
+
     // Create a dynamic gradient based on the theme colors
     val gradient = Brush.horizontalGradient(
         colors = listOf(
@@ -69,7 +69,7 @@ fun NowPlayingBar(
     )
 
     var dragX by remember { mutableStateOf(0f) }
-    
+
     // Track drag animation
     val dragProgress by animateFloatAsState(
         targetValue = dragX.coerceIn(-100f, 100f) / 100f,
@@ -79,7 +79,7 @@ fun NowPlayingBar(
         ),
         label = "dragProgress"
     )
-    
+
     // Swipe hint animation
     LaunchedEffect(isPlaying) {
         if (isPlaying) {
@@ -146,9 +146,9 @@ fun NowPlayingBar(
                         .size(56.dp)
                         .clip(RoundedCornerShape(12.dp))
                 )
-                
+
                 Spacer(Modifier.width(12.dp))
-                
+
                 // Track info with marquee effect for long titles
                 Column(
                     modifier = Modifier
@@ -169,9 +169,9 @@ fun NowPlayingBar(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
-                
+
                 Spacer(Modifier.width(8.dp))
-                
+
                 // Media control buttons with animations
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -194,7 +194,7 @@ fun NowPlayingBar(
                             modifier = Modifier.size(28.dp)
                         )
                     }
-                    
+
                     // Next button
                     IconButton(
                         onClick = { onNext() },
@@ -209,7 +209,7 @@ fun NowPlayingBar(
                     }
                 }
             }
-            
+
             // Swipe indicators (shown only when dragging) with simple alpha animation
             val leftAlpha by animateFloatAsState(
                 targetValue = if (dragX > 50f) 1f else 0f,

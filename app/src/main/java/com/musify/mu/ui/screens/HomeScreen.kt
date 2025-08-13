@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -32,33 +33,78 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.Artwork
 import com.musify.mu.ui.navigation.Screen
+import com.musify.mu.playback.LocalMediaController
+import com.musify.mu.data.db.entities.Playlist
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
-    
+    val controller = LocalMediaController.current
+
     var recentPlayed by remember { mutableStateOf<List<Track>>(emptyList()) }
     var recentAdded by remember { mutableStateOf<List<Track>>(emptyList()) }
     var favorites by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var customPlaylists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
-    
+    var refreshTrigger by remember { mutableStateOf(0) }
+
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+
+    // Function to refresh data
+    val refreshData = {
+        scope.launch {
+            try {
+                recentPlayed = repo.recentlyPlayed(12)
+                recentAdded = repo.recentlyAdded(12)
+                favorites = repo.favorites()
+                customPlaylists = repo.playlists()
+            } catch (e: Exception) {
+                android.util.Log.w("HomeScreen", "Failed to refresh data", e)
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         scope.launch {
             try {
-            recentPlayed = repo.recentlyPlayed(12)
-            recentAdded = repo.recentlyAdded(12)
-            favorites = repo.favorites()
+                recentPlayed = repo.recentlyPlayed(12)
+                recentAdded = repo.recentlyAdded(12)
+                favorites = repo.favorites()
+                customPlaylists = repo.playlists()
             } catch (e: Exception) {
                 // Handle error gracefully
             } finally {
                 isLoading = false
             }
         }
+    }
+
+    // Refresh data when trigger changes
+    LaunchedEffect(refreshTrigger) {
+        if (refreshTrigger > 0) {
+            refreshData()
+        }
+    }
+
+    // Dynamically update recently played when the controller transitions
+    LaunchedEffect(controller) {
+        controller?.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                scope.launch { recentPlayed = repo.recentlyPlayed(12) }
+            }
+        })
+    }
+
+    // Refresh data when the screen becomes visible (simplified approach)
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(1000) // Initial delay
+        refreshData()
     }
 
     // Create gradient background
@@ -81,7 +127,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         item {
             WelcomeHeader()
         }
-        
+
         if (isLoading) {
             items(3) {
                 ShimmerCarousel()
@@ -92,29 +138,65 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     title = "Recently Played",
                     icon = Icons.Rounded.History,
                     data = recentPlayed,
-                    onPlay = onPlay,
-                    haptic = haptic
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        // Trigger refresh after a short delay to allow the database to update
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/recently_played") }
                 )
             }
-            
+
             item {
                 AnimatedCarousel(
                     title = "Recently Added",
                     icon = Icons.Rounded.NewReleases,
                     data = recentAdded,
-                    onPlay = onPlay,
-                    haptic = haptic
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        // Trigger refresh after a short delay to allow the database to update
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/recently_added") }
                 )
             }
-            
+
             item {
                 AnimatedCarousel(
                     title = "Favourites",
                     icon = Icons.Rounded.Favorite,
                     data = favorites,
-                    onPlay = onPlay,
-                    haptic = haptic
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        // Trigger refresh after a short delay to allow the database to update
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/favorites") }
                 )
+            }
+
+            // Custom Playlists Carousel
+            if (customPlaylists.isNotEmpty()) {
+                item {
+                    CustomPlaylistsCarousel(
+                        playlists = customPlaylists,
+                        navController = navController,
+                        haptic = haptic,
+                        onRefresh = { refreshTrigger++ }
+                    )
+                }
             }
         }
     }
@@ -132,7 +214,7 @@ private fun WelcomeHeader() {
         ),
         label = "shimmer"
     )
-    
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -193,10 +275,11 @@ private fun AnimatedCarousel(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     data: List<Track>,
     onPlay: (List<Track>, Int) -> Unit,
-    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onSeeAll: () -> Unit
 ) {
     if (data.isEmpty()) return
-    
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -214,15 +297,19 @@ private fun AnimatedCarousel(
                 style = MaterialTheme.typography.titleLarge.copy(
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = MaterialTheme.colorScheme.onBackground
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f)
             )
+            TextButton(onClick = onSeeAll) {
+                Text("See all")
+            }
         }
-        
+
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             contentPadding = PaddingValues(horizontal = 4.dp)
         ) {
-            items(data.size) { index ->
+            items(data.size, key = { index -> "carousel_${title}_${index}_${data[index].mediaId}" }) { index ->
                 val track = data[index]
                 TrackCard(
                     track = track,
@@ -247,7 +334,7 @@ private fun TrackCard(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "scale"
     )
-    
+
     Card(
         modifier = Modifier
             .width(150.dp)
@@ -271,12 +358,12 @@ private fun TrackCard(
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(12.dp))
             ) {
-                    Artwork(
-                        data = track.artUri,
-                        contentDescription = track.title,
+                Artwork(
+                    data = track.artUri,
+                    contentDescription = track.title,
                     modifier = Modifier.fillMaxSize()
                 )
-                
+
                 // Play overlay
                 Box(
                     modifier = Modifier
@@ -299,9 +386,9 @@ private fun TrackCard(
                     )
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(8.dp))
-            
+
             Text(
                 text = track.title,
                 maxLines = 1,
@@ -310,7 +397,7 @@ private fun TrackCard(
                 ),
                 color = MaterialTheme.colorScheme.onSurface
             )
-            
+
             Text(
                 text = track.artist,
                 maxLines = 1,
@@ -333,7 +420,7 @@ private fun ShimmerCarousel() {
         ),
         label = "shimmer"
     )
-    
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // Title shimmer
         Box(
@@ -345,7 +432,7 @@ private fun ShimmerCarousel() {
                     shape = RoundedCornerShape(8.dp)
                 )
         )
-        
+
         // Cards shimmer
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp)
@@ -359,17 +446,17 @@ private fun ShimmerCarousel() {
                         modifier = Modifier.padding(12.dp)
                     ) {
                         Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
                                 .background(
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f + shimmer * 0.1f),
                                     shape = RoundedCornerShape(12.dp)
                                 )
                         )
-                        
+
                         Spacer(modifier = Modifier.height(8.dp))
-                        
+
                         Box(
                             modifier = Modifier
                                 .height(16.dp)
@@ -379,9 +466,9 @@ private fun ShimmerCarousel() {
                                     shape = RoundedCornerShape(4.dp)
                                 )
                         )
-                        
+
                         Spacer(modifier = Modifier.height(4.dp))
-                        
+
                         Box(
                             modifier = Modifier
                                 .height(14.dp)
@@ -394,6 +481,184 @@ private fun ShimmerCarousel() {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CustomPlaylistsCarousel(
+    playlists: List<Playlist>,
+    navController: NavController,
+    haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
+    onRefresh: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val repo = remember { LibraryRepository.get(context) }
+    val scope = rememberCoroutineScope()
+
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var playlistName by remember { mutableStateOf("") }
+
+    if (showCreateDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreateDialog = false },
+            title = { Text("Create New Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = playlistName,
+                    onValueChange = { playlistName = it },
+                    label = { Text("Playlist Name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (playlistName.isNotBlank()) {
+                            scope.launch {
+                                repo.createPlaylist(playlistName.trim())
+                                playlistName = ""
+                                showCreateDialog = false
+                                onRefresh()
+                            }
+                        }
+                    }
+                ) {
+                    Text("Create")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreateDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.PlaylistPlay,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Your Playlists",
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f)
+            )
+            FilledTonalIconButton(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    showCreateDialog = true
+                }
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = "Create Playlist")
+            }
+        }
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp)
+        ) {
+            items(playlists, key = { playlist -> "playlist_card_${playlist.id}" }) { playlist ->
+                PlaylistCard(
+                    playlist = playlist,
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        navController.navigate("playlist_details/${playlist.id}")
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistCard(
+    playlist: Playlist,
+    onClick: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val repo = remember { LibraryRepository.get(context) }
+    var trackCount by remember { mutableStateOf(0) }
+    var firstTrackArt by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(playlist.id) {
+        val tracks = repo.playlistTracks(playlist.id)
+        trackCount = tracks.size
+        firstTrackArt = tracks.firstOrNull()?.artUri
+    }
+
+    Card(
+        modifier = Modifier
+            .width(160.dp)
+            .clickable { onClick() },
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                                MaterialTheme.colorScheme.tertiary.copy(alpha = 0.3f)
+                            )
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (firstTrackArt != null) {
+                    coil.compose.AsyncImage(
+                        model = firstTrackArt,
+                        contentDescription = playlist.name,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(12.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.MusicNote,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(48.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = playlist.name,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Text(
+                text = "$trackCount ${if (trackCount == 1) "song" else "songs"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
         }
     }
 }

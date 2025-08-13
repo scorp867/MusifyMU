@@ -43,127 +43,112 @@ fun TopBar(
 ) {
     val density = LocalDensity.current
     var topBarHeight by remember { mutableStateOf(0.dp) }
-    
+
     // Calculate animated properties based on scroll
     val backgroundAlpha by animateFloatAsState(
-        targetValue = (scrollOffset / 150f).coerceIn(0f, 0.85f), 
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        targetValue = (scrollOffset / 120f).coerceIn(0f, 0.9f),
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "backgroundAlpha"
     )
-    
+
     val elevationAlpha by animateFloatAsState(
-        targetValue = (scrollOffset / 150f).coerceIn(0f, 1f),
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
+        targetValue = (scrollOffset / 120f).coerceIn(0f, 1f),
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "elevationAlpha"
     )
-    
-    // Create gradient background
+
+    // Create modern gradient background
     val backgroundGradient = Brush.verticalGradient(
         colors = listOf(
             MaterialTheme.colorScheme.surface.copy(alpha = backgroundAlpha),
-            MaterialTheme.colorScheme.surface.copy(alpha = backgroundAlpha * 0.8f)
+            MaterialTheme.colorScheme.surface.copy(alpha = backgroundAlpha * 0.7f)
         )
     )
 
-    Box(
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .onGloballyPositioned { coordinates ->
                 topBarHeight = with(density) { coordinates.size.height.toDp() }
-            }
+            },
+        color = Color.Transparent,
+        shadowElevation = (4.dp * elevationAlpha)
     ) {
-        // Background with blur effect
-        if (scrollOffset > 5) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(topBarHeight)
-                    .background(backgroundGradient)
-                    .zIndex(0f)
-                    .graphicsLayer {
-                        shadowElevation = 8f * elevationAlpha
-                        alpha = backgroundAlpha
-                    }
-                    .blur(radius = 1.dp)
-            )
-        }
-        
-        // Actual top bar content
-        Row(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .height(56.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                .background(backgroundGradient)
         ) {
-            // Menu button
-            IconButton(
-                onClick = onMenu,
+            // Compact top bar content
+            Row(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .height(44.dp), // Reduced from 56dp
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Menu,
-                    contentDescription = "Menu",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
+                // Compact menu button
+                IconButton(
+                    onClick = onMenu,
+                    modifier = Modifier.size(36.dp) // Reduced from 40dp
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Menu,
+                        contentDescription = "Menu",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Title with better typography
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 4.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.graphicsLayer {
+                            alpha = 1f - (backgroundAlpha * 0.2f)
+                        }
+                    )
+                }
+
+                // Compact action buttons
+                IconButton(
+                    onClick = onSearch,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "Search",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onSettings,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Additional actions if provided
+                actions()
             }
-            
-            // Title with animated weight
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 8.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.graphicsLayer {
-                        alpha = 1f - (backgroundAlpha * 0.3f)
-                    }
-                )
-            }
-            
-            // Search button
-            IconButton(
-                onClick = onSearch,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            
-            // Settings button
-            IconButton(
-                onClick = onSettings,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Settings,
-                    contentDescription = "Settings",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-            
-            // Additional actions if provided
-            actions()
         }
     }
 }

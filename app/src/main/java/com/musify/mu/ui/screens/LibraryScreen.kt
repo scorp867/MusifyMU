@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,8 +32,14 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.util.PermissionHelper
 import com.musify.mu.ui.navigation.Screen
+import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.musify.mu.playback.LocalMediaController
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
+import androidx.compose.material.DismissValue
+import androidx.compose.material.DismissDirection
 
 enum class SortType {
     TITLE, ARTIST, ALBUM, DATE_ADDED
@@ -46,11 +53,12 @@ fun LibraryScreen(
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
-    
+    val controller = LocalMediaController.current
+
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var permissionChecked by remember { mutableStateOf(false) }
-    
+
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
@@ -103,30 +111,37 @@ fun LibraryScreen(
     ) {
         // Simple header
         LibraryHeader()
-        
+
         if (isLoading) {
             LoadingLibrary()
         } else if (tracks.isEmpty()) {
             EmptyLibrary()
         } else {
-            // Track list with animations
+            // Track list with improved interactions
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(
-                    items = tracks,
-                    key = { track -> track.mediaId }
-                ) { track ->
-                    val index = tracks.indexOf(track)
+                itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
+
+                    // Improved track item without aggressive swipe gestures
                     TrackItem(
                         track = track,
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onPlay(tracks, index)
-                            // Don't navigate to player screen - only play the song
+                        },
+                        onAddToQueue = { addToEnd ->
+                            // Only add to queue when explicitly requested (not while scrolling)
+                            if (addToEnd) {
+                                controller?.addMediaItem(track.toMediaItem())
+                            } else {
+                                val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
+                                    .coerceAtMost(controller?.mediaItemCount ?: 0)
+                                controller?.addMediaItem(insertIndex, track.toMediaItem())
+                            }
                         }
                     )
                 }
@@ -139,7 +154,7 @@ fun LibraryScreen(
 @Composable
 private fun LibraryHeader() {
     var searchQuery by remember { mutableStateOf("") }
-    
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -162,9 +177,9 @@ private fun LibraryHeader() {
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(24.dp)
             )
-            
+
             Spacer(modifier = Modifier.width(12.dp))
-            
+
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
@@ -188,7 +203,7 @@ private fun LibraryHeader() {
                 ),
                 singleLine = true
             )
-            
+
             if (searchQuery.isNotEmpty()) {
                 IconButton(
                     onClick = { searchQuery = "" },
@@ -209,7 +224,8 @@ private fun LibraryHeader() {
 @Composable
 private fun TrackItem(
     track: Track,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onAddToQueue: (Boolean) -> Unit
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -217,7 +233,7 @@ private fun TrackItem(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "scale"
     )
-    
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -251,9 +267,9 @@ private fun TrackItem(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-            
+
             Spacer(modifier = Modifier.width(12.dp))
-            
+
             // Track info
             Column(
                 modifier = Modifier.weight(1f)
@@ -267,9 +283,9 @@ private fun TrackItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                
+
                 Spacer(modifier = Modifier.height(2.dp))
-                
+
                 Text(
                     text = "${track.artist} • ${track.album}",
                     style = MaterialTheme.typography.bodyMedium,
@@ -278,14 +294,46 @@ private fun TrackItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            
-            // Play indicator
-            Icon(
-                imageVector = Icons.Rounded.PlayArrow,
-                contentDescription = "Play",
-                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                modifier = Modifier.size(24.dp)
-            )
+
+            // Queue actions
+            var showMenu by remember { mutableStateOf(false) }
+
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More options",
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Play next") },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
+                        },
+                        onClick = {
+                            onAddToQueue(false)
+                            showMenu = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Add to queue") },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.QueueMusic, contentDescription = null)
+                        },
+                        onClick = {
+                            onAddToQueue(true)
+                            showMenu = false
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -302,7 +350,7 @@ private fun LoadingLibrary() {
         ),
         label = "shimmer"
     )
-    
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -327,9 +375,9 @@ private fun LoadingLibrary() {
                                 shape = RoundedCornerShape(8.dp)
                             )
                     )
-                    
+
                     Spacer(modifier = Modifier.width(12.dp))
-                    
+
                     Column(modifier = Modifier.weight(1f)) {
                         Box(
                             modifier = Modifier
@@ -340,9 +388,9 @@ private fun LoadingLibrary() {
                                     shape = RoundedCornerShape(4.dp)
                                 )
                         )
-                        
+
                         Spacer(modifier = Modifier.height(4.dp))
-                        
+
                         Box(
                             modifier = Modifier
                                 .height(14.dp)
@@ -376,15 +424,15 @@ private fun EmptyLibrary() {
                 tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
                 modifier = Modifier.size(64.dp)
             )
-            
+
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             Text(
                 text = "No music found",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
             )
-            
+
             Text(
                 text = "Add some music to your device to get started",
                 style = MaterialTheme.typography.bodyMedium,

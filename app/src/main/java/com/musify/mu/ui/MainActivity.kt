@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
@@ -29,6 +30,7 @@ import androidx.media3.session.SessionToken
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.musify.mu.data.db.entities.Track
+import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.playback.PlayerService
 import com.musify.mu.ui.components.NowPlayingBar
 import com.musify.mu.ui.navigation.MusifyNavGraph
@@ -42,44 +44,68 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // Install splash screen for better app launch experience
         installSplashScreen()
-        
+
         // Enable edge-to-edge display for modern look
         enableEdgeToEdge()
-        
+
         super.onCreate(savedInstanceState)
-        
+
         setContent {
             MusifyTheme {
                 val navController = rememberNavController()
                 val scope = rememberCoroutineScope()
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val repo = remember { LibraryRepository.get(context) }
 
                 var controller by remember { mutableStateOf<MediaController?>(null) }
                 var currentTrack by remember { mutableStateOf<Track?>(null) }
                 var isPlaying by remember { mutableStateOf(false) }
+                var hasPlayedBefore by remember { mutableStateOf(false) }
 
+                // Build controller eagerly so miniplayer controls work after restart
                 LaunchedEffect(Unit) {
-                    val token = SessionToken(applicationContext, ComponentName(applicationContext, PlayerService::class.java))
-                    controller = MediaController.Builder(applicationContext, token).buildAsync().await()
-                    controller?.addListener(object : Player.Listener {
-                        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                            currentTrack = mediaItem?.toTrack()
-                        }
-                        
-                        override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                            isPlaying = isPlayingNow
-                        }
-                        
-                        override fun onPlaybackStateChanged(playbackState: Int) {
-                            isPlaying = controller?.isPlaying == true
-                            // Update track info when ready
-                            if (playbackState == Player.STATE_READY) {
-                                val item = controller?.currentMediaItem
-                                if (item != null) {
-                                    currentTrack = item.toTrack()
+                    try {
+                        val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
+                        val built = MediaController.Builder(context, token).buildAsync().await()
+                        controller = built
+                        // Attach listeners
+                        built.addListener(object : Player.Listener {
+                            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                                currentTrack = mediaItem?.toTrack()
+                                hasPlayedBefore = currentTrack != null
+                            }
+
+                            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                                isPlaying = isPlayingNow
+                            }
+
+                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                isPlaying = built.isPlaying
+                                if (playbackState == Player.STATE_READY) {
+                                    val item = built.currentMediaItem
+                                    if (item != null) {
+                                        currentTrack = item.toTrack()
+                                        hasPlayedBefore = true
+                                    }
                                 }
                             }
+                        })
+                        // Initialize UI state from controller/session if available
+                        currentTrack = built.currentMediaItem?.toTrack()
+                        isPlaying = built.isPlaying
+                        hasPlayedBefore = currentTrack != null
+
+                        // If no media item yet, fallback to last recently played for showing bar
+                        if (currentTrack == null) {
+                            val recentTracks = repo.recentlyPlayed(1)
+                            if (recentTracks.isNotEmpty()) {
+                                currentTrack = recentTracks.first()
+                                hasPlayedBefore = true
+                            }
                         }
-                    })
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Failed to create controller", e)
+                    }
                 }
 
                 // Check if we should navigate to player from notification
@@ -91,10 +117,16 @@ class MainActivity : ComponentActivity() {
 
                 val onPlay: (List<Track>, Int) -> Unit = { tracks, index ->
                     scope.launch {
-                        controller?.let { c ->
+                        try {
+                            val c = controller ?: run {
+                                val token = SessionToken(context, ComponentName(context, PlayerService::class.java))
+                                MediaController.Builder(context, token).buildAsync().await().also { controller = it }
+                            }
                             c.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
                             c.prepare()
                             c.play()
+                        } catch (e: Exception) {
+                            android.util.Log.e("MainActivity", "Failed to start playback", e)
                         }
                     }
                 }
@@ -103,55 +135,62 @@ class MainActivity : ComponentActivity() {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
                 val isPlayerScreen = currentRoute == com.musify.mu.ui.navigation.Screen.NowPlaying.route
+                val isQueueScreen = currentRoute == com.musify.mu.ui.navigation.Screen.Queue.route
+                val shouldHideBottomBar = isPlayerScreen || isQueueScreen
 
-                androidx.compose.runtime.CompositionLocalProvider(com.musify.mu.playback.LocalMediaController provides controller) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.background
-                ) {
-                    Scaffold(
-                        bottomBar = {
-                            // Animated visibility for smoother transitions
-                            AnimatedVisibility(
-                                visible = !isPlayerScreen,
-                                enter = fadeIn(animationSpec = tween(300)),
-                                exit = fadeOut(animationSpec = tween(300))
-                            ) {
-                                Column {
-                                    // Show now playing bar only when there's a current track
-                                    AnimatedVisibility(
-                                        visible = currentTrack != null,
-                                        enter = fadeIn(animationSpec = tween(300)),
-                                        exit = fadeOut(animationSpec = tween(300))
-                                    ) {
-                                        NowPlayingBar(
-                                            navController = navController,
-                                            currentTrack = currentTrack,
-                                            isPlaying = isPlaying,
-                                            onPlayPause = { 
-                                                controller?.let { 
-                                                    if (it.isPlaying) it.pause() else it.play() 
-                                                } 
-                                            },
-                                            onNext = { controller?.seekToNext() },
-                                            onPrev = { controller?.seekToPrevious() },
-                                            onExpand = { 
-                                                navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route) 
-                                            }
-                                        )
-                                    }
-                                    com.musify.mu.ui.components.BottomBar(navController)
-                                }
-                            }
-                        }
-                    ) { paddingValues ->
-                        MusifyNavGraph(
-                            navController = navController,
-                            modifier = Modifier.padding(if (!isPlayerScreen) paddingValues else PaddingValues(0.dp)),
-                            onPlay = onPlay
-                        )
+                // Cleanup controller when activity is destroyed
+                DisposableEffect(Unit) {
+                    onDispose {
+                        controller?.release()
                     }
                 }
+
+                androidx.compose.runtime.CompositionLocalProvider(com.musify.mu.playback.LocalMediaController provides controller) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        Scaffold(
+                            bottomBar = {
+                                // Animated visibility for smoother transitions
+                                AnimatedVisibility(
+                                    visible = !shouldHideBottomBar,
+                                    enter = fadeIn(animationSpec = tween(300)),
+                                    exit = fadeOut(animationSpec = tween(300))
+                                ) {
+                                    Column {
+                                        // Show now playing bar only when there's a current track and we've played before
+                                        AnimatedVisibility(
+                                            visible = currentTrack != null && hasPlayedBefore,
+                                            enter = fadeIn(animationSpec = tween(300)),
+                                            exit = fadeOut(animationSpec = tween(300))
+                                        ) {
+                                            NowPlayingBar(
+                                                navController = navController,
+                                                currentTrack = currentTrack,
+                                                isPlaying = isPlaying,
+                                                onPlayPause = {
+                                                    controller?.let { if (it.isPlaying) it.pause() else it.play() }
+                                                },
+                                                onNext = { controller?.seekToNext() },
+                                                onPrev = { controller?.seekToPrevious() },
+                                                onExpand = {
+                                                    navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route)
+                                                }
+                                            )
+                                        }
+                                        com.musify.mu.ui.components.BottomBar(navController)
+                                    }
+                                }
+                            }
+                        ) { paddingValues ->
+                            MusifyNavGraph(
+                                navController = navController,
+                                modifier = Modifier.padding(if (!shouldHideBottomBar) paddingValues else PaddingValues(0.dp)),
+                                onPlay = onPlay
+                            )
+                        }
+                    }
                 }
             }
         }
