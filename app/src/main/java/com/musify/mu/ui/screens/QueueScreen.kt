@@ -22,6 +22,7 @@ import androidx.compose.material.rememberDismissState
 import androidx.compose.material.DismissDirection
 import androidx.compose.material.DismissValue
 import com.musify.mu.util.toMediaItem
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,6 +31,7 @@ fun QueueScreen(navController: NavController) {
     var queue by remember { mutableStateOf<List<Track>>(emptyList()) }
     var currentIndex by remember { mutableStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     val state = rememberReorderableLazyListState(onMove = { from, to ->
         queue = queue.toMutableList().apply {
@@ -86,7 +88,7 @@ fun QueueScreen(navController: NavController) {
                         DismissValue.DismissedToStart -> {
                             controller?.removeMediaItem(idx)
                             val removed = track
-                            LaunchedEffect(key1 = "undo_" + idx.toLong() + "_" + track.mediaId) {
+                            scope.launch {
                                 val res = snackbarHostState.showSnackbar(
                                     message = "Removed from queue",
                                     actionLabel = "Undo",
@@ -111,7 +113,7 @@ fun QueueScreen(navController: NavController) {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .background(if (idx == currentIndex) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface)
-                                    .clickable { controller?.seekTo(idx) }
+                                    .clickable { controller?.seekToDefaultPosition(idx) }
                                     .padding(8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
