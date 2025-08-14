@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
             // Permission launcher for requesting media permissions
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions()
-            ) { permissions ->
+            ) { permissions: Map<String, Boolean> ->
                 android.util.Log.d("MainActivity", "Permission result received: $permissions")
                 
                 // Check if required permissions are granted (ignore optional ones)
