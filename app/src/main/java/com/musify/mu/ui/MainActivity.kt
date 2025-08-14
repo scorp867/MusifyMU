@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -42,38 +43,40 @@ import kotlinx.coroutines.guava.await
 
 class MainActivity : ComponentActivity() {
 
-    // Permission launcher for requesting media permissions
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.values.all { it }
-        permissionsGranted = allGranted
-        if (allGranted) {
-            android.util.Log.d("MainActivity", "Media permissions granted")
-        } else {
-            android.util.Log.w("MainActivity", "Some permissions denied: ${permissions.filter { !it.value }}")
-        }
-    }
-    
-    private var permissionsGranted by mutableStateOf(false)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Check permissions immediately
-        val hasPermissions = PermissionManager.checkMediaPermissions(this)
-        if (hasPermissions) {
-            permissionsGranted = true
-        } else {
-            // Request permissions at startup
-            permissionLauncher.launch(PermissionManager.getRequiredMediaPermissions())
-        }
-
         setContent {
             val context = this@MainActivity
             var mediaController by remember { mutableStateOf<MediaController?>(null) }
+            var hasPermissions by remember { mutableStateOf(false) }
+
+            // Permission launcher for requesting media permissions
+            val permissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestMultiplePermissions()
+            ) { permissions ->
+                val allGranted = permissions.values.all { it }
+                hasPermissions = allGranted
+                if (allGranted) {
+                    android.util.Log.d("MainActivity", "Media permissions granted - updating UI state")
+                } else {
+                    android.util.Log.w("MainActivity", "Some permissions denied: ${permissions.filter { !it.value }}")
+                }
+            }
+
+            // Check permissions immediately when the composable is created
+            LaunchedEffect(Unit) {
+                val currentlyHasPermissions = PermissionManager.checkMediaPermissions(context)
+                if (currentlyHasPermissions) {
+                    hasPermissions = true
+                    android.util.Log.d("MainActivity", "Permissions already granted")
+                } else {
+                    android.util.Log.d("MainActivity", "Requesting permissions")
+                    permissionLauncher.launch(PermissionManager.getRequiredMediaPermissions())
+                }
+            }
 
             // Connect to media service
             LaunchedEffect(Unit) {
@@ -89,7 +92,7 @@ class MainActivity : ComponentActivity() {
                 Surface {
                     AppContent(
                         mediaController = mediaController,
-                        hasPermissions = permissionsGranted
+                        hasPermissions = hasPermissions
                     )
                 }
             }
