@@ -24,10 +24,9 @@ object PermissionManager {
     // Required permissions based on Android version
     fun getRequiredMediaPermissions(): Array<String> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // Android 13+ requires READ_MEDIA_AUDIO
+            // Android 13+ requires READ_MEDIA_AUDIO (POST_NOTIFICATIONS is optional)
             arrayOf(
-                Manifest.permission.READ_MEDIA_AUDIO,
-                Manifest.permission.POST_NOTIFICATIONS
+                Manifest.permission.READ_MEDIA_AUDIO
             )
         } else {
             // Older versions use READ_EXTERNAL_STORAGE
@@ -37,9 +36,25 @@ object PermissionManager {
         }
     }
     
+    // Optional permissions that enhance the experience but aren't required
+    fun getOptionalPermissions(): Array<String> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                Manifest.permission.POST_NOTIFICATIONS
+            )
+        } else {
+            emptyArray()
+        }
+    }
+    
+    // Request both required and optional permissions
+    fun getAllPermissions(): Array<String> {
+        return getRequiredMediaPermissions() + getOptionalPermissions()
+    }
+    
     fun checkMediaPermissions(context: Context): Boolean {
-        val permissions = getRequiredMediaPermissions()
-        android.util.Log.d("PermissionManager", "Checking permissions: ${permissions.toList()}")
+        val permissions = getRequiredMediaPermissions() // Only check required permissions
+        android.util.Log.d("PermissionManager", "Checking REQUIRED permissions: ${permissions.toList()}")
         
         val results = permissions.map { permission ->
             val granted = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
@@ -48,7 +63,7 @@ object PermissionManager {
         }
         
         val allGranted = results.all { it.second }
-        android.util.Log.d("PermissionManager", "Overall permission status: ${if (allGranted) "ALL GRANTED" else "SOME DENIED"}")
+        android.util.Log.d("PermissionManager", "Overall REQUIRED permission status: ${if (allGranted) "ALL GRANTED" else "SOME DENIED"}")
         
         return allGranted
     }

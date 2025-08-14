@@ -60,14 +60,31 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.RequestMultiplePermissions()
             ) { permissions ->
                 android.util.Log.d("MainActivity", "Permission result received: $permissions")
-                val allGranted = permissions.values.all { it }
-                android.util.Log.d("MainActivity", "All permissions granted: $allGranted")
-                hasPermissions = allGranted
+                
+                // Check if required permissions are granted (ignore optional ones)
+                val requiredPermissions = PermissionManager.getRequiredMediaPermissions()
+                val requiredGranted = requiredPermissions.all { permission ->
+                    permissions[permission] == true
+                }
+                
+                android.util.Log.d("MainActivity", "Required permissions granted: $requiredGranted")
+                android.util.Log.d("MainActivity", "Required permissions: ${requiredPermissions.toList()}")
+                
+                hasPermissions = requiredGranted
                 android.util.Log.d("MainActivity", "Updated hasPermissions to: $hasPermissions")
-                if (allGranted) {
-                    android.util.Log.d("MainActivity", "Media permissions granted - updating UI state")
+                
+                if (requiredGranted) {
+                    android.util.Log.d("MainActivity", "Required media permissions granted - updating UI state")
+                    
+                    // Log optional permissions status
+                    val optionalPermissions = PermissionManager.getOptionalPermissions()
+                    optionalPermissions.forEach { permission ->
+                        val granted = permissions[permission] == true
+                        android.util.Log.d("MainActivity", "Optional permission $permission: ${if (granted) "GRANTED" else "DENIED"}")
+                    }
                 } else {
-                    android.util.Log.w("MainActivity", "Some permissions denied: ${permissions.filter { !it.value }}")
+                    val deniedRequired = requiredPermissions.filter { permissions[it] != true }
+                    android.util.Log.w("MainActivity", "Required permissions denied: $deniedRequired")
                 }
             }
 
@@ -75,17 +92,19 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(Unit) {
                 android.util.Log.d("MainActivity", "LaunchedEffect started - checking permissions")
                 val requiredPermissions = PermissionManager.getRequiredMediaPermissions()
+                val allPermissions = PermissionManager.getAllPermissions()
                 android.util.Log.d("MainActivity", "Required permissions: ${requiredPermissions.toList()}")
+                android.util.Log.d("MainActivity", "All permissions to request: ${allPermissions.toList()}")
                 
                 val currentlyHasPermissions = PermissionManager.checkMediaPermissions(context)
                 android.util.Log.d("MainActivity", "Current permission status: $currentlyHasPermissions")
                 
                 if (currentlyHasPermissions) {
                     hasPermissions = true
-                    android.util.Log.d("MainActivity", "Permissions already granted - set hasPermissions to true")
+                    android.util.Log.d("MainActivity", "Required permissions already granted - set hasPermissions to true")
                 } else {
-                    android.util.Log.d("MainActivity", "Requesting permissions: ${requiredPermissions.toList()}")
-                    permissionLauncher.launch(requiredPermissions)
+                    android.util.Log.d("MainActivity", "Requesting all permissions: ${allPermissions.toList()}")
+                    permissionLauncher.launch(allPermissions)
                 }
             }
 
