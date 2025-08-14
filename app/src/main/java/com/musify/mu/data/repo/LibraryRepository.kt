@@ -5,16 +5,22 @@ import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.db.entities.*
 import com.musify.mu.data.media.MediaStoreScanner
+import kotlinx.coroutines.flow.Flow
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
     private val scanner by lazy { MediaStoreScanner(context, db) }
 
+    // New Flow-based method for real-time scanning updates
+    fun refreshLibraryFlow(): Flow<MediaStoreScanner.ScanProgress> = scanner.scanAndCacheFlow()
+
+    // Original method for backward compatibility
     suspend fun refreshLibrary(): List<Track> = scanner.scanAndCache()
+    
     suspend fun getAllTracks(): List<Track> = db.dao().getAllTracks()
     suspend fun search(q: String): List<Track> = db.dao().searchTracks("%$q%")
     suspend fun playlists(): List<Playlist> = db.dao().getPlaylists()
-    suspend fun createPlaylist(name: String): Long = db.dao().createPlaylist(Playlist(name = name))
+    suspend fun createPlaylist(name: String, imageUri: String? = null): Long = db.dao().createPlaylist(Playlist(name = name, imageUri = imageUri))
     suspend fun renamePlaylist(id: Long, name: String) = db.dao().renamePlaylist(id, name)
     suspend fun deletePlaylist(id: Long) = db.dao().deletePlaylist(id)
     suspend fun addToPlaylist(playlistId: Long, mediaIds: List<String>) {

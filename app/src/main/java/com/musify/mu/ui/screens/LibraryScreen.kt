@@ -30,9 +30,12 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
-import com.musify.mu.util.PermissionHelper
+import com.musify.mu.util.PermissionManager
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.util.toMediaItem
+import com.musify.mu.ui.components.AlphabeticalScrollBar
+import com.musify.mu.ui.components.generateAlphabet
+import com.musify.mu.ui.components.getFirstLetter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.musify.mu.playback.LocalMediaController
@@ -48,7 +51,8 @@ enum class SortType {
 @Composable
 fun LibraryScreen(
     navController: NavController,
-    onPlay: (List<Track>, Int) -> Unit
+    onPlay: (List<Track>, Int) -> Unit,
+    hasPermissions: Boolean = true
 ) {
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
@@ -57,50 +61,59 @@ fun LibraryScreen(
     
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
-    var permissionChecked by remember { mutableStateOf(false) }
     
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    val audioPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val granted = results.values.all { it }
-        permissionChecked = true
-        if (granted) {
+    // Load tracks when permissions are granted
+    LaunchedEffect(hasPermissions) {
+        android.util.Log.d("LibraryScreen", "LaunchedEffect triggered - hasPermissions: $hasPermissions")
+        if (hasPermissions) {
             coroutineScope.launch {
-                tracks = repo.refreshLibrary()
-                isLoading = false
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        coroutineScope.launch {
-            val hasPermission = (context as? android.app.Activity)?.let { PermissionHelper.hasAudioPermission(it) } ?: true
-            if (!hasPermission && context is android.app.Activity) {
-                PermissionHelper.requestAudioPermission(audioPermissionLauncher)
-            } else {
                 try {
+                    isLoading = true
+                    android.util.Log.d("LibraryScreen", "Starting track loading process...")
+                    
+                    // First try to get cached tracks
+                    android.util.Log.d("LibraryScreen", "Checking for cached tracks...")
                     tracks = repo.getAllTracks()
+                    android.util.Log.d("LibraryScreen", "Found ${tracks.size} cached tracks")
+                    
                     if (tracks.isEmpty()) {
+                        // If no cached tracks, scan the device
+                        android.util.Log.d("LibraryScreen", "No cached tracks found, starting device scan...")
                         tracks = repo.refreshLibrary()
+                        android.util.Log.d("LibraryScreen", "Device scan completed, found ${tracks.size} tracks")
+                        
+                        if (tracks.isEmpty()) {
+                            android.util.Log.w("LibraryScreen", "No tracks found after scan - checking permissions again")
+                            val hasPerms = PermissionManager.checkMediaPermissions(context)
+                            android.util.Log.w("LibraryScreen", "Current permission status: $hasPerms")
+                        }
+                    } else {
+                        android.util.Log.d("LibraryScreen", "Using cached tracks: ${tracks.take(3).map { "${it.title} by ${it.artist}" }}")
                     }
                 } catch (e: Exception) {
-                    // Handle error gracefully
+                    android.util.Log.e("LibraryScreen", "Error loading tracks", e)
+                    tracks = emptyList()
                 } finally {
                     isLoading = false
-                    permissionChecked = true
+                    android.util.Log.d("LibraryScreen", "Loading process completed - isLoading: false, tracks.size: ${tracks.size}")
                 }
             }
+        } else {
+            android.util.Log.d("LibraryScreen", "No permissions granted, clearing tracks")
+            isLoading = false
+            tracks = emptyList()
         }
     }
 
     // Background gradient
     val backgroundGradient = Brush.verticalGradient(
         colors = listOf(
+            MaterialTheme.colorScheme.surface,
             MaterialTheme.colorScheme.background,
-            MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
         )
     )
 
@@ -108,41 +121,70 @@ fun LibraryScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundGradient)
+            .padding(top = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Simple header
         LibraryHeader()
         
-        if (isLoading) {
-            LoadingLibrary()
-        } else if (tracks.isEmpty()) {
-            EmptyLibrary()
-        } else {
-            // Track list with improved interactions
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
-                    
-                    // Improved track item without aggressive swipe gestures
-                    TrackItem(
-                        track = track,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onPlay(tracks, index)
-                        },
-                        onAddToQueue = { addToEnd ->
-                            // Only add to queue when explicitly requested (not while scrolling)
-                            if (addToEnd) {
-                                controller?.addMediaItem(track.toMediaItem())
-                            } else {
-                                val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                                    .coerceAtMost(controller?.mediaItemCount ?: 0)
-                                controller?.addMediaItem(insertIndex, track.toMediaItem())
-                            }
+        when {
+            !hasPermissions -> {
+                PermissionDeniedState()
+            }
+            isLoading -> {
+                LoadingLibrary()
+            }
+            tracks.isEmpty() -> {
+                EmptyLibrary()
+            }
+            else -> {
+                // Track list with alphabetical scroll bar
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 44.dp, top = 8.dp, bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
+                            
+                            // Improved track item without aggressive swipe gestures
+                            TrackItem(
+                                track = track,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onPlay(tracks, index)
+                                },
+                                onAddToQueue = { addToEnd ->
+                                    // Only add to queue when explicitly requested (not while scrolling)
+                                    if (addToEnd) {
+                                        controller?.addMediaItem(track.toMediaItem())
+                                    } else {
+                                        val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
+                                            .coerceAtMost(controller?.mediaItemCount ?: 0)
+                                        controller?.addMediaItem(insertIndex, track.toMediaItem())
+                                    }
+                                }
+                            )
                         }
+                    }
+                    
+                    // Alphabetical scroll bar
+                    AlphabeticalScrollBar(
+                        letters = generateAlphabet(),
+                        onLetterSelected = { letter ->
+                            coroutineScope.launch {
+                                val targetIndex = tracks.indexOfFirst { track ->
+                                    getFirstLetter(track.title) == letter
+                                }
+                                if (targetIndex >= 0) {
+                                    listState.animateScrollToItem(targetIndex)
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                            }
+                        },
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        isVisible = tracks.size > 20 // Only show for larger lists
                     )
                 }
             }
@@ -437,6 +479,44 @@ private fun EmptyLibrary() {
                 text = "Add some music to your device to get started",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PermissionDeniedState() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.MusicOff,
+                contentDescription = "No permissions",
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+            )
+            
+            Text(
+                text = "Music Access Required",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold
+                ),
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            
+            Text(
+                text = "Please grant media permissions to access your music library",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
         }
     }

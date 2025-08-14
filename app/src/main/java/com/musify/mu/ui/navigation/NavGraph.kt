@@ -17,6 +17,7 @@ import com.musify.mu.ui.screens.*
 sealed class Screen(val route: String) {
     object Home : Screen("home")
     object Library : Screen("library")
+    object Search : Screen("search")
     object Queue : Screen("queue")
     object NowPlaying : Screen("now_playing")
     object Lyrics : Screen("lyrics")
@@ -28,7 +29,8 @@ sealed class Screen(val route: String) {
 fun MusifyNavGraph(
     navController: NavHostController,
     modifier: Modifier = Modifier,
-    onPlay: (List<Track>, Int) -> Unit
+    onPlay: (List<Track>, Int) -> Unit,
+    hasPermissions: Boolean = true
 ) {
     // Configure back behavior for player screen
     val onBackFromPlayer: () -> Unit = {
@@ -42,7 +44,8 @@ fun MusifyNavGraph(
         modifier = modifier
     ) {
         composable(Screen.Home.route) { HomeScreen(navController, onPlay) }
-        composable(Screen.Library.route) { LibraryScreen(navController, onPlay) }
+        composable(Screen.Library.route) { LibraryScreen(navController, onPlay, hasPermissions) }
+        composable(Screen.Search.route) { SearchScreen(navController, onPlay) }
         
         // Queue screen as a modal overlay - only accessible from player screen
         composable(
