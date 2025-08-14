@@ -32,6 +32,9 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.util.toTrack
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.navigation.Screen
 
@@ -81,36 +84,68 @@ fun NowPlayingScreen(navController: NavController) {
     
     val coroutineScope = rememberCoroutineScope()
 
-    // Extract colors from album artwork
-    LaunchedEffect(currentTrack?.artUri) {
-        val artUri = currentTrack?.artUri
-        if (artUri.isNullOrBlank()) {
-            dominantColor = Color(0xFF6236FF)
-            vibrantColor = Color(0xFF38B6FF)
-        } else {
-            coroutineScope.launch {
+    // Extract colors from album artwork only on track change
+    LaunchedEffect(currentTrack?.mediaId) {
+        currentTrack?.let { track ->
+            coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    val imageRequest = ImageRequest.Builder(context)
-                        .data(artUri)
-                        .allowHardware(false)
-                        .build()
+                    // First try to get embedded artwork from cache
+                    val embeddedBitmap = com.musify.mu.data.media.EmbeddedArtCache.getFromMemory(track.mediaId)
+                        ?: com.musify.mu.data.media.EmbeddedArtCache.loadEmbedded(context, track.mediaId)
                     
-                    val drawable = ImageLoader(context).execute(imageRequest).drawable
-                    val bitmap = (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                    val sourceBitmap = embeddedBitmap ?: run {
+                        // Fallback to artUri or album artwork
+                        val artUri = track.artUri ?: track.albumId?.let { id ->
+                            android.net.Uri.parse("content://media/external/audio/albumart/$id").toString()
+                        }
+                        
+                        if (!artUri.isNullOrBlank()) {
+                            try {
+                                val imageRequest = ImageRequest.Builder(context)
+                                    .data(artUri)
+                                    .allowHardware(false)
+                                    .size(512) // Limit size for performance
+                                    .build()
+                                
+                                val drawable = ImageLoader(context).execute(imageRequest).drawable
+                                (drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                            } catch (e: Exception) {
+                                null
+                            }
+                        } else null
+                    }
                     
-                    bitmap?.let {
-                        val palette = Palette.from(it).generate()
-                        dominantColor = Color(palette.getDominantColor(0xFF6236FF.toInt()))
-                        vibrantColor = Color(palette.getVibrantColor(0xFF38B6FF.toInt()))
-                    } ?: run {
+                    // Extract palette colors on background thread
+                    val extractedColors = sourceBitmap?.let { bitmap ->
+                        val palette = androidx.palette.graphics.Palette.from(bitmap)
+                            .maximumColorCount(16)
+                            .generate()
+                        
+                        val vibrant = palette.getVibrantColor(0xFF38B6FF.toInt())
+                        val dominant = palette.getDominantColor(0xFF6236FF.toInt())
+                        val darkVibrant = palette.getDarkVibrantColor(dominant)
+                        
+                        Pair(Color(dominant), Color(vibrant))
+                    } ?: Pair(Color(0xFF6236FF), Color(0xFF38B6FF))
+                    
+                    // Update colors on main thread
+                    withContext(Dispatchers.Main) {
+                        dominantColor = extractedColors.first
+                        vibrantColor = extractedColors.second
+                    }
+                    
+                } catch (e: Exception) {
+                    android.util.Log.w("NowPlayingScreen", "Failed to extract colors for ${track.title}", e)
+                    withContext(Dispatchers.Main) {
                         dominantColor = Color(0xFF6236FF)
                         vibrantColor = Color(0xFF38B6FF)
                     }
-                } catch (e: Exception) {
-                    dominantColor = Color(0xFF6236FF)
-                    vibrantColor = Color(0xFF38B6FF)
                 }
             }
+        } ?: run {
+            // No track, use default colors
+            dominantColor = Color(0xFF6236FF)
+            vibrantColor = Color(0xFF38B6FF)
         }
     }
 
@@ -170,12 +205,25 @@ fun NowPlayingScreen(navController: NavController) {
             
             mediaController.addListener(listener)
             
-            // Update progress periodically
-            while (true) {
-                if (mediaController.isPlaying && mediaController.duration > 0) {
-                    progress = mediaController.currentPosition.toFloat() / mediaController.duration.toFloat()
+            // Continuous progress updates - use ticker for smoother updates
+            launch {
+                while (true) {
+                    try {
+                        if (mediaController.isPlaying) {
+                            val currentPos = mediaController.currentPosition
+                            val dur = mediaController.duration
+                            if (dur > 0) {
+                                progress = (currentPos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                                duration = dur
+                            }
+                        }
+                        // Update every 100ms for smooth progress
+                        delay(100)
+                    } catch (e: Exception) {
+                        // Handle any exceptions silently
+                        delay(500) // Wait longer if there's an error
+                    }
                 }
-                kotlinx.coroutines.delay(500) // Update every 500ms
             }
         }
     }
@@ -286,6 +334,8 @@ fun NowPlayingScreen(navController: NavController) {
                 ) {
                     com.musify.mu.ui.components.Artwork(
                         data = track.artUri,
+                        audioUri = track.mediaId,
+                        albumId = track.albumId,
                         contentDescription = track.title,
                         modifier = Modifier.fillMaxSize()
                     )

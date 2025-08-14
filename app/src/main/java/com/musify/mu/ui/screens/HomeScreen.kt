@@ -38,6 +38,12 @@ import com.musify.mu.data.db.entities.Playlist
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import android.content.ContentUris
+import android.provider.MediaStore
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
@@ -73,12 +79,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     LaunchedEffect(Unit) {
         scope.launch {
             try {
+                // Get data from fast cache - background loading handles the heavy lifting
                 recentPlayed = repo.recentlyPlayed(12)
                 recentAdded = repo.recentlyAdded(12)
                 favorites = repo.favorites()
                 customPlaylists = repo.playlists()
             } catch (e: Exception) {
                 // Handle error gracefully
+                android.util.Log.w("HomeScreen", "Failed to load home data", e)
             } finally {
                 isLoading = false
             }
@@ -187,18 +195,27 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 )
             }
 
-            // Custom Playlists Carousel
-            if (customPlaylists.isNotEmpty()) {
-                item {
-                    CustomPlaylistsCarousel(
-                        playlists = customPlaylists,
-                        navController = navController,
-                        haptic = haptic,
-                        onRefresh = { refreshTrigger++ }
-                    )
-                }
+            // Custom Playlists Carousel (always visible so user can create playlists)
+            item {
+                CustomPlaylistsCarousel(
+                    playlists = customPlaylists,
+                    navController = navController,
+                    haptic = haptic,
+                    onRefresh = { refreshTrigger++ }
+                )
             }
         }
+    }
+
+    // Prefetch embedded art for visible recent lists (row-based prefetch for the main column)
+    LaunchedEffect(listState, recentAdded, recentPlayed, favorites) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+            .distinctUntilChanged()
+            .collectLatest { _ ->
+                val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
+                val uris = visibleTracks.map { it.mediaId }
+                com.musify.mu.data.media.EmbeddedArtCache.preload(context, uris)
+            }
     }
 }
 
@@ -360,6 +377,8 @@ private fun TrackCard(
             ) {
                 Artwork(
                     data = track.artUri,
+                    audioUri = track.mediaId,
+                    albumId = track.albumId,
                     contentDescription = track.title,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -516,7 +535,7 @@ private fun CustomPlaylistsCarousel(
         playlists = playlists,
         onPlaylistClick = { playlist ->
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            navController.navigate("playlist_details/${playlist.id}")
+            navController.navigate(com.musify.mu.ui.navigation.Screen.PlaylistDetails.route.replace("{id}", playlist.id.toString()))
         },
         onCreatePlaylistClick = {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)

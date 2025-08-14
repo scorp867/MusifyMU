@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,16 +37,28 @@ import com.musify.mu.util.toMediaItem
 import com.musify.mu.ui.components.AlphabeticalScrollBar
 import com.musify.mu.ui.components.generateAlphabet
 import com.musify.mu.ui.components.getFirstLetter
+import com.musify.mu.playback.rememberQueueOperations
+import com.musify.mu.playback.QueueContextHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import androidx.compose.runtime.snapshotFlow
 import com.musify.mu.playback.LocalMediaController
 import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
 import androidx.compose.material.DismissValue
 import androidx.compose.material.DismissDirection
+import android.content.ContentUris
+import android.provider.MediaStore
 
 enum class SortType {
     TITLE, ARTIST, ALBUM, DATE_ADDED
+}
+
+enum class QueueOperation {
+    ADDING_TO_END, ADDING_TO_NEXT, REMOVING, COMPLETED_SUCCESS, COMPLETED_ERROR
 }
 
 @Composable
@@ -58,54 +71,133 @@ fun LibraryScreen(
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
     val controller = LocalMediaController.current
+    val queueOperationsManager = rememberQueueOperations()
 
-    var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var allTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var searchQuery by remember { mutableStateOf("") }
+    var visualSearchQuery by remember { mutableStateOf("") }
+    var isSearching by remember { mutableStateOf(false) }
+
+    // Visual state for add-to-queue operations
+    var queueOperationsState by remember { mutableStateOf<Map<String, QueueOperation>>(emptyMap()) }
+    var isProcessingQueueOps by remember { mutableStateOf(false) }
+
+    // Debounced search with visual-only immediate feedback
+    val tracks by remember(searchQuery, allTracks) {
+        mutableStateOf(
+            if (searchQuery.isBlank()) allTracks else allTracks.filter { t ->
+                t.title.contains(searchQuery, ignoreCase = true) ||
+                t.artist.contains(searchQuery, ignoreCase = true) ||
+                t.album.contains(searchQuery, ignoreCase = true)
+            }
+        )
+    }
+
+    // Visual tracks for immediate search feedback
+    val visualTracks by remember(visualSearchQuery, allTracks) {
+        mutableStateOf(
+            if (visualSearchQuery.isBlank()) allTracks else allTracks.filter { t ->
+                t.title.contains(visualSearchQuery, ignoreCase = true) ||
+                t.artist.contains(visualSearchQuery, ignoreCase = true) ||
+                t.album.contains(visualSearchQuery, ignoreCase = true)
+            }
+        )
+    }
+
+    // Debounced search to prevent excessive filtering
+    LaunchedEffect(visualSearchQuery) {
+        if (visualSearchQuery != searchQuery) {
+            isSearching = true
+            kotlinx.coroutines.delay(300) // 300ms debounce
+            searchQuery = visualSearchQuery
+            isSearching = false
+        }
+    }
+
+
 
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Load tracks when permissions are granted
+    // Observe background loading progress and get data from cache
     LaunchedEffect(hasPermissions) {
         android.util.Log.d("LibraryScreen", "LaunchedEffect triggered - hasPermissions: $hasPermissions")
         if (hasPermissions) {
-            coroutineScope.launch {
-                try {
-                    isLoading = true
-                    android.util.Log.d("LibraryScreen", "Starting track loading process...")
-
-                    // First try to get cached tracks
-                    android.util.Log.d("LibraryScreen", "Checking for cached tracks...")
-                    tracks = repo.getAllTracks()
-                    android.util.Log.d("LibraryScreen", "Found ${tracks.size} cached tracks")
-
-                    if (tracks.isEmpty()) {
-                        // If no cached tracks, scan the device
-                        android.util.Log.d("LibraryScreen", "No cached tracks found, starting device scan...")
-                        tracks = repo.refreshLibrary()
-                        android.util.Log.d("LibraryScreen", "Device scan completed, found ${tracks.size} tracks")
-
-                        if (tracks.isEmpty()) {
-                            android.util.Log.w("LibraryScreen", "No tracks found after scan - checking permissions again")
-                            val hasPerms = PermissionManager.checkMediaPermissions(context)
-                            android.util.Log.w("LibraryScreen", "Current permission status: $hasPerms")
+            // Get data from fast cache immediately
+            allTracks = repo.getAllTracks()
+            isLoading = allTracks.isEmpty()
+            android.util.Log.d("LibraryScreen", "Initial load: ${allTracks.size} tracks from cache")
+            
+            // Observe background loading progress
+            repo.loadingProgress.collect { state ->
+                when (state) {
+                    is com.musify.mu.data.media.BackgroundDataManager.LoadingState.Loading -> {
+                        if (allTracks.isEmpty()) {
+                            isLoading = true
                         }
-                    } else {
-                        android.util.Log.d("LibraryScreen", "Using cached tracks: ${tracks.take(3).map { "${it.title} by ${it.artist}" }}")
+                        android.util.Log.d("LibraryScreen", "Background loading: ${state.message}")
                     }
-                } catch (e: Exception) {
-                    android.util.Log.e("LibraryScreen", "Error loading tracks", e)
-                    tracks = emptyList()
-                } finally {
-                    isLoading = false
-                    android.util.Log.d("LibraryScreen", "Loading process completed - isLoading: false, tracks.size: ${tracks.size}")
+                    is com.musify.mu.data.media.BackgroundDataManager.LoadingState.Completed -> {
+                        // Refresh tracks from cache
+                        allTracks = repo.getAllTracks()
+                        isLoading = false
+                        android.util.Log.d("LibraryScreen", "Background loading completed: ${allTracks.size} tracks")
+                        
+                        // If still no tracks after background loading, try manual refresh
+                        if (allTracks.isEmpty()) {
+                            android.util.Log.w("LibraryScreen", "No tracks found after background loading, trying manual refresh...")
+                            coroutineScope.launch {
+                                try {
+                                    isLoading = true
+                                    allTracks = repo.refreshLibrary()
+                                    android.util.Log.d("LibraryScreen", "Manual refresh found ${allTracks.size} tracks")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("LibraryScreen", "Manual refresh failed", e)
+                                } finally {
+                                    isLoading = false
+                                }
+                            }
+                        }
+                    }
+                    is com.musify.mu.data.media.BackgroundDataManager.LoadingState.Error -> {
+                        isLoading = false
+                        android.util.Log.e("LibraryScreen", "Background loading error: ${state.message}")
+                        
+                        // Try manual refresh as fallback
+                        android.util.Log.w("LibraryScreen", "Trying manual refresh after background loading error...")
+                        coroutineScope.launch {
+                            try {
+                                isLoading = true
+                                allTracks = repo.refreshLibrary()
+                                android.util.Log.d("LibraryScreen", "Manual refresh after error found ${allTracks.size} tracks")
+                            } catch (e: Exception) {
+                                android.util.Log.e("LibraryScreen", "Manual refresh after error failed", e)
+                            } finally {
+                                isLoading = false
+                            }
+                        }
+                    }
+                    else -> {
+                        // Idle state
+                    }
                 }
             }
         } else {
             android.util.Log.d("LibraryScreen", "No permissions granted, clearing tracks")
             isLoading = false
-            tracks = emptyList()
+            allTracks = emptyList()
         }
+    }
+
+    // Prefetch embedded art for visible items
+    LaunchedEffect(listState, tracks) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+            .distinctUntilChanged()
+            .collectLatest { indexes ->
+                val uris = indexes.mapNotNull { i -> tracks.getOrNull(i)?.mediaId }
+                com.musify.mu.data.media.EmbeddedArtCache.preload(context, uris)
+            }
     }
 
     // Background gradient
@@ -124,8 +216,16 @@ fun LibraryScreen(
             .padding(top = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Simple header
-        LibraryHeader()
+        // Header with working search
+                    LibraryHeader(
+                query = visualSearchQuery,
+                onQueryChange = { visualSearchQuery = it },
+                onClear = { 
+                    visualSearchQuery = ""
+                    searchQuery = ""
+                },
+                isSearching = isSearching
+            )
 
         when {
             !hasPermissions -> {
@@ -144,25 +244,57 @@ fun LibraryScreen(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(start = 16.dp, end = 44.dp, top = 8.dp, bottom = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        // Performance optimizations for smooth scrolling
+                        flingBehavior = rememberSnapFlingBehavior(listState)
                     ) {
-                        itemsIndexed(tracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
+                        itemsIndexed(visualTracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
 
                             // Improved track item without aggressive swipe gestures
                             TrackItem(
                                 track = track,
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onPlay(tracks, index)
+                                    onPlay(visualTracks, index)
                                 },
+                                queueOperation = queueOperationsState[track.mediaId],
                                 onAddToQueue = { addToEnd ->
-                                    // Only add to queue when explicitly requested (not while scrolling)
-                                    if (addToEnd) {
-                                        controller?.addMediaItem(track.toMediaItem())
-                                    } else {
-                                        val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                                            .coerceAtMost(controller?.mediaItemCount ?: 0)
-                                        controller?.addMediaItem(insertIndex, track.toMediaItem())
+                                    // Visual-only queue operation - immediate UI feedback
+                                    val operation = if (addToEnd) QueueOperation.ADDING_TO_END else QueueOperation.ADDING_TO_NEXT
+                                    queueOperationsState = queueOperationsState + (track.mediaId to operation)
+                                    
+                                    // Perform actual queue operation in background
+                                    coroutineScope.launch {
+                                        try {
+                                            // Create library context for the operation
+                                            val context = QueueContextHelper.createSearchContext("library")
+                                            
+                                            if (addToEnd) {
+                                                // Use operation queue for non-blocking add to end
+                                                queueOperationsManager.queueAddItems(
+                                                    items = listOf(track.toMediaItem()),
+                                                    position = -1, // Add to end
+                                                    context = context
+                                                )
+                                            } else {
+                                                // Add to play next with context (immediate processing)
+                                                queueOperationsManager.playNextWithContext(
+                                                    items = listOf(track.toMediaItem()),
+                                                    context = context
+                                                )
+                                            }
+                                            
+                                            // Success feedback
+                                            queueOperationsState = queueOperationsState + (track.mediaId to QueueOperation.COMPLETED_SUCCESS)
+                                            delay(2000) // Show success for 2 seconds
+                                            queueOperationsState = queueOperationsState - track.mediaId
+                                            
+                                        } catch (e: Exception) {
+                                            // Error feedback
+                                            queueOperationsState = queueOperationsState + (track.mediaId to QueueOperation.COMPLETED_ERROR)
+                                            delay(3000) // Show error longer
+                                            queueOperationsState = queueOperationsState - track.mediaId
+                                        }
                                     }
                                 }
                             )
@@ -170,21 +302,35 @@ fun LibraryScreen(
                     }
 
                     // Alphabetical scroll bar
+                    // Precompute first-letter index map for O(1) jumps with better performance
+                    val indexMap by remember(visualTracks) {
+                        derivedStateOf {
+                            val map = mutableMapOf<String, Int>()
+                            visualTracks.forEachIndexed { i, t ->
+                                val l = getFirstLetter(t.title)
+                                if (map[l] == null) map[l] = i
+                            }
+                            map
+                        }
+                    }
+
                     AlphabeticalScrollBar(
                         letters = generateAlphabet(),
                         onLetterSelected = { letter ->
-                            coroutineScope.launch {
-                                val targetIndex = tracks.indexOfFirst { track ->
-                                    getFirstLetter(track.title) == letter
-                                }
-                                if (targetIndex >= 0) {
-                                    listState.animateScrollToItem(targetIndex)
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            val targetIndex = indexMap[letter] ?: -1
+                            if (targetIndex >= 0) {
+                                // Use immediate scrolling for instant response
+                                coroutineScope.launch {
+                                    // Use scrollToItem for instant jump without animation
+                                    listState.scrollToItem(
+                                        index = targetIndex,
+                                        scrollOffset = 0
+                                    )
                                 }
                             }
                         },
                         modifier = Modifier.align(Alignment.CenterEnd),
-                        isVisible = tracks.size > 20 // Only show for larger lists
+                        isVisible = visualTracks.size > 10 // Show for even smaller lists
                     )
                 }
             }
@@ -194,8 +340,12 @@ fun LibraryScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LibraryHeader() {
-    var searchQuery by remember { mutableStateOf("") }
+private fun LibraryHeader(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClear: () -> Unit,
+    isSearching: Boolean = false
+) {
 
     Card(
         modifier = Modifier
@@ -223,8 +373,8 @@ private fun LibraryHeader() {
             Spacer(modifier = Modifier.width(12.dp))
 
             OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
+                value = query,
+                onValueChange = onQueryChange,
                 placeholder = {
                     Text(
                         text = "Search your music library...",
@@ -246,17 +396,25 @@ private fun LibraryHeader() {
                 singleLine = true
             )
 
-            if (searchQuery.isNotEmpty()) {
-                IconButton(
-                    onClick = { searchQuery = "" },
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Clear,
-                        contentDescription = "Clear",
-                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.size(20.dp)
+            if (query.isNotEmpty()) {
+                if (isSearching) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
                     )
+                } else {
+                    IconButton(
+                        onClick = onClear,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Clear,
+                            contentDescription = "Clear",
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }
@@ -267,13 +425,29 @@ private fun LibraryHeader() {
 private fun TrackItem(
     track: Track,
     onClick: () -> Unit,
-    onAddToQueue: (Boolean) -> Unit
+    onAddToQueue: (Boolean) -> Unit,
+    queueOperation: QueueOperation? = null
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (isPressed) 0.98f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "scale"
+    )
+
+    // Visual feedback colors based on queue operation
+    val containerColor by animateColorAsState(
+        targetValue = when (queueOperation) {
+            QueueOperation.ADDING_TO_END, QueueOperation.ADDING_TO_NEXT -> 
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            QueueOperation.COMPLETED_SUCCESS -> 
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+            QueueOperation.COMPLETED_ERROR -> 
+                MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+            else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+        },
+        animationSpec = tween(300),
+        label = "containerColor"
     )
 
     Card(
@@ -285,7 +459,7 @@ private fun TrackItem(
             }
             .clickable { onClick() },
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+            containerColor = containerColor
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         shape = RoundedCornerShape(12.dp)
@@ -305,6 +479,9 @@ private fun TrackItem(
             ) {
                 com.musify.mu.ui.components.Artwork(
                     data = track.artUri,
+                    audioUri = track.mediaId,
+                    cacheKey = track.mediaId,
+                    albumId = track.albumId,
                     contentDescription = track.title,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -335,6 +512,63 @@ private fun TrackItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // Queue operation visual indicator
+            AnimatedVisibility(
+                visible = queueOperation != null,
+                enter = slideInHorizontally(animationSpec = tween(200)) + fadeIn(),
+                exit = slideOutHorizontally(animationSpec = tween(200)) + fadeOut()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(end = 8.dp)
+                ) {
+                    when (queueOperation) {
+                        QueueOperation.ADDING_TO_END, QueueOperation.ADDING_TO_NEXT -> {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (queueOperation == QueueOperation.ADDING_TO_END) "Adding..." else "Adding next...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        QueueOperation.COMPLETED_SUCCESS -> {
+                            Icon(
+                                imageVector = Icons.Rounded.CheckCircle,
+                                contentDescription = "Added successfully",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Added",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        QueueOperation.COMPLETED_ERROR -> {
+                            Icon(
+                                imageVector = Icons.Rounded.Error,
+                                contentDescription = "Failed to add",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Failed",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                        else -> {}
+                    }
+                }
             }
 
             // Queue actions

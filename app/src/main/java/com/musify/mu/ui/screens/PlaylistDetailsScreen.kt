@@ -8,6 +8,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
@@ -19,6 +21,9 @@ import androidx.compose.material.icons.filled.DragHandle
 import kotlinx.coroutines.launch
 import com.musify.mu.ui.components.TrackPickerSheet
 import org.burnoutcrew.reorderable.*
+import org.burnoutcrew.reorderable.ItemPosition
+import android.content.ContentUris
+import android.provider.MediaStore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,17 +42,68 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
         allTracks = repo.getAllTracks()
     }
 
-    val reorderState = rememberReorderableLazyListState(onMove = { from, to ->
-        tracks = tracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
-        // Auto-save the new order immediately
-        scope.launch {
-            // Remove all items from playlist and re-add in new order
-            val mediaIds = tracks.map { it.mediaId }
-            repo.deletePlaylist(playlistId) // This might be too aggressive, let me find a better approach
-            // Instead, let's create a new method to reorder playlist items
-            // For now, we'll just update the tracks list visually
+    // Separate visual state from actual data state for playlists
+    var visualTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var isDragging by remember { mutableStateOf(false) }
+    
+    // Visual state for remove operations
+    var removeOperations by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var isProcessingRemoval by remember { mutableStateOf(false) }
+
+    // Sync visual tracks with actual tracks when not dragging
+    LaunchedEffect(tracks) {
+        if (!isDragging) {
+            visualTracks = tracks
         }
-    })
+    }
+
+    // Enhanced drag configuration for playlist reordering
+    val dragConfig = remember {
+        com.musify.mu.ui.components.DragDropConfig(
+            longPressTimeout = 300L,
+            animationDuration = 150,
+            enableHardwareAcceleration = true,
+            enableAutoScroll = true,
+            autoScrollThreshold = 70f
+        )
+    }
+
+    val reorderState = rememberReorderableLazyListState(
+        onMove = { from, to ->
+            // Update ONLY visual state for smooth UI feedback
+            visualTracks = visualTracks.toMutableList().apply { 
+                add(to.index, removeAt(from.index)) 
+            }
+            isDragging = true
+        },
+        onDragEnd = { from, to ->
+            val fromIdx = from  // from is Int in onDragEnd  
+            val toIdx = to      // to is Int in onDragEnd
+            
+            if (fromIdx != toIdx) {
+                // Commit actual data change when drag completes
+        scope.launch {
+                    try {
+                        // Update actual tracks data
+                        tracks = visualTracks.toList()
+                        
+                        // TODO: Implement efficient playlist reordering in repository
+            val mediaIds = tracks.map { it.mediaId }
+                        // For now, we maintain the tracks list state
+                        
+                    } catch (e: Exception) {
+                        // On failure, revert visual state to match actual data
+                        visualTracks = tracks
+                    } finally {
+                        isDragging = false
+                    }
+                }
+            } else {
+                isDragging = false
+                visualTracks = tracks // Ensure sync
+            }
+        }
+    )
 
     Scaffold(
         topBar = {
@@ -67,19 +123,35 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(tracks.size, key = { idx -> "playlist_${playlistId}_${idx}_${tracks[idx].mediaId}" }) { idx ->
-                val track = tracks[idx]
+            items(visualTracks.size, key = { idx -> "playlist_${playlistId}_${idx}_${visualTracks[idx].mediaId}" }) { idx ->
+                val track = visualTracks[idx]
                 var showMenu by remember { mutableStateOf(false) }
                 
                 ReorderableItem(reorderState, key = "playlist_${playlistId}_${idx}_${track.mediaId}") { isDragging ->
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                // Hardware acceleration for smooth drag animations
+                                if (dragConfig.enableHardwareAcceleration) {
+                                    compositingStrategy = if (isDragging) {
+                                        CompositingStrategy.Offscreen
+                                    } else {
+                                        CompositingStrategy.Auto
+                                    }
+                                }
+                                scaleX = if (isDragging) 1.02f else 1f
+                                scaleY = if (isDragging) 1.02f else 1f
+                                alpha = if (isDragging) 0.95f else 1f
+                            },
                         elevation = CardDefaults.cardElevation(
-                            defaultElevation = if (isDragging) 8.dp else 2.dp
+                            defaultElevation = if (isDragging) {
+                                if (dragConfig.enableLightweightShadow) 6.dp else 8.dp
+                            } else 2.dp
                         ),
                         colors = CardDefaults.cardColors(
                             containerColor = if (isDragging) 
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
                             else 
                                 MaterialTheme.colorScheme.surface
                         )
@@ -87,12 +159,17 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onPlay(tracks, idx) }
+                                .clickable { onPlay(visualTracks, idx) }
                                 .padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            val fallbackAlbumArt = track.albumId?.let { id ->
+                                android.net.Uri.parse("content://media/external/audio/albumart/$id")
+                            }
                             com.musify.mu.ui.components.Artwork(
                                 data = track.artUri,
+                                audioUri = track.mediaId,
+                                albumId = track.albumId,
                                 contentDescription = track.title,
                                 modifier = Modifier.size(48.dp)
                             )
@@ -119,10 +196,26 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                 }
                                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                     DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = {
+                                        // Visual-only removal - immediate UI feedback
+                                        removeOperations = removeOperations + track.mediaId
+                                        visualTracks = visualTracks.filter { it.mediaId != track.mediaId }
+                                        showMenu = false
+                                        
+                                        // Perform actual removal in background
                                         scope.launch {
+                                            try {
                                             repo.removeFromPlaylist(playlistId, track.mediaId)
-                                            tracks = repo.playlistTracks(playlistId)
-                                            showMenu = false
+                                                // Reload actual tracks from database
+                                                val newTracks = repo.playlistTracks(playlistId)
+                                                tracks = newTracks
+                                                // Success - remove from pending operations
+                                                removeOperations = removeOperations - track.mediaId
+                                            } catch (e: Exception) {
+                                                // On failure, revert visual state
+                                                visualTracks = tracks
+                                                removeOperations = removeOperations - track.mediaId
+                                                // Show error feedback
+                                            }
                                         }
                                     })
                                 }

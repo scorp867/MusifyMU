@@ -44,6 +44,8 @@ fun TrackPickerSheet(
                         leadingContent = {
                             com.musify.mu.ui.components.Artwork(
                                 data = t.artUri,
+                                audioUri = t.mediaId,
+                                albumId = t.albumId,
                                 contentDescription = t.title,
                                 modifier = Modifier.size(40.dp)
                             )

@@ -90,6 +90,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                             ) {
                                 com.musify.mu.ui.components.Artwork(
                                     data = track.artUri,
+                                    audioUri = track.mediaId,
+                                    albumId = track.albumId,
                                     contentDescription = track.title,
                                     modifier = Modifier.size(48.dp)
                                 )
@@ -148,6 +150,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                         ) {
                             com.musify.mu.ui.components.Artwork(
                                 data = track.artUri,
+                                audioUri = track.mediaId,
+                                albumId = track.albumId,
                                 contentDescription = track.title,
                                 modifier = Modifier.size(48.dp)
                             )

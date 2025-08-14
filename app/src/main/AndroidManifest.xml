@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.musify.mu">
 
     <!-- Permissions for local music access, internet (for lyrics/art), and voice -->
@@ -17,7 +18,8 @@
         android:name=".MusifyApp"
         android:allowBackup="true"
         android:theme="@style/Theme.MusifyMU"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:hardwareAccelerated="true">
 
         <!-- Main Activity -->
         <activity
@@ -39,6 +41,8 @@
                 <action android:name="androidx.media3.session.MediaLibraryService" />
             </intent-filter>
         </service>
+
+
     </application>
 
 </manifest>

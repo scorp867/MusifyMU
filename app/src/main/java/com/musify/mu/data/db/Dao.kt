@@ -110,4 +110,11 @@ interface AppDao {
 
     @Query("SELECT * FROM lyrics_map WHERE mediaId = :mediaId")
     suspend fun getLyricsMap(mediaId: String): LyricsMap?
+
+    // Artwork helpers
+    @Query("UPDATE track SET artUri = :art WHERE mediaId = :mediaId")
+    suspend fun updateTrackArt(mediaId: String, art: String?)
+
+    @Query("SELECT * FROM track WHERE artUri IS NULL OR artUri = ''")
+    suspend fun getTracksMissingArt(): List<Track>
 }

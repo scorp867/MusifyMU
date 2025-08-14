@@ -5,19 +5,48 @@ import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.db.entities.*
 import com.musify.mu.data.media.MediaStoreScanner
+import com.musify.mu.data.media.BackgroundDataManager
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
     private val scanner by lazy { MediaStoreScanner(context, db) }
+    private val artResolver by lazy { com.musify.mu.data.media.ArtworkResolver(context, db) }
+    private val backgroundDataManager by lazy { BackgroundDataManager.getInstance(context) }
+
+    // Background loading progress
+    val loadingProgress: StateFlow<BackgroundDataManager.LoadingState> = backgroundDataManager.loadingProgress
+
+    // Initialize background data loading
+    fun initializeBackgroundLoading() {
+        backgroundDataManager.initializeData()
+        backgroundDataManager.schedulePeriodicRefresh()
+    }
 
     // New Flow-based method for real-time scanning updates
     fun refreshLibraryFlow(): Flow<MediaStoreScanner.ScanProgress> = scanner.scanAndCacheFlow()
 
     // Original method for backward compatibility
-    suspend fun refreshLibrary(): List<Track> = scanner.scanAndCache()
+    suspend fun refreshLibrary(): List<Track> {
+        val tracks = scanner.scanAndCache()
+        // Resolve embedded art for tracks missing art in background
+        artResolver.resolveMissingArtAsync()
+        return tracks
+    }
 
-    suspend fun getAllTracks(): List<Track> = db.dao().getAllTracks()
+    // Fast access to all tracks from cache
+    suspend fun getAllTracks(): List<Track> = backgroundDataManager.getAllTracks()
+
+    // Force refresh all data
+    suspend fun forceRefreshAll(): List<Track> {
+        backgroundDataManager.forceRefresh()
+        return getAllTracks()
+    }
     suspend fun search(q: String): List<Track> = db.dao().searchTracks("%$q%")
     suspend fun playlists(): List<Playlist> = db.dao().getPlaylists()
     suspend fun createPlaylist(name: String, imageUri: String? = null): Long = db.dao().createPlaylist(Playlist(name = name, imageUri = imageUri))
@@ -50,7 +79,17 @@ class LibraryRepository private constructor(private val context: Context, privat
         fun get(context: Context): LibraryRepository =
             INSTANCE ?: synchronized(this) {
                 val db = DatabaseProvider.get(context)
-                INSTANCE ?: LibraryRepository(context.applicationContext, db).also { INSTANCE = it }
+                INSTANCE ?: LibraryRepository(context.applicationContext, db).also { repo ->
+                    // Register lightweight observers to update cache in background
+                    val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+                    repo.scanner.registerContentObservers(onChange = {
+                        observerScope.launch {
+                            runCatching { repo.scanner.scanAndCache() }
+                            runCatching { repo.artResolver.resolveMissingArtAsync() }
+                        }
+                    })
+                    INSTANCE = repo
+                }
             }
     }
 }

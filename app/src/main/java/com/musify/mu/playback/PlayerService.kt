@@ -4,15 +4,19 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
+import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -47,6 +51,7 @@ class PlayerService : MediaLibraryService() {
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
     private var hasValidMedia = false
 
+    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
         
@@ -55,6 +60,34 @@ class PlayerService : MediaLibraryService() {
         queueStateStore = QueueStateStore(this)
         player = ExoPlayer.Builder(this).build()
         queue = QueueManager(player, queueStateStore)
+        
+        // Initialize QueueManager provider for UI access
+        QueueManagerProvider.setInstance(queue)
+        
+        // Add player listener for track changes and queue updates
+        player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onMediaItemTransition(
+                mediaItem: androidx.media3.common.MediaItem?,
+                reason: Int
+            ) {
+                mediaItem?.let { item ->
+                    // Notify QueueManager of track changes for history tracking
+                    queue.onTrackChanged(item.mediaId)
+                }
+            }
+            
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // Update playback state store when playback state changes
+                when (playbackState) {
+                    androidx.media3.common.Player.STATE_READY -> {
+                        // Player is ready to play
+                    }
+                    androidx.media3.common.Player.STATE_ENDED -> {
+                        // Playback ended, could trigger auto-play next or recommendations
+                    }
+                }
+            }
+        })
         
         // Initialize audio focus manager
         audioFocusManager = AudioFocusManager(this) { focusChange ->
@@ -151,7 +184,7 @@ class PlayerService : MediaLibraryService() {
             override fun onEvents(player: Player, events: Player.Events) {
                 // Save playback state
                 serviceScope.launch {
-                    val ids = queue.snapshotIds()
+                    val ids = queue.getQueueSnapshot().map { it.id }
                     val index = player.currentMediaItemIndex
                     val pos = player.currentPosition
                     val repeat = player.repeatMode
@@ -248,7 +281,29 @@ class PlayerService : MediaLibraryService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
-        player.pause()
+        android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
+        
+        // Stop playback immediately
+        player.stop()
+        player.clearMediaItems()
+        
+        // Clear queue state in coroutine
+        serviceScope.launch {
+            try {
+                queue.clearQueue(keepCurrent = false)
+            } catch (e: Exception) {
+                android.util.Log.e("PlayerService", "Error clearing queue on task removed", e)
+            }
+        }
+        
+        // Abandon audio focus
+        audioFocusManager.abandon()
+        
+        // Stop foreground service and clear notifications
+        stopForegroundService()
+        
+        // Stop the service completely
+        serviceScope.cancel()
         stopSelf()
     }
 
@@ -317,7 +372,16 @@ class PlayerService : MediaLibraryService() {
     }
     
     private fun stopForegroundService() {
-        // No-op since we don't manage our own notification anymore
+        // Stop foreground service and remove notifications
+        try {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+            // Also clear any system media notifications
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancelAll()
+            android.util.Log.d("PlayerService", "Stopped foreground service and cleared notifications")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error stopping foreground service", e)
+        }
     }
     
 

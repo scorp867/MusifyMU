@@ -86,7 +86,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     )
 
     enum class QueueSource {
-        USER_ADDED, PLAY_NEXT, ALBUM, PLAYLIST, SHUFFLE, LIKED_SONGS
+        USER_ADDED, PLAY_NEXT, ALBUM, PLAYLIST, LIKED_SONGS
     }
 
     data class PlayContext(
@@ -122,15 +122,55 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     sealed class QueueOperation {
         data class Add(val items: List<QueueItem>, val position: Int = -1) : QueueOperation()
-        data class Remove(val id: String) : QueueOperation()
-        data class Move(val from: Int, val to: Int) : QueueOperation()
-        data class Clear(val keepCurrent: Boolean = false) : QueueOperation()
-        data class Shuffle(val enabled: Boolean) : QueueOperation()
     }
 
     init {
         // Initialize with current state
         updateUIState()
+        
+        // Start background operation processing
+        CoroutineScope(Dispatchers.IO).launch {
+            processOperationQueue()
+        }
+    }
+    
+    /**
+     * Background operation processor that handles queued operations
+     * This ensures all operations are processed sequentially and safely
+     */
+    private suspend fun processOperationQueue() {
+        while (true) {
+            val operation = operationQueue.poll()
+            if (operation != null) {
+                try {
+                    executeOperation(operation)
+                } catch (e: Exception) {
+                    android.util.Log.e("QueueManager", "Error executing operation: $operation", e)
+                }
+            } else {
+                // No operations, wait a bit
+                kotlinx.coroutines.delay(50)
+            }
+        }
+    }
+    
+    /**
+     * Execute individual queue operations
+     */
+    private suspend fun executeOperation(operation: QueueOperation) = queueMutex.withLock {
+        when (operation) {
+            is QueueOperation.Add -> {
+                val position = if (operation.position == -1) mainQueue.size else operation.position
+                operation.items.forEachIndexed { index, item ->
+                    if (position + index <= mainQueue.size) {
+                        mainQueue.add(position + index, item)
+                        queueLookup[item.id] = item
+                        _queueChanges.postValue(QueueChangeEvent.ItemAdded(item, position + index))
+                    }
+                }
+                updateUIState()
+            }
+        }
     }
 
     suspend fun setQueue(
@@ -457,10 +497,10 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         }
     }
 
-    fun snapshotIds(): List<String> = try {
-        getCombinedQueue().map { it.id }
+    fun getQueueSnapshot(): List<QueueItem> = try {
+        getCombinedQueue().toList()
     } catch (e: Exception) {
-        android.util.Log.e("QueueManager", "Error getting snapshot", e)
+        android.util.Log.e("QueueManager", "Error getting queue snapshot", e)
         emptyList()
     }
 
@@ -631,4 +671,18 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         }
         getCurrentItem()
     }
+    
+    // Operation queue methods for external use
+    
+    /**
+     * Queue an add operation for background processing (for bulk operations)
+     */
+    fun queueAdd(items: List<QueueItem>, position: Int = -1) {
+        operationQueue.offer(QueueOperation.Add(items, position))
+    }
+    
+    /**
+     * Get pending operation count for UI feedback
+     */
+    fun getPendingOperationCount(): Int = operationQueue.size
 }

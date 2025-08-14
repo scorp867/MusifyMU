@@ -4,8 +4,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import com.musify.mu.data.db.entities.Track
 
-fun Track.toMediaItem(): MediaItem =
-    MediaItem.Builder()
+fun Track.toMediaItem(): MediaItem {
+    val artwork = artUri?.let { android.net.Uri.parse(it) }
+
+    return MediaItem.Builder()
         .setMediaId(mediaId)
         .setUri(mediaId) // mediaId stores the content:// URI string
         .setMediaMetadata(
@@ -13,10 +15,11 @@ fun Track.toMediaItem(): MediaItem =
                 .setTitle(title)
                 .setArtist(artist)
                 .setAlbumTitle(album)
-                .setArtworkUri(artUri?.let { android.net.Uri.parse(it) })
+                .setArtworkUri(artwork)
                 .build()
         )
         .build()
+}
 
 fun MediaItem.toTrack(): Track =
     Track(

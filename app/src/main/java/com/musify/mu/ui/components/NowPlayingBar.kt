@@ -29,6 +29,8 @@ import com.musify.mu.ui.theme.ElectricBlue
 import com.musify.mu.ui.theme.NeonPink
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.content.ContentUris
+import android.provider.MediaStore
 
 @Composable
 fun NowPlayingBar(
@@ -141,6 +143,8 @@ fun NowPlayingBar(
                 // Album artwork with rounded corners
                 Artwork(
                     data = currentTrack.artUri,
+                    audioUri = currentTrack.mediaId,
+                    albumId = currentTrack.albumId,
                     contentDescription = currentTrack.title,
                     modifier = Modifier
                         .size(56.dp)

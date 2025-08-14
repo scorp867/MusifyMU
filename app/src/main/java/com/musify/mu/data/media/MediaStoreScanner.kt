@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 
@@ -25,6 +28,54 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
         private const val TAG = "MediaStoreScanner"
         private const val CHUNK_SIZE = 100 // Process 100 songs at a time
         private const val SCAN_DELAY_MS = 50L // Small delay between chunks to avoid blocking
+    }
+    
+    // Simple debug method to check total audio files
+    suspend fun debugCountAllAudio(): Int = withContext(Dispatchers.IO) {
+        try {
+            // Count all audio files without any filters
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                arrayOf("COUNT(*)"),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val totalAudio = cursor.getInt(0)
+                    Log.d(TAG, "DEBUG: Total audio files in MediaStore: $totalAudio")
+                    totalAudio
+                } else 0
+            } ?: 0
+        } catch (e: Exception) {
+            Log.e(TAG, "Error counting all audio", e)
+            0
+        }
+    }
+
+    private var observerRegistered = false
+
+    private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    fun registerContentObservers(onChange: () -> Unit) {
+        if (observerRegistered) return
+        val cr = context.contentResolver
+        val observer = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                super.onChange(selfChange, uri)
+                // Fire and forget background rescan; caller decides how to handle UI updates
+                observerScope.launch {
+                    runCatching { scanAndCache() }
+                    runCatching { onChange() }
+                }
+            }
+        }
+
+        // Observe Audio media and playlists
+        cr.registerContentObserver(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, true, observer)
+        cr.registerContentObserver(MediaStore.Audio.Playlists.EXTERNAL_CONTENT_URI, true, observer)
+        cr.registerContentObserver(MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI, true, observer)
+        observerRegistered = true
     }
 
     // Flow-based chunked scanning for better performance and real-time updates
@@ -191,7 +242,9 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
     private suspend fun getTotalTrackCount(): Int = withContext(Dispatchers.IO) {
         try {
             val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1 AND ${MediaStore.Audio.Media.SIZE} > ?"
-            val selectionArgs = arrayOf("100000")
+            val selectionArgs = arrayOf("1000") // Use same size threshold as main scan
+
+            Log.d(TAG, "Getting total track count with selection: $selection, args: ${selectionArgs.contentToString()}")
 
             context.contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -201,9 +254,17 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                 null
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    cursor.getInt(0)
-                } else 0
-            } ?: 0
+                    val count = cursor.getInt(0)
+                    Log.d(TAG, "Total track count: $count")
+                    count
+                } else {
+                    Log.w(TAG, "Cursor returned no results for track count")
+                    0
+                }
+            } ?: run {
+                Log.e(TAG, "Query returned null cursor for track count")
+                0
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Error getting track count", e)
             0
@@ -227,8 +288,10 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
             )
 
             val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1 AND ${MediaStore.Audio.Media.SIZE} > ?"
-            val selectionArgs = arrayOf("100000")
+            val selectionArgs = arrayOf("1000") // Use same size threshold as main scan
             val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC LIMIT $limit OFFSET $offset"
+            
+            Log.d(TAG, "Scanning chunk: offset=$offset, limit=$limit with selection: $selection")
 
             context.contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -237,6 +300,8 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                 selectionArgs,
                 sortOrder
             )?.use { cursor ->
+                Log.d(TAG, "Chunk query returned cursor with ${cursor.count} items")
+                
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                 val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                 val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
@@ -246,6 +311,7 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                 val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                 val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
+                var processedInChunk = 0
                 while (cursor.moveToNext()) {
                     try {
                         val id = cursor.getLong(idCol)
@@ -258,9 +324,8 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                         val dateAdded = cursor.getLong(dateAddedCol)
                         val dataPath = cursor.getString(dataCol)
 
-                        // Validate file existence
-                        if (dataPath != null && File(dataPath).exists()) {
-                            // Skip artwork generation in chunks for performance - do it lazily
+                        // More lenient validation - just check if duration > 0
+                        if (duration > 0 && !dataPath.isNullOrBlank()) {
                             tracks += Track(
                                 mediaId = contentUri.toString(),
                                 title = title,
@@ -271,11 +336,19 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                                 albumId = albumId,
                                 dateAddedSec = dateAdded
                             )
+                            processedInChunk++
+                            
+                            if (processedInChunk <= 3) {
+                                Log.d(TAG, "Added track in chunk: $title by $artist (duration: ${duration}ms)")
+                            }
                         }
                     } catch (e: Exception) {
                         Log.w(TAG, "Error processing track in chunk", e)
                     }
                 }
+                Log.d(TAG, "Chunk completed: processed $processedInChunk tracks")
+            } ?: run {
+                Log.e(TAG, "Chunk query returned null cursor")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error scanning chunk", e)

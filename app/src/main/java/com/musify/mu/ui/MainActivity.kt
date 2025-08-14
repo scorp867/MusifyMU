@@ -1,6 +1,7 @@
 package com.musify.mu.ui
 
 import android.content.ComponentName
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -42,6 +43,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.await
 
 class MainActivity : ComponentActivity() {
+    
+    private var mediaController: MediaController? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -50,7 +53,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val context = this@MainActivity
-            var mediaController by remember { mutableStateOf<MediaController?>(null) }
+            var controllerState by remember { mutableStateOf<MediaController?>(null) }
             var hasPermissions by remember { mutableStateOf(false) }
 
             android.util.Log.d("MainActivity", "Composable created - initial hasPermissions: $hasPermissions")
@@ -75,6 +78,11 @@ class MainActivity : ComponentActivity() {
 
                 if (requiredGranted) {
                     android.util.Log.d("MainActivity", "Required media permissions granted - updating UI state")
+
+                    // Initialize background data loading when permissions are granted
+                    val repo = LibraryRepository.get(context)
+                    repo.initializeBackgroundLoading()
+                    android.util.Log.d("MainActivity", "Background data loading initialized after permission grant")
 
                     // Log optional permissions status
                     val optionalPermissions = PermissionManager.getOptionalPermissions()
@@ -102,20 +110,43 @@ class MainActivity : ComponentActivity() {
                 if (currentlyHasPermissions) {
                     hasPermissions = true
                     android.util.Log.d("MainActivity", "Required permissions already granted - set hasPermissions to true")
+                    
+                    // Initialize background data loading immediately when permissions are available
+                    val repo = LibraryRepository.get(context)
+                    repo.initializeBackgroundLoading()
+                    android.util.Log.d("MainActivity", "Background data loading initialized")
                 } else {
                     android.util.Log.d("MainActivity", "Requesting all permissions: ${allPermissions.toList()}")
                     permissionLauncher.launch(allPermissions)
                 }
             }
 
-            // Connect to media service
+            // Connect to media service with proper cleanup
             LaunchedEffect(Unit) {
-                val sessionToken = SessionToken(
-                    context,
-                    ComponentName(context, PlayerService::class.java)
-                )
-                val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-                mediaController = controllerFuture.await()
+                try {
+                    val sessionToken = SessionToken(
+                        context,
+                        ComponentName(context, PlayerService::class.java)
+                    )
+                    val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+                    val controller = controllerFuture.await()
+                    mediaController = controller
+                    controllerState = controller
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Failed to connect to MediaController", e)
+                }
+            }
+            
+            // Cleanup MediaController when leaving composition
+            DisposableEffect(Unit) {
+                onDispose {
+                    try {
+                        mediaController?.release()
+                        mediaController = null
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Error releasing MediaController", e)
+                    }
+                }
             }
 
             android.util.Log.d("MainActivity", "About to render UI with hasPermissions: $hasPermissions")
@@ -123,11 +154,32 @@ class MainActivity : ComponentActivity() {
             MusifyTheme {
                 Surface {
                     AppContent(
-                        mediaController = mediaController,
+                        mediaController = controllerState,
                         hasPermissions = hasPermissions
                     )
                 }
             }
+        }
+    }
+    
+    override fun onDestroy() {
+        super.onDestroy()
+        // Stop the PlayerService when the main activity is destroyed (app swiped away)
+        try {
+            val serviceIntent = Intent(this, PlayerService::class.java)
+            stopService(serviceIntent)
+            android.util.Log.d("MainActivity", "PlayerService stopped")
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error stopping PlayerService", e)
+        }
+        
+        // Ensure MediaController is properly released
+        try {
+            mediaController?.release()
+            mediaController = null
+            android.util.Log.d("MainActivity", "MediaController released in onDestroy")
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error releasing MediaController in onDestroy", e)
         }
     }
 }
@@ -144,7 +196,7 @@ private fun AppContent(
 
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
-    var hasPlayedBefore by remember { mutableStateOf(false) }
+    var hasPlayableQueue by remember { mutableStateOf(false) }
 
     // Listen to media controller changes
     LaunchedEffect(mediaController) {
@@ -152,7 +204,7 @@ private fun AppContent(
             controller.addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentTrack = mediaItem?.toTrack()
-                    hasPlayedBefore = currentTrack != null
+                    hasPlayableQueue = (controller.mediaItemCount > 0)
                 }
 
                 override fun onIsPlayingChanged(isPlayingNow: Boolean) {
@@ -161,12 +213,16 @@ private fun AppContent(
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     isPlaying = controller.isPlaying
-                    if (playbackState == Player.STATE_READY) {
-                        val item = controller.currentMediaItem
-                        if (item != null) {
-                            currentTrack = item.toTrack()
-                            hasPlayedBefore = true
-                        }
+                    hasPlayableQueue = controller.mediaItemCount > 0
+                }
+
+                override fun onTimelineChanged(
+                    timeline: androidx.media3.common.Timeline,
+                    reason: Int
+                ) {
+                    hasPlayableQueue = controller.mediaItemCount > 0
+                    if (controller.currentMediaItem != null) {
+                        currentTrack = controller.currentMediaItem?.toTrack()
                     }
                 }
             })
@@ -174,20 +230,7 @@ private fun AppContent(
             // Initialize UI state
             currentTrack = controller.currentMediaItem?.toTrack()
             isPlaying = controller.isPlaying
-            hasPlayedBefore = currentTrack != null
-
-            // If no media item yet, fallback to recent tracks
-            if (currentTrack == null && hasPermissions) {
-                try {
-                    val recentTracks = repo.recentlyPlayed(1)
-                    if (recentTracks.isNotEmpty()) {
-                        currentTrack = recentTracks.first()
-                        hasPlayedBefore = true
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("MainActivity", "Error loading recent tracks", e)
-                }
-            }
+            hasPlayableQueue = controller.mediaItemCount > 0
         }
     }
 
@@ -226,9 +269,9 @@ private fun AppContent(
                         exit = fadeOut(animationSpec = tween(300))
                     ) {
                         Column {
-                            // Show now playing bar only when there's a current track and we've played before
+                            // Show now playing bar only when controller has a queue
                             AnimatedVisibility(
-                                visible = currentTrack != null && hasPlayedBefore,
+                                visible = hasPlayableQueue && currentTrack != null,
                                 enter = fadeIn(animationSpec = tween(300)),
                                 exit = fadeOut(animationSpec = tween(300))
                             ) {
@@ -253,7 +296,11 @@ private fun AppContent(
             ) { paddingValues ->
                 MusifyNavGraph(
                     navController = navController,
-                    modifier = Modifier.padding(if (!shouldHideBottomBar) paddingValues else PaddingValues(0.dp)),
+                    modifier = Modifier.padding(
+                        if (!shouldHideBottomBar) paddingValues else PaddingValues(
+                            0.dp
+                        )
+                    ),
                     onPlay = onPlay,
                     hasPermissions = hasPermissions
                 )

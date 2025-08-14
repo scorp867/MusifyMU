@@ -10,8 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material.icons.rounded.QueueMusic
-import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.livedata.observeAsState
@@ -25,10 +24,22 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.musify.mu.ui.components.TopBar
+import com.musify.mu.ui.components.EnhancedQueueTrackItem
+import com.musify.mu.ui.components.EnhancedSwipeBackground
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
+import com.musify.mu.playback.QueueManager
+import com.musify.mu.playback.QueueManagerProvider
+import com.musify.mu.playback.LocalQueueManager
+import com.musify.mu.playback.rememberQueueState
+import com.musify.mu.playback.rememberQueueChanges
+import com.musify.mu.playback.rememberCurrentItem
+import com.musify.mu.playback.rememberQueueOperations
+import com.musify.mu.playback.rememberPendingOperations
+import com.musify.mu.playback.QueueContextHelper
 import androidx.compose.foundation.lazy.itemsIndexed
 import org.burnoutcrew.reorderable.*
+import org.burnoutcrew.reorderable.ItemPosition
 import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
 import androidx.compose.material.DismissDirection
@@ -41,6 +52,9 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.zIndex
+import android.content.ContentUris
+import android.provider.MediaStore
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -50,68 +64,199 @@ fun QueueScreen(navController: NavController) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // Use the enhanced QueueManager for real-time updates
-    var queue by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var currentIndex by remember { mutableStateOf(0) }
-    var queueState by remember { mutableStateOf(com.musify.mu.playback.QueueManager.QueueState()) }
-
-    // Real-time queue updates
-    LaunchedEffect(controller) {
-        controller?.let { c ->
-            // Initial load
-            queue = (0 until c.mediaItemCount).mapNotNull { idx -> c.getMediaItemAt(idx)?.toTrack() }
-            currentIndex = c.currentMediaItemIndex
-
-            // Add listener for real-time updates
-            val listener = object : androidx.media3.common.Player.Listener {
-                override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                    currentIndex = c.currentMediaItemIndex
+    // Advanced QueueManager integration with reactive state
+    val queueManager = LocalQueueManager()
+    val queueState by rememberQueueState()
+    val queueChanges by rememberQueueChanges()
+    val currentItem by rememberCurrentItem()
+    val queueOperations = rememberQueueOperations()
+    val pendingOperations by rememberPendingOperations()
+    
+    // Visual state for drag operations
+    var isDragging by remember { mutableStateOf(false) }
+    var visualQueueItems by remember { mutableStateOf<List<QueueManager.QueueItem>>(emptyList()) }
+    
+    // Get real-time queue data from QueueManager with fallback to controller
+    val queueItems = remember(queueManager, controller) {
+        derivedStateOf { 
+            val queueManagerItems = queueOperations.getVisibleQueue()
+            if (queueManagerItems.isEmpty() && controller != null) {
+                // Fallback: Get items directly from MediaController
+                (0 until controller.mediaItemCount).mapNotNull { idx ->
+                    controller.getMediaItemAt(idx)?.let { mediaItem ->
+                        QueueManager.QueueItem(
+                            mediaItem = mediaItem,
+                            position = idx,
+                            source = QueueManager.QueueSource.USER_ADDED
+                        )
+                    }
                 }
-                override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
-                    queue = (0 until c.mediaItemCount).mapNotNull { idx -> c.getMediaItemAt(idx)?.toTrack() }
+            } else {
+                queueManagerItems
+            }
+        }
+    }
+    
+    // Initialize QueueManager with controller data if needed
+    LaunchedEffect(controller, queueManager) {
+        if (controller != null && queueManager != null && queueState.totalItems == 0 && controller.mediaItemCount > 0) {
+            android.util.Log.d("QueueScreen", "Initializing QueueManager with ${controller.mediaItemCount} items from controller")
+            
+            // Get all media items from controller
+            val mediaItems = (0 until controller.mediaItemCount).mapNotNull { idx ->
+                controller.getMediaItemAt(idx)
+            }
+            
+            if (mediaItems.isNotEmpty()) {
+                // Initialize QueueManager with current playlist
+                queueOperations.setQueueWithContext(
+                    items = mediaItems,
+                    startIndex = controller.currentMediaItemIndex.coerceAtLeast(0),
+                    play = false, // Don't start playing, just set the queue
+                    startPosMs = 0L,
+                    context = null
+                )
+            }
+        }
+    }
+    
+    // Debug: Log queue state
+    LaunchedEffect(queueItems.value, queueState) {
+        android.util.Log.d("QueueScreen", "Queue items count: ${queueItems.value.size}")
+        android.util.Log.d("QueueScreen", "Queue state total: ${queueState.totalItems}")
+        android.util.Log.d("QueueScreen", "Controller items: ${controller?.mediaItemCount ?: 0}")
+    }
+    
+    // Function to convert QueueItem to Track for UI
+    fun QueueManager.QueueItem.toTrack(): Track {
+        val md = mediaItem.mediaMetadata
+        return Track(
+            mediaId = mediaItem.mediaId,
+            title = md.title?.toString() ?: "",
+            artist = md.artist?.toString() ?: "",
+            album = md.albumTitle?.toString() ?: "",
+            durationMs = 0L,
+            artUri = md.artworkUri?.toString(),
+            albumId = null
+        )
+    }
+
+    // Sync visual queue with real queue data
+    LaunchedEffect(queueItems.value) {
+                    if (!isDragging) {
+            visualQueueItems = queueItems.value.toList()
                 }
             }
-            c.addListener(listener)
 
-            // Cleanup listener
+    // React to queue changes for real-time updates
+    LaunchedEffect(queueChanges) {
+        queueChanges?.let { change ->
             scope.launch {
-                try {
-                    // Keep the listener active
-                } finally {
-                    c.removeListener(listener)
+                when (change) {
+                    is QueueManager.QueueChangeEvent.ItemAdded -> {
+                        snackbarHostState.showSnackbar(
+                            message = "Track added to queue",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                    is QueueManager.QueueChangeEvent.ItemRemoved -> {
+                        snackbarHostState.showSnackbar(
+                            message = "Track removed from queue",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                    is QueueManager.QueueChangeEvent.ItemMoved -> {
+                        snackbarHostState.showSnackbar(
+                            message = "Track moved in queue",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                    is QueueManager.QueueChangeEvent.QueueShuffled -> {
+                        snackbarHostState.showSnackbar(
+                            message = if (queueState.shuffleEnabled) "Shuffle enabled" else "Shuffle disabled",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                    is QueueManager.QueueChangeEvent.QueueCleared -> {
+                        snackbarHostState.showSnackbar(
+                            message = "Queue cleared",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                    is QueueManager.QueueChangeEvent.QueueReordered -> {
+                        snackbarHostState.showSnackbar(
+                            message = "Queue reordered",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
                 }
             }
         }
     }
 
+    // Enhanced drag state with optimized configuration
+    val dragConfig = remember {
+        com.musify.mu.ui.components.DragDropConfig(
+            longPressTimeout = 250L, // Instant drag feel
+            animationDuration = 150,
+            enableHardwareAcceleration = true,
+            enableAutoScroll = true,
+            autoScrollThreshold = 60f // More responsive edge scrolling
+        )
+    }
+
     val state = rememberReorderableLazyListState(
         onMove = { from, to ->
-            // Provide immediate UI feedback
+            // Immediate haptic feedback for better UX
+            if (dragConfig.enableHapticFeedback) {
             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-
-            // Update local state immediately for smooth UX
-            queue = queue.toMutableList().apply {
-                add(to.index, removeAt(from.index))
             }
 
-            // Update the actual queue
-            val fromIdx = from.index
-            val toIdx = to.index
-            if (fromIdx != toIdx) {
-                scope.launch {
-                    try {
-                        controller?.moveMediaItem(fromIdx, toIdx)
-                    } catch (e: Exception) {
-                        // Revert local change if move fails
-                        queue = queue.toMutableList().apply {
-                            add(fromIdx, removeAt(toIdx))
-                        }
-                    }
-                }
+            isDragging = true
+            
+            // Update ONLY visual state for smooth UI feedback
+            val newVisualItems = visualQueueItems.toMutableList()
+            if (from.index < newVisualItems.size && to.index <= newVisualItems.size) {
+                val item = newVisualItems.removeAt(from.index)
+                newVisualItems.add(to.index, item)
+                visualQueueItems = newVisualItems
             }
         },
-        onDragEnd = { _, _ ->
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        onDragEnd = { from, to ->
+            if (dragConfig.enableHapticFeedback) {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            }
+            
+            // Commit the actual move operation using QueueManager
+            val fromIdx = from  // from is Int in onDragEnd
+            val toIdx = to      // to is Int in onDragEnd
+            
+            if (fromIdx != toIdx && fromIdx < queueItems.value.size && toIdx <= queueItems.value.size) {
+                scope.launch {
+                    try {
+                        // Use QueueManager's move function for immediate execution
+                        queueOperations.moveItem(fromIdx, toIdx)
+                        
+                        snackbarHostState.showSnackbar(
+                            message = "Track moved successfully",
+                            duration = SnackbarDuration.Short
+                        )
+                    } catch (e: Exception) {
+                        // Revert visual state on error
+                        visualQueueItems = queueItems.value.toList()
+                        
+                        snackbarHostState.showSnackbar(
+                            message = "Failed to move track: ${e.message}",
+                            duration = SnackbarDuration.Long
+                        )
+                    } finally {
+                        isDragging = false
+                    }
+                }
+            } else {
+                isDragging = false
+                visualQueueItems = queueItems.value.toList()
+            }
         }
     )
 
@@ -136,21 +281,46 @@ fun QueueScreen(navController: NavController) {
                 .background(backgroundGradient)
                 .padding(paddingValues)
         ) {
-            // Enhanced queue header with controls
+            // Enhanced queue header with advanced controls
             EnhancedQueueHeader(
-                queueSize = queue.size,
-                currentIndex = currentIndex,
+                queueSize = queueState.totalItems,
+                currentIndex = queueState.currentIndex,
                 queueState = queueState,
+                currentItem = currentItem,
+                queueOperations = queueOperations,
+                pendingOperations = pendingOperations,
                 onShuffleToggle = { enabled ->
                     scope.launch {
-                        controller?.shuffleModeEnabled = enabled
+                        // Use QueueManager's setShuffle for immediate execution
+                        queueOperations.toggleShuffle(enabled)
+                    }
+                },
+                onRepeatModeChange = { mode ->
+                    queueOperations.setRepeatMode(mode)
+                },
+                onClearQueue = { keepCurrent ->
+                    scope.launch {
+                        // Use QueueManager's clearQueue for immediate execution
+                        queueOperations.clearQueue(keepCurrent)
                     }
                 }
             )
 
-            if (queue.isEmpty()) {
-                EmptyQueueMessage()
+            if (visualQueueItems.isEmpty()) {
+                EmptyQueueMessage(
+                    queueState = queueState,
+                    controllerItemCount = controller?.mediaItemCount ?: 0,
+                    queueManagerConnected = queueManager != null
+                )
             } else {
+                // Enhanced auto-scroll state for smooth edge scrolling
+                val autoScrollState = com.musify.mu.ui.components.EnhancedDragAndDrop
+                    .rememberAutoScrollState(
+                        listState = state.listState,
+                        threshold = dragConfig.autoScrollThreshold,
+                        maxScrollSpeed = 400f
+                    )
+
                 LazyColumn(
                     state = state.listState,
                     modifier = Modifier
@@ -159,57 +329,82 @@ fun QueueScreen(navController: NavController) {
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (queueState.playNextCount > 0 && queueState.currentIndex + 1 < visualQueueItems.size) {
+                        item(key = "queue_section_playnext_header") {
+                            Text(
+                                text = "Play Next (${queueState.playNextCount})",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp)
+                            )
+                        }
+                    }
                     itemsIndexed(
-                        queue,
-                        key = { idx, item -> "queue_${idx}_${item.mediaId}" }
-                    ) { idx, track ->
+                        visualQueueItems, // Use visual queue for display
+                        key = { idx, item -> "queue_${idx}_${item.id}" }
+                    ) { idx, queueItem ->
+                        val track = queueItem.toTrack()
                         val dismissState = rememberDismissState(
                             confirmStateChange = { value ->
                                 when (value) {
                                     DismissValue.DismissedToEnd -> {
                                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        // Move to play next
-                                        val insertIndex = ((controller?.currentMediaItemIndex ?: -1) + 1)
-                                            .coerceAtMost(controller?.mediaItemCount ?: 0)
+                                        // Use QueueManager's advanced playNext functionality
                                         scope.launch {
                                             try {
-                                                controller?.removeMediaItem(idx)
-                                                controller?.addMediaItem(insertIndex, track.toMediaItem())
+                                                // Create context for the play next operation
+                                                val context = queueState.context ?: QueueContextHelper.createSearchContext("manual_add")
+                                                
+                                                // Use QueueManager's advanced playNext with context
+                                                queueOperations.playNextWithContext(
+                                                    items = listOf(track.toMediaItem()),
+                                                    context = context
+                                                )
+                                                
                                                 snackbarHostState.showSnackbar(
-                                                    message = "Moved to play next",
+                                                    message = "Added to play next",
                                                     duration = SnackbarDuration.Short
                                                 )
                                             } catch (e: Exception) {
                                                 snackbarHostState.showSnackbar(
-                                                    message = "Failed to move track",
+                                                    message = "Failed to add to play next: ${e.message}",
                                                     duration = SnackbarDuration.Short
                                                 )
                                             }
                                         }
-                                        true
+                                        false // Don't dismiss the item
                                     }
                                     DismissValue.DismissedToStart -> {
                                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        // Remove from queue
+                                        // Use QueueManager's advanced remove functionality
                                         scope.launch {
                                             try {
-                                                controller?.removeMediaItem(idx)
+                                                                                // Store item for potential undo
+                                val removedItem = queueItem
+                                
+                                // Use QueueManager's removeAt function for immediate execution
+                                queueOperations.removeItemById(removedItem.id)
+                                                
                                                 val result = snackbarHostState.showSnackbar(
                                                     message = "Removed \"${track.title}\" from queue",
                                                     actionLabel = "Undo",
                                                     duration = SnackbarDuration.Long
                                                 )
                                                 if (result == SnackbarResult.ActionPerformed) {
-                                                    controller?.addMediaItem(idx, track.toMediaItem())
+                                                    // Restore item using QueueManager's addToEnd with context
+                                                    queueOperations.addToEndWithContext(
+                                                        items = listOf(removedItem.mediaItem),
+                                                        context = removedItem.context
+                                                    )
                                                 }
                                             } catch (e: Exception) {
                                                 snackbarHostState.showSnackbar(
-                                                    message = "Failed to remove track",
+                                                    message = "Failed to remove track: ${e.message}",
                                                     duration = SnackbarDuration.Short
                                                 )
                                             }
                                         }
-                                        true
+                                        true // Dismiss the item
                                     }
                                     else -> false
                                 }
@@ -223,21 +418,35 @@ fun QueueScreen(navController: NavController) {
                                 EnhancedSwipeBackground(dismissState.dismissDirection)
                             },
                             dismissContent = {
-                                ReorderableItem(state, key = "queue_${idx}_${track.mediaId}") { isDragging ->
+                                ReorderableItem(state, key = "queue_${idx}_${queueItem.id}") { isDragging ->
                                     EnhancedQueueTrackItem(
                                         track = track,
-                                        isCurrentlyPlaying = idx == currentIndex,
+                                        isCurrentlyPlaying = idx == queueState.currentIndex,
                                         isDragging = isDragging,
+                                        isMarkedPlayNext = queueItem.source == QueueManager.QueueSource.PLAY_NEXT,
                                         position = idx + 1,
                                         onClick = {
+                                            if (dragConfig.enableHapticFeedback) {
                                             hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
                                             controller?.seekToDefaultPosition(idx)
                                         },
-                                        reorderState = state
+                                        reorderState = state,
+                                        config = dragConfig
                                     )
                                 }
                             }
                         )
+                    }
+                    if (queueState.playNextCount > 0 && queueState.currentIndex + queueState.playNextCount + 1 < visualQueueItems.size) {
+                        item(key = "queue_section_normal_header") {
+                            Text(
+                                text = "Queue (${queueState.totalItems - queueState.playNextCount - 1})",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -249,8 +458,13 @@ fun QueueScreen(navController: NavController) {
 private fun EnhancedQueueHeader(
     queueSize: Int,
     currentIndex: Int,
-    queueState: com.musify.mu.playback.QueueManager.QueueState,
-    onShuffleToggle: (Boolean) -> Unit
+    queueState: QueueManager.QueueState,
+    currentItem: QueueManager.QueueItem? = null,
+    queueOperations: com.musify.mu.playback.EnhancedQueueOperations,
+    pendingOperations: Int = 0,
+    onShuffleToggle: (Boolean) -> Unit,
+    onRepeatModeChange: (Int) -> Unit = {},
+    onClearQueue: (Boolean) -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -304,10 +518,11 @@ private fun EnhancedQueueHeader(
                 }
             }
 
-            // Queue controls
+            // Advanced queue controls
             if (queueSize > 0) {
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // First row of controls
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -325,6 +540,120 @@ private fun EnhancedQueueHeader(
                             )
                         }
                     )
+                    
+                    // Repeat mode toggle
+                    FilterChip(
+                        onClick = { 
+                            val nextMode = when (queueState.repeatMode) {
+                                0 -> 1 // None -> All
+                                1 -> 2 // All -> One
+                                2 -> 0 // One -> None
+                                else -> 0
+                            }
+                            onRepeatModeChange(nextMode)
+                        },
+                        label = { 
+                            Text(when (queueState.repeatMode) {
+                                1 -> "Repeat All"
+                                2 -> "Repeat One"
+                                else -> "No Repeat"
+                            })
+                        },
+                        selected = queueState.repeatMode != 0,
+                        leadingIcon = {
+                            Icon(
+                                imageVector = when (queueState.repeatMode) {
+                                    1 -> Icons.Rounded.Repeat
+                                    2 -> Icons.Rounded.RepeatOne
+                                    else -> Icons.Rounded.Repeat
+                                },
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Second row of controls
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Clear queue options
+                    var showClearMenu by remember { mutableStateOf(false) }
+                    
+                    Box {
+                        FilterChip(
+                            onClick = { showClearMenu = true },
+                            label = { Text("Clear Queue") },
+                            selected = false,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Clear,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        )
+                        
+                        DropdownMenu(
+                            expanded = showClearMenu,
+                            onDismissRequest = { showClearMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Clear All") },
+                                leadingIcon = { Icon(Icons.Rounded.Clear, contentDescription = null) },
+                                onClick = {
+                                    onClearQueue(false)
+                                    showClearMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Keep Current") },
+                                leadingIcon = { Icon(Icons.Rounded.SkipNext, contentDescription = null) },
+                                onClick = {
+                                    onClearQueue(true)
+                                    showClearMenu = false
+                                }
+                            )
+                        }
+                    }
+                    
+                    // Queue info chip
+                    if (queueState.playNextCount > 0) {
+                        FilterChip(
+                            onClick = { },
+                            label = { Text("${queueState.playNextCount} in Play Next") },
+                            selected = false,
+                            enabled = false,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlaylistPlay,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        )
+                    }
+                    
+                    // Pending operations indicator
+                    if (pendingOperations > 0) {
+                        FilterChip(
+                            onClick = { },
+                            label = { Text("$pendingOperations pending") },
+                            selected = true,
+                            enabled = false,
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.HourglassEmpty,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -332,7 +661,11 @@ private fun EnhancedQueueHeader(
 }
 
 @Composable
-private fun EmptyQueueMessage() {
+private fun EmptyQueueMessage(
+    queueState: QueueManager.QueueState = QueueManager.QueueState(),
+    controllerItemCount: Int = 0,
+    queueManagerConnected: Boolean = false
+) {
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
@@ -357,6 +690,46 @@ private fun EmptyQueueMessage() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
             )
+            
+            // Debug information
+            Spacer(modifier = Modifier.height(16.dp))
+            Card(
+                modifier = Modifier.padding(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = "Debug Info:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "QueueManager Connected: $queueManagerConnected",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Controller Items: $controllerItemCount",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Queue State Total: ${queueState.totalItems}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Current Index: ${queueState.currentIndex}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
@@ -415,134 +788,7 @@ private fun EnhancedSwipeBackground(dismissDirection: DismissDirection?) {
     }
 }
 
-@Composable
-private fun EnhancedQueueTrackItem(
-    track: Track,
-    isCurrentlyPlaying: Boolean,
-    isDragging: Boolean,
-    position: Int,
-    onClick: () -> Unit,
-    reorderState: ReorderableLazyListState
-) {
-    val animatedElevation by animateDpAsState(
-        targetValue = if (isDragging) 8.dp else 2.dp,
-        animationSpec = tween(200),
-        label = "drag_elevation"
-    )
 
-    val animatedScale by animateFloatAsState(
-        targetValue = if (isDragging) 1.02f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "drag_scale"
-    )
-
-    val containerColor = if (isCurrentlyPlaying) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-    } else {
-        MaterialTheme.colorScheme.surface
-    }
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(animatedElevation, RoundedCornerShape(12.dp))
-            .clickable { onClick() }
-            .graphicsLayer {
-                scaleX = animatedScale
-                scaleY = animatedScale
-            },
-        colors = CardDefaults.cardColors(containerColor = containerColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Position indicator
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .background(
-                        if (isCurrentlyPlaying)
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                        else
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
-                        RoundedCornerShape(8.dp)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = position.toString(),
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = if (isCurrentlyPlaying) FontWeight.Bold else FontWeight.Normal
-                    ),
-                    color = if (isCurrentlyPlaying)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Track artwork
-            AsyncImage(
-                model = track.artUri,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Track info
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = track.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = if (isCurrentlyPlaying) FontWeight.SemiBold else FontWeight.Normal
-                    ),
-                    color = if (isCurrentlyPlaying)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = track.artist,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Drag handle
-            IconButton(
-                onClick = { },
-                modifier = Modifier
-                    .detectReorderAfterLongPress(reorderState)
-                    .size(40.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.DragHandle,
-                    contentDescription = "Reorder",
-                    tint = if (isDragging)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                )
-            }
-        }
-    }
-}
 
 private fun androidx.media3.common.MediaItem.toTrack(): Track {
     val md = mediaMetadata
