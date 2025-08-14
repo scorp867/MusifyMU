@@ -16,6 +16,7 @@ import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -52,7 +53,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
 
     Scaffold(
         topBar = {
-            SmallTopAppBar(title = { Text(title) })
+            TopAppBar(title = { Text(title) })
         }
     ) { padding ->
         if (type == "favorites") {

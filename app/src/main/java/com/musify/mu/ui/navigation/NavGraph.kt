@@ -17,6 +17,7 @@ import com.musify.mu.ui.screens.*
 sealed class Screen(val route: String) {
     object Home : Screen("home")
     object Library : Screen("library")
+    object Search : Screen("search")
     object Queue : Screen("queue")
     object NowPlaying : Screen("now_playing")
     object Lyrics : Screen("lyrics")
@@ -28,22 +29,24 @@ sealed class Screen(val route: String) {
 fun MusifyNavGraph(
     navController: NavHostController,
     modifier: Modifier = Modifier,
-    onPlay: (List<Track>, Int) -> Unit
+    onPlay: (List<Track>, Int) -> Unit,
+    hasPermissions: Boolean = true
 ) {
     // Configure back behavior for player screen
     val onBackFromPlayer: () -> Unit = {
         // Pop back to previous screen without re-creating that screen
         navController.popBackStack()
     }
-    
+
     NavHost(
         navController = navController,
         startDestination = Screen.Home.route,
         modifier = modifier
     ) {
         composable(Screen.Home.route) { HomeScreen(navController, onPlay) }
-        composable(Screen.Library.route) { LibraryScreen(navController, onPlay) }
-        
+        composable(Screen.Library.route) { LibraryScreen(navController, onPlay, hasPermissions) }
+        composable(Screen.Search.route) { SearchScreen(navController, onPlay) }
+
         // Queue screen as a modal overlay - only accessible from player screen
         composable(
             route = Screen.Queue.route,
@@ -59,14 +62,14 @@ fun MusifyNavGraph(
                     animationSpec = tween(300)
                 ) + fadeOut(animationSpec = tween(300))
             }
-        ) { 
+        ) {
             BackHandler(enabled = true) {
                 // Always go back to the previous screen (should be player)
                 navController.popBackStack()
             }
-            QueueScreen(navController) 
+            QueueScreen(navController)
         }
-        
+
         composable(Screen.SeeAll.route) { backStackEntry ->
             val type = backStackEntry.arguments?.getString("type") ?: ""
             SeeAllScreen(navController = navController, type = type, onPlay = onPlay)
@@ -75,7 +78,7 @@ fun MusifyNavGraph(
             val id = backStackEntry.arguments?.getString("id")?.toLongOrNull() ?: -1L
             PlaylistDetailsScreen(navController = navController, playlistId = id, onPlay = onPlay)
         }
-        
+
         // Player screen as a modal overlay - doesn't participate in bottom navigation
         composable(
             route = Screen.NowPlaying.route,
@@ -91,11 +94,11 @@ fun MusifyNavGraph(
                     animationSpec = tween(300)
                 ) + fadeOut(animationSpec = tween(300))
             }
-        ) { 
+        ) {
             BackHandler(enabled = true, onBack = onBackFromPlayer)
-            NowPlayingScreen(navController) 
+            NowPlayingScreen(navController)
         }
-        
+
         composable(Screen.Lyrics.route) { LyricsView(navController) }
     }
 }

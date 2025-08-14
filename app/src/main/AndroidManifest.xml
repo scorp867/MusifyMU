@@ -15,7 +15,6 @@
 
     <application
         android:name=".MusifyApp"
-        android:label="Musify MU"
         android:allowBackup="true"
         android:theme="@style/Theme.MusifyMU"
         android:supportsRtl="true">

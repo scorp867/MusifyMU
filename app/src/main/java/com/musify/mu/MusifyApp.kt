@@ -10,7 +10,9 @@ class MusifyApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Here you can initialize any global dependencies or SDKs if needed
-        // Example: preload database, set up logging, crash reporting, etc.
+
+        // Initialize app components
+        // For an offline music app, we don't need background scanning
+        // Music will be scanned when user opens the library screen
     }
 }
