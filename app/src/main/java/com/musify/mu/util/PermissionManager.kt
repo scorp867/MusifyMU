@@ -38,9 +38,19 @@ object PermissionManager {
     }
     
     fun checkMediaPermissions(context: Context): Boolean {
-        return getRequiredMediaPermissions().all { permission ->
-            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+        val permissions = getRequiredMediaPermissions()
+        android.util.Log.d("PermissionManager", "Checking permissions: ${permissions.toList()}")
+        
+        val results = permissions.map { permission ->
+            val granted = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+            android.util.Log.d("PermissionManager", "Permission $permission: ${if (granted) "GRANTED" else "DENIED"}")
+            permission to granted
         }
+        
+        val allGranted = results.all { it.second }
+        android.util.Log.d("PermissionManager", "Overall permission status: ${if (allGranted) "ALL GRANTED" else "SOME DENIED"}")
+        
+        return allGranted
     }
     
     fun requestMediaPermissions(activity: Activity) {

@@ -53,12 +53,17 @@ class MainActivity : ComponentActivity() {
             var mediaController by remember { mutableStateOf<MediaController?>(null) }
             var hasPermissions by remember { mutableStateOf(false) }
 
+            android.util.Log.d("MainActivity", "Composable created - initial hasPermissions: $hasPermissions")
+
             // Permission launcher for requesting media permissions
             val permissionLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestMultiplePermissions()
             ) { permissions ->
+                android.util.Log.d("MainActivity", "Permission result received: $permissions")
                 val allGranted = permissions.values.all { it }
+                android.util.Log.d("MainActivity", "All permissions granted: $allGranted")
                 hasPermissions = allGranted
+                android.util.Log.d("MainActivity", "Updated hasPermissions to: $hasPermissions")
                 if (allGranted) {
                     android.util.Log.d("MainActivity", "Media permissions granted - updating UI state")
                 } else {
@@ -68,13 +73,19 @@ class MainActivity : ComponentActivity() {
 
             // Check permissions immediately when the composable is created
             LaunchedEffect(Unit) {
+                android.util.Log.d("MainActivity", "LaunchedEffect started - checking permissions")
+                val requiredPermissions = PermissionManager.getRequiredMediaPermissions()
+                android.util.Log.d("MainActivity", "Required permissions: ${requiredPermissions.toList()}")
+                
                 val currentlyHasPermissions = PermissionManager.checkMediaPermissions(context)
+                android.util.Log.d("MainActivity", "Current permission status: $currentlyHasPermissions")
+                
                 if (currentlyHasPermissions) {
                     hasPermissions = true
-                    android.util.Log.d("MainActivity", "Permissions already granted")
+                    android.util.Log.d("MainActivity", "Permissions already granted - set hasPermissions to true")
                 } else {
-                    android.util.Log.d("MainActivity", "Requesting permissions")
-                    permissionLauncher.launch(PermissionManager.getRequiredMediaPermissions())
+                    android.util.Log.d("MainActivity", "Requesting permissions: ${requiredPermissions.toList()}")
+                    permissionLauncher.launch(requiredPermissions)
                 }
             }
 
@@ -87,6 +98,8 @@ class MainActivity : ComponentActivity() {
                 val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
                 mediaController = controllerFuture.await()
             }
+
+            android.util.Log.d("MainActivity", "About to render UI with hasPermissions: $hasPermissions")
 
             MusifyTheme {
                 Surface {
