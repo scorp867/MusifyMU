@@ -82,6 +82,7 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
     // Original method for backward compatibility
     suspend fun scanAndCache(): List<Track> = withContext(Dispatchers.IO) {
         try {
+            Log.d(TAG, "Starting media scan...")
             val tracks = mutableListOf<Track>()
             
             val projection = arrayOf(
@@ -96,9 +97,12 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                 MediaStore.Audio.Media.DATA
             )
             
+            // Less restrictive selection - only require IS_MUSIC = 1 and size > 1KB
             val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1 AND ${MediaStore.Audio.Media.SIZE} > ?"
-            val selectionArgs = arrayOf("100000") // Filter out very small files (< 100KB)
+            val selectionArgs = arrayOf("1000") // Reduced from 100KB to 1KB
             val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+            
+            Log.d(TAG, "Querying MediaStore with selection: $selection")
             
             context.contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -107,6 +111,9 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                 selectionArgs,
                 sortOrder
             )?.use { cursor ->
+                val count = cursor.count
+                Log.d(TAG, "MediaStore query returned $count potential tracks")
+                
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                 val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                 val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
@@ -117,8 +124,12 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                 val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
                 val dataCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
 
+                var processedCount = 0
+                var validCount = 0
+                
                 while (cursor.moveToNext()) {
                     try {
+                        processedCount++
                         val id = cursor.getLong(idCol)
                         val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
                         val title = cursor.getString(titleCol)?.takeIf { it.isNotBlank() } ?: "Unknown"
@@ -130,9 +141,13 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                         val size = cursor.getLong(sizeCol)
                         val dataPath = cursor.getString(dataCol)
                         
-                        // Validate file existence for better compatibility
-                        if (dataPath != null && File(dataPath).exists()) {
-                            val artUri = getOrCreateTrackArtwork(contentUri.toString(), albumId, title, artist, album)
+                        // More lenient validation - only check if duration is reasonable
+                        val isValid = duration > 0 && dataPath != null && dataPath.isNotBlank()
+                        
+                        if (isValid) {
+                            validCount++
+                            // Skip artwork generation for faster scanning - will be loaded lazily
+                            val artUri: String? = null
                             
                             tracks += Track(
                                 mediaId = contentUri.toString(),
@@ -144,20 +159,29 @@ class MediaStoreScanner(private val context: Context, private val db: AppDatabas
                                 albumId = albumId,
                                 dateAddedSec = dateAdded
                             )
+                            
+                            if (validCount <= 5) {
+                                Log.d(TAG, "Added track: $title by $artist (duration: ${duration}ms, path: $dataPath)")
+                            }
                         } else {
-                            Log.w(TAG, "Skipping invalid file: $dataPath")
+                            Log.v(TAG, "Skipped invalid track: $title (duration: $duration, path: $dataPath)")
                         }
                     } catch (e: Exception) {
-                        Log.w(TAG, "Error processing track", e)
-                        // Continue with next track
+                        Log.w(TAG, "Error processing track at cursor position $processedCount", e)
                     }
                 }
+                
+                Log.d(TAG, "Processed $processedCount tracks, found $validCount valid tracks")
+            } ?: run {
+                Log.e(TAG, "MediaStore query returned null cursor - permission issue?")
             }
-            
+
+            Log.d(TAG, "Caching ${tracks.size} tracks to database...")
+            // Cache to database for future use
             db.dao().upsertTracks(tracks)
-            Log.i(TAG, "Successfully scanned ${tracks.size} tracks")
-            tracks
+            Log.d(TAG, "Media scan completed successfully with ${tracks.size} tracks")
             
+            tracks
         } catch (e: Exception) {
             Log.e(TAG, "Error during media scan", e)
             emptyList()

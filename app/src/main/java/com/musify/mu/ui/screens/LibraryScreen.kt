@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
-
+import com.musify.mu.util.PermissionManager
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.util.toMediaItem
 import com.musify.mu.ui.components.AlphabeticalScrollBar
@@ -67,28 +67,42 @@ fun LibraryScreen(
 
     // Load tracks when permissions are granted
     LaunchedEffect(hasPermissions) {
+        android.util.Log.d("LibraryScreen", "LaunchedEffect triggered - hasPermissions: $hasPermissions")
         if (hasPermissions) {
             coroutineScope.launch {
                 try {
                     isLoading = true
+                    android.util.Log.d("LibraryScreen", "Starting track loading process...")
+                    
                     // First try to get cached tracks
+                    android.util.Log.d("LibraryScreen", "Checking for cached tracks...")
                     tracks = repo.getAllTracks()
+                    android.util.Log.d("LibraryScreen", "Found ${tracks.size} cached tracks")
+                    
                     if (tracks.isEmpty()) {
                         // If no cached tracks, scan the device
-                        android.util.Log.d("LibraryScreen", "No cached tracks found, scanning device...")
+                        android.util.Log.d("LibraryScreen", "No cached tracks found, starting device scan...")
                         tracks = repo.refreshLibrary()
-                        android.util.Log.d("LibraryScreen", "Scan completed, found ${tracks.size} tracks")
+                        android.util.Log.d("LibraryScreen", "Device scan completed, found ${tracks.size} tracks")
+                        
+                        if (tracks.isEmpty()) {
+                            android.util.Log.w("LibraryScreen", "No tracks found after scan - checking permissions again")
+                            val hasPerms = PermissionManager.checkMediaPermissions(context)
+                            android.util.Log.w("LibraryScreen", "Current permission status: $hasPerms")
+                        }
                     } else {
-                        android.util.Log.d("LibraryScreen", "Loaded ${tracks.size} cached tracks")
+                        android.util.Log.d("LibraryScreen", "Using cached tracks: ${tracks.take(3).map { "${it.title} by ${it.artist}" }}")
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("LibraryScreen", "Error loading tracks", e)
                     tracks = emptyList()
                 } finally {
                     isLoading = false
+                    android.util.Log.d("LibraryScreen", "Loading process completed - isLoading: false, tracks.size: ${tracks.size}")
                 }
             }
         } else {
+            android.util.Log.d("LibraryScreen", "No permissions granted, clearing tracks")
             isLoading = false
             tracks = emptyList()
         }
