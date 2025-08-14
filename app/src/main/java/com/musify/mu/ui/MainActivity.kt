@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -36,27 +37,43 @@ import com.musify.mu.ui.navigation.MusifyNavGraph
 import com.musify.mu.ui.theme.MusifyTheme
 import com.musify.mu.util.toMediaItem
 import com.musify.mu.util.PermissionManager
-import com.musify.mu.util.RequestPermissionsEffect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.await
 
 class MainActivity : ComponentActivity() {
+
+    // Permission launcher for requesting media permissions
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        permissionsGranted = allGranted
+        if (allGranted) {
+            android.util.Log.d("MainActivity", "Media permissions granted")
+        } else {
+            android.util.Log.w("MainActivity", "Some permissions denied: ${permissions.filter { !it.value }}")
+        }
+    }
+    
+    private var permissionsGranted by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Check permissions immediately
+        val hasPermissions = PermissionManager.checkMediaPermissions(this)
+        if (hasPermissions) {
+            permissionsGranted = true
+        } else {
+            // Request permissions at startup
+            permissionLauncher.launch(PermissionManager.getRequiredMediaPermissions())
+        }
+
         setContent {
             val context = this@MainActivity
             var mediaController by remember { mutableStateOf<MediaController?>(null) }
-
-            // Check and request permissions
-            RequestPermissionsEffect { granted, deniedPermissions ->
-                if (!granted) {
-                    android.util.Log.w("MainActivity", "Missing permissions: $deniedPermissions")
-                }
-            }
 
             // Connect to media service
             LaunchedEffect(Unit) {
@@ -70,7 +87,10 @@ class MainActivity : ComponentActivity() {
 
             MusifyTheme {
                 Surface {
-                    AppContent(mediaController = mediaController)
+                    AppContent(
+                        mediaController = mediaController,
+                        hasPermissions = permissionsGranted
+                    )
                 }
             }
         }
@@ -78,7 +98,10 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun AppContent(mediaController: MediaController?) {
+private fun AppContent(
+    mediaController: MediaController?,
+    hasPermissions: Boolean
+) {
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -119,11 +142,15 @@ private fun AppContent(mediaController: MediaController?) {
             hasPlayedBefore = currentTrack != null
             
             // If no media item yet, fallback to recent tracks
-            if (currentTrack == null) {
-                val recentTracks = repo.recentlyPlayed(1)
-                if (recentTracks.isNotEmpty()) {
-                    currentTrack = recentTracks.first()
-                    hasPlayedBefore = true
+            if (currentTrack == null && hasPermissions) {
+                try {
+                    val recentTracks = repo.recentlyPlayed(1)
+                    if (recentTracks.isNotEmpty()) {
+                        currentTrack = recentTracks.first()
+                        hasPlayedBefore = true
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Error loading recent tracks", e)
                 }
             }
         }
@@ -192,7 +219,8 @@ private fun AppContent(mediaController: MediaController?) {
                 MusifyNavGraph(
                     navController = navController,
                     modifier = Modifier.padding(if (!shouldHideBottomBar) paddingValues else PaddingValues(0.dp)),
-                    onPlay = onPlay
+                    onPlay = onPlay,
+                    hasPermissions = hasPermissions
                 )
             }
         }
