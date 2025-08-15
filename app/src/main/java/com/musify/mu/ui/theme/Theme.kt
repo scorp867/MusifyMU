@@ -24,8 +24,24 @@ fun MusifyTheme(dynamic: DynamicColors? = null, content: @Composable () -> Unit)
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val dynamicFromArt = remember { mutableStateOf<DynamicColors?>(null) }
+    val themeManager = remember { AppThemeManager.getInstance(context) }
+    
+    // Check if custom theme is enabled
+    val useCustomTheme = remember { themeManager.useCustomTheme }
+    val customColors = remember {
+        if (useCustomTheme) {
+            DynamicColors(
+                primary = Color(themeManager.customPrimaryColor),
+                secondary = Color(themeManager.customSecondaryColor),
+                surface = Color(themeManager.customBackgroundColor)
+            )
+        } else null
+    }
 
     LaunchedEffect(controller?.currentMediaItem) {
+        // Skip dynamic color extraction if using custom theme
+        if (useCustomTheme) return@LaunchedEffect
+        
         val artUri = controller?.currentMediaItem?.mediaMetadata?.artworkUri
         if (artUri != null) {
             val req = ImageRequest.Builder(context).data(artUri).allowHardware(false).build()
@@ -42,7 +58,8 @@ fun MusifyTheme(dynamic: DynamicColors? = null, content: @Composable () -> Unit)
         }
     }
 
-    val appliedDynamic = dynamic ?: dynamicFromArt.value
+    // Priority: 1. Explicitly passed dynamic, 2. Custom theme, 3. Dynamic from artwork
+    val appliedDynamic = dynamic ?: customColors ?: dynamicFromArt.value
     val colorScheme = when {
         appliedDynamic != null -> {
             if (darkTheme) darkColorScheme(

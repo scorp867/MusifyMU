@@ -39,6 +39,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import java.io.File
 import java.io.FileOutputStream
 import java.util.*
@@ -415,7 +417,7 @@ private fun ColorSelectorItem(
 
 // Helper functions
 
-private suspend fun saveImageToInternalStorage(context: Context, uri: Uri): String {
+private suspend fun saveImageToInternalStorage(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
     val bitmap = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
         ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri))
     } else {
@@ -434,10 +436,10 @@ private suspend fun saveImageToInternalStorage(context: Context, uri: Uri): Stri
         bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
     }
 
-    return file.absolutePath
+    file.absolutePath
 }
 
-private suspend fun generateColorImage(context: Context, colors: List<Color>): String {
+private suspend fun generateColorImage(context: Context, colors: List<Color>): String = withContext(Dispatchers.IO) {
     val bitmap = Bitmap.createBitmap(512, 512, Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
 
@@ -465,5 +467,5 @@ private suspend fun generateColorImage(context: Context, colors: List<Color>): S
         bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
     }
 
-    return file.absolutePath
+    file.absolutePath
 }

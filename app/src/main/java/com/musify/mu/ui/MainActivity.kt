@@ -33,6 +33,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
+import com.musify.mu.data.repo.PlaybackStateStore
 import com.musify.mu.playback.PlayerService
 import com.musify.mu.ui.components.NowPlayingBar
 import com.musify.mu.ui.navigation.MusifyNavGraph
@@ -41,6 +42,9 @@ import com.musify.mu.util.toMediaItem
 import com.musify.mu.util.PermissionManager
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.net.Uri
 
 class MainActivity : ComponentActivity() {
     
@@ -193,10 +197,12 @@ private fun AppContent(
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
+    val stateStore = remember { PlaybackStateStore(context) }
 
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var hasPlayableQueue by remember { mutableStateOf(false) }
+    var previewTrack by remember { mutableStateOf<Track?>(null) }
 
     // Listen to media controller changes
     LaunchedEffect(mediaController) {
@@ -205,6 +211,7 @@ private fun AppContent(
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     currentTrack = mediaItem?.toTrack()
                     hasPlayableQueue = (controller.mediaItemCount > 0)
+                    if (controller.mediaItemCount > 0) previewTrack = null
                 }
 
                 override fun onIsPlayingChanged(isPlayingNow: Boolean) {
@@ -214,6 +221,7 @@ private fun AppContent(
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     isPlaying = controller.isPlaying
                     hasPlayableQueue = controller.mediaItemCount > 0
+                    if (controller.mediaItemCount > 0) previewTrack = null
                 }
 
                 override fun onTimelineChanged(
@@ -231,6 +239,56 @@ private fun AppContent(
             currentTrack = controller.currentMediaItem?.toTrack()
             isPlaying = controller.isPlaying
             hasPlayableQueue = controller.mediaItemCount > 0
+            if (controller.mediaItemCount > 0) previewTrack = null
+        }
+    }
+
+    // Load preview of last played track for miniplayer when there is no controller queue yet
+    LaunchedEffect(hasPermissions, mediaController) {
+        if (hasPermissions && (mediaController?.mediaItemCount ?: 0) == 0) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val state = stateStore.load()
+                    val trackId = state?.mediaIds?.getOrNull(state.index ?: 0)
+                    val preview = trackId?.let { repo.getTrackByMediaId(it) }
+                    withContext(Dispatchers.Main) {
+                        if ((mediaController?.mediaItemCount ?: 0) == 0) {
+                            previewTrack = preview
+                            currentTrack = preview ?: currentTrack
+                        }
+                    }
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
+    // Helper: restore last queue from store and play
+    val restoreLastQueueAndPlay: () -> Unit = {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val state = stateStore.load()
+                if (state == null || state.mediaIds.isEmpty()) return@launch
+                val validTracks = state.mediaIds.mapNotNull { id ->
+                    repo.getTrackByMediaId(id)?.let { track ->
+                        try {
+                            val uri = Uri.parse(track.mediaId)
+                            context.contentResolver.openInputStream(uri)?.close()
+                            track
+                        } catch (_: Exception) { null }
+                    }
+                }
+                if (validTracks.isEmpty()) return@launch
+                val items = validTracks.map { it.toMediaItem() }
+                val validIndex = state.index.coerceIn(0, items.size - 1)
+                val pos = state.posMs.coerceAtLeast(0L)
+                withContext(Dispatchers.Main) {
+                    mediaController?.let { c ->
+                        c.setMediaItems(items, validIndex, pos)
+                        c.prepare()
+                        c.play()
+                    }
+                }
+            } catch (_: Exception) { }
         }
     }
 
@@ -239,6 +297,7 @@ private fun AppContent(
             try {
                 mediaController?.let { controller ->
                     controller.setMediaItems(tracks.map { it.toMediaItem() }, index, 0)
+                    // Prepare/play triggers service lazy init under the hood
                     controller.prepare()
                     controller.play()
                 }
@@ -277,13 +336,37 @@ private fun AppContent(
                             ) {
                                 NowPlayingBar(
                                     navController = navController,
-                                    currentTrack = currentTrack,
+                                    currentTrack = currentTrack ?: previewTrack,
                                     isPlaying = isPlaying,
                                     onPlayPause = {
-                                        mediaController?.let { if (it.isPlaying) it.pause() else it.play() }
+                                        mediaController?.let { c ->
+                                            if ((c.mediaItemCount == 0) && previewTrack != null) {
+                                                restoreLastQueueAndPlay()
+                                            } else {
+                                                if (c.isPlaying) c.pause() else c.play()
+                                            }
+                                        }
                                     },
-                                    onNext = { mediaController?.seekToNext() },
-                                    onPrev = { mediaController?.seekToPrevious() },
+                                    onNext = {
+                                        mediaController?.let { c ->
+                                            if ((c.mediaItemCount == 0) && previewTrack != null) {
+                                                restoreLastQueueAndPlay()
+                                            } else {
+                                                c.seekToNext()
+                                                if (!c.isPlaying) c.play()
+                                            }
+                                        }
+                                    },
+                                    onPrev = {
+                                        mediaController?.let { c ->
+                                            if ((c.mediaItemCount == 0) && previewTrack != null) {
+                                                restoreLastQueueAndPlay()
+                                            } else {
+                                                c.seekToPrevious()
+                                                if (!c.isPlaying) c.play()
+                                            }
+                                        }
+                                    },
                                     onExpand = {
                                         navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route)
                                     }

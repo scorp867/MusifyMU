@@ -6,10 +6,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
@@ -24,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -44,6 +47,9 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+
+// Composition local to provide scroll state to child components
+val LocalScrollState = compositionLocalOf<LazyListState?> { null }
 
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
@@ -67,9 +73,16 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         scope.launch {
             try {
                 recentPlayed = repo.recentlyPlayed(12)
+                android.util.Log.d("HomeScreen", "Recently played loaded: ${recentPlayed.size} tracks")
+                
                 recentAdded = repo.recentlyAdded(12)
+                android.util.Log.d("HomeScreen", "Recently added loaded: ${recentAdded.size} tracks")
+                
                 favorites = repo.favorites()
+                android.util.Log.d("HomeScreen", "Favorites loaded: ${favorites.size} tracks")
+                
                 customPlaylists = repo.playlists()
+                android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
             } catch (e: Exception) {
                 android.util.Log.w("HomeScreen", "Failed to refresh data", e)
             }
@@ -81,9 +94,16 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             try {
                 // Get data from fast cache - background loading handles the heavy lifting
                 recentPlayed = repo.recentlyPlayed(12)
+                android.util.Log.d("HomeScreen", "Recently played loaded: ${recentPlayed.size} tracks")
+                
                 recentAdded = repo.recentlyAdded(12)
+                android.util.Log.d("HomeScreen", "Recently added loaded: ${recentAdded.size} tracks")
+                
                 favorites = repo.favorites()
+                android.util.Log.d("HomeScreen", "Favorites loaded: ${favorites.size} tracks")
+                
                 customPlaylists = repo.playlists()
+                android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
             } catch (e: Exception) {
                 // Handle error gracefully
                 android.util.Log.w("HomeScreen", "Failed to load home data", e)
@@ -131,9 +151,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        // Welcome header with animation
+        // Welcome header with animation and settings button
         item {
-            WelcomeHeader()
+            WelcomeHeader(navController)
         }
 
         if (isLoading) {
@@ -220,7 +240,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
 }
 
 @Composable
-private fun WelcomeHeader() {
+private fun WelcomeHeader(navController: NavController) {
     val infiniteTransition = rememberInfiniteTransition(label = "welcome")
     val shimmer by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -254,31 +274,55 @@ private fun WelcomeHeader() {
                 )
                 .padding(24.dp)
         ) {
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.MusicNote,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MusicNote,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Welcome to Musify",
+                            style = MaterialTheme.typography.headlineSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Welcome to Musify",
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                        text = "Discover your music in a whole new way",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                     )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Discover your music in a whole new way",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                )
+                
+                // Settings button
+                IconButton(
+                    onClick = { navController.navigate(Screen.Settings.route) },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                            CircleShape
+                        )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
     }
@@ -322,19 +366,26 @@ private fun AnimatedCarousel(
             }
         }
 
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(horizontal = 4.dp)
-        ) {
-            items(data.size, key = { index -> "carousel_${title}_${index}_${data[index].mediaId}" }) { index ->
-                val track = data[index]
-                TrackCard(
-                    track = track,
-                    onClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onPlay(data, index)
-                    }
-                )
+        // Create a scroll state for this row
+        val rowScrollState = rememberLazyListState()
+
+        // Provide the scroll state to child components via CompositionLocal
+        CompositionLocalProvider(LocalScrollState provides rowScrollState) {
+            LazyRow(
+                state = rowScrollState,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(horizontal = 4.dp)
+            ) {
+                items(data.size, key = { index -> "carousel_${title}_${index}_${data[index].mediaId}" }) { index ->
+                    val track = data[index]
+                    TrackCard(
+                        track = track,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onPlay(data, index)
+                        }
+                    )
+                }
             }
         }
     }
@@ -351,6 +402,10 @@ private fun TrackCard(
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
         label = "scale"
     )
+
+    // Get scroll state from parent LazyRow
+    val scrollState = LocalScrollState.current
+    val scrollOffset = scrollState?.firstVisibleItemScrollOffset ?: 0
 
     Card(
         modifier = Modifier
@@ -375,6 +430,7 @@ private fun TrackCard(
                     .aspectRatio(1f)
                     .clip(RoundedCornerShape(12.dp))
             ) {
+                // Use regular Artwork
                 Artwork(
                     data = track.artUri,
                     audioUri = track.mediaId,
@@ -397,12 +453,22 @@ private fun TrackCard(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color.White.copy(alpha = 0.8f),
-                        modifier = Modifier.size(32.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(
+                                Color.White.copy(alpha = 0.2f),
+                                RoundedCornerShape(24.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = "Play",
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
                 }
             }
 
@@ -414,14 +480,16 @@ private fun TrackCard(
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Medium
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                overflow = TextOverflow.Ellipsis
             )
 
             Text(
                 text = track.artist,
                 maxLines = 1,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                overflow = TextOverflow.Ellipsis
             )
         }
     }

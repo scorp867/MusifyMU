@@ -91,12 +91,12 @@ class BackgroundDataManager private constructor(
     /**
      * Get all tracks from cache (fast access)
      */
-    suspend fun getAllTracks(): List<Track> = withContext(Dispatchers.Main) {
-        if (cachedTracks.isNotEmpty()) {
-            cachedTracks
-        } else {
-            // Fallback to database if cache is empty
-            database.dao().getAllTracks().also { 
+    suspend fun getAllTracks(): List<Track> {
+        // Return cached on current context for fast path
+        if (cachedTracks.isNotEmpty()) return cachedTracks
+        // Load from DB on IO only when cache is empty
+        return withContext(Dispatchers.IO) {
+            database.dao().getAllTracks().also {
                 cachedTracks = it
             }
         }

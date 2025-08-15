@@ -195,8 +195,10 @@ fun LibraryScreen(
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
             .distinctUntilChanged()
             .collectLatest { indexes ->
-                val uris = indexes.mapNotNull { i -> tracks.getOrNull(i)?.mediaId }
-                com.musify.mu.data.media.EmbeddedArtCache.preload(context, uris)
+                // Combine adjacent ranges and limit batch size to reduce redundant work
+                val uniqueIndexes = indexes.distinct().sorted()
+                val uriBatch = uniqueIndexes.mapNotNull { i -> tracks.getOrNull(i)?.mediaId }.take(40)
+                com.musify.mu.data.media.EmbeddedArtCache.preload(context, uriBatch)
             }
     }
 

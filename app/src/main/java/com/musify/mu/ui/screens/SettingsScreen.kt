@@ -1,0 +1,743 @@
+package com.musify.mu.ui.screens
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
+import com.musify.mu.ui.theme.AppThemeManager
+import com.musify.mu.ui.theme.DynamicColors
+import kotlinx.coroutines.launch
+
+@Composable
+fun SettingsScreen(navController: NavController) {
+    val context = LocalContext.current
+    val themeManager = remember { AppThemeManager.getInstance(context) }
+    val scope = rememberCoroutineScope()
+    
+    // State for settings
+    var useCustomTheme by remember { mutableStateOf(themeManager.useCustomTheme) }
+    var customPrimaryColor by remember { mutableStateOf(Color(themeManager.customPrimaryColor)) }
+    var customSecondaryColor by remember { mutableStateOf(Color(themeManager.customSecondaryColor)) }
+    var customBackgroundColor by remember { mutableStateOf(Color(themeManager.customBackgroundColor)) }
+    var useAnimatedBackgrounds by remember { mutableStateOf(themeManager.useAnimatedBackgrounds) }
+    var customLayoutEnabled by remember { mutableStateOf(themeManager.customLayoutEnabled) }
+    var homeLayoutConfig by remember { mutableStateOf(themeManager.homeLayoutConfig) }
+    
+    // Color picker state
+    var showColorPicker by remember { mutableStateOf(false) }
+    var currentColorEditTarget by remember { mutableStateOf<String?>(null) }
+    
+    // Section expansion states
+    var themeExpanded by remember { mutableStateOf(false) }
+    var layoutExpanded by remember { mutableStateOf(false) }
+    var animationExpanded by remember { mutableStateOf(false) }
+    
+    // Background gradient
+    val backgroundGradient = Brush.verticalGradient(
+        colors = listOf(
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+        )
+    )
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundGradient)
+            .statusBarsPadding()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+        ) {
+            // Top bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { navController.navigateUp() },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            CircleShape
+                        )
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+                
+                Spacer(modifier = Modifier.width(16.dp))
+                
+                Text(
+                    text = "Settings",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+            }
+            
+            // Settings content
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                // Theme customization section
+                item {
+                    SettingsSection(
+                        title = "Theme Customization",
+                        icon = Icons.Rounded.Palette,
+                        isExpanded = themeExpanded,
+                        onExpandToggle = { themeExpanded = !themeExpanded }
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Custom theme toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Use Custom Theme",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                
+                                Switch(
+                                    checked = useCustomTheme,
+                                    onCheckedChange = {
+                                        useCustomTheme = it
+                                        scope.launch {
+                                            themeManager.setUseCustomTheme(it)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                    )
+                                )
+                            }
+                            
+                            AnimatedVisibility(visible = useCustomTheme) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    // Primary color
+                                    ColorPickerRow(
+                                        title = "Primary Color",
+                                        color = customPrimaryColor,
+                                        onClick = {
+                                            currentColorEditTarget = "primary"
+                                            showColorPicker = true
+                                        }
+                                    )
+                                    
+                                    // Secondary color
+                                    ColorPickerRow(
+                                        title = "Secondary Color",
+                                        color = customSecondaryColor,
+                                        onClick = {
+                                            currentColorEditTarget = "secondary"
+                                            showColorPicker = true
+                                        }
+                                    )
+                                    
+                                    // Background color
+                                    ColorPickerRow(
+                                        title = "Background Color",
+                                        color = customBackgroundColor,
+                                        onClick = {
+                                            currentColorEditTarget = "background"
+                                            showColorPicker = true
+                                        }
+                                    )
+                                    
+                                    // Apply button
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                themeManager.setCustomColors(
+                                                    DynamicColors(
+                                                        primary = customPrimaryColor,
+                                                        secondary = customSecondaryColor,
+                                                        surface = customBackgroundColor
+                                                    )
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    ) {
+                                        Text("Apply Theme")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Layout customization section
+                item {
+                    SettingsSection(
+                        title = "Layout Customization",
+                        icon = Icons.Rounded.ViewModule,
+                        isExpanded = layoutExpanded,
+                        onExpandToggle = { layoutExpanded = !layoutExpanded }
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Custom layout toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Custom Home Layout",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                
+                                Switch(
+                                    checked = customLayoutEnabled,
+                                    onCheckedChange = {
+                                        customLayoutEnabled = it
+                                        scope.launch {
+                                            themeManager.setCustomLayoutEnabled(it)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                    )
+                                )
+                            }
+                            
+                            AnimatedVisibility(visible = customLayoutEnabled) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    // Layout options
+                                    val sections = listOf(
+                                        "welcome" to "Welcome Header",
+                                        "recentlyPlayed" to "Recently Played",
+                                        "recentlyAdded" to "Recently Added",
+                                        "favorites" to "Favorites",
+                                        "playlists" to "Playlists"
+                                    )
+                                    
+                                    sections.forEach { (key, name) ->
+                                        DraggableLayoutItem(
+                                            title = name,
+                                            enabled = homeLayoutConfig.contains(key),
+                                            onToggle = { enabled ->
+                                                homeLayoutConfig = if (enabled) {
+                                                    homeLayoutConfig + key
+                                                } else {
+                                                    homeLayoutConfig.filter { it != key }
+                                                }
+                                                scope.launch {
+                                                    themeManager.setHomeLayoutConfig(homeLayoutConfig)
+                                                }
+                                            }
+                                        )
+                                    }
+                                    
+                                    // Reset button
+                                    TextButton(
+                                        onClick = {
+                                            homeLayoutConfig = listOf(
+                                                "welcome", "recentlyPlayed", "recentlyAdded", 
+                                                "favorites", "playlists"
+                                            )
+                                            scope.launch {
+                                                themeManager.setHomeLayoutConfig(homeLayoutConfig)
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Reset to Default")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Animation settings section
+                item {
+                    SettingsSection(
+                        title = "Animation Settings",
+                        icon = Icons.Rounded.Animation,
+                        isExpanded = animationExpanded,
+                        onExpandToggle = { animationExpanded = !animationExpanded }
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // Animated backgrounds toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Animated Backgrounds",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                
+                                Switch(
+                                    checked = useAnimatedBackgrounds,
+                                    onCheckedChange = {
+                                        useAnimatedBackgrounds = it
+                                        scope.launch {
+                                            themeManager.setUseAnimatedBackgrounds(it)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                    )
+                                )
+                            }
+                            
+                            // Animation style options
+                            AnimatedVisibility(visible = useAnimatedBackgrounds) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val animationStyles = listOf(
+                                        "waves" to "Wave Effect",
+                                        "particles" to "Particle Effect",
+                                        "pulse" to "Pulse Effect"
+                                    )
+                                    
+                                    var selectedAnimation by remember { 
+                                        mutableStateOf(themeManager.animationStyle) 
+                                    }
+                                    
+                                    animationStyles.forEach { (key, name) ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    selectedAnimation = key
+                                                    scope.launch {
+                                                        themeManager.setAnimationStyle(key)
+                                                    }
+                                                }
+                                                .background(
+                                                    if (selectedAnimation == key)
+                                                        MaterialTheme.colorScheme.primaryContainer
+                                                    else
+                                                        Color.Transparent
+                                                )
+                                                .padding(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = selectedAnimation == key,
+                                                onClick = {
+                                                    selectedAnimation = key
+                                                    scope.launch {
+                                                        themeManager.setAnimationStyle(key)
+                                                    }
+                                                }
+                                            )
+                                            
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            
+                                            Text(
+                                                text = name,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onBackground
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // About section
+                item {
+                    SettingsSection(
+                        title = "About",
+                        icon = Icons.Rounded.Info,
+                        isExpanded = false,
+                        onExpandToggle = { }
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Musify Music Player",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                            
+                            Text(
+                                text = "Version 1.0.0",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Color picker dialog
+    if (showColorPicker) {
+        ColorPickerDialog(
+            initialColor = when (currentColorEditTarget) {
+                "primary" -> customPrimaryColor
+                "secondary" -> customSecondaryColor
+                "background" -> customBackgroundColor
+                else -> Color.White
+            },
+            onColorSelected = { color ->
+                when (currentColorEditTarget) {
+                    "primary" -> customPrimaryColor = color
+                    "secondary" -> customSecondaryColor = color
+                    "background" -> customBackgroundColor = color
+                }
+                showColorPicker = false
+            },
+            onDismiss = {
+                showColorPicker = false
+            }
+        )
+    }
+}
+
+@Composable
+fun SettingsSection(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isExpanded: Boolean,
+    onExpandToggle: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = 4.dp
+        )
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Header (always visible)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onExpandToggle() }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    Spacer(modifier = Modifier.width(16.dp))
+                    
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+                
+                val rotation by animateFloatAsState(
+                    targetValue = if (isExpanded) 180f else 0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessLow
+                    ),
+                    label = "rotation"
+                )
+                
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.graphicsLayer(rotationZ = rotation)
+                )
+            }
+            
+            // Expandable content
+            AnimatedVisibility(visible = isExpanded) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ColorPickerRow(
+    title: String,
+    color: Color,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .shadow(4.dp, CircleShape)
+                .clip(CircleShape)
+                .background(color)
+                .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape)
+                .clickable { onClick() }
+        )
+    }
+}
+
+@Composable
+fun DraggableLayoutItem(
+    title: String,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (enabled)
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                else
+                    MaterialTheme.colorScheme.surface.copy(alpha = 0.3f)
+            )
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.DragIndicator,
+            contentDescription = "Drag",
+            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f)
+        )
+        
+        Spacer(modifier = Modifier.width(8.dp))
+        
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.weight(1f)
+        )
+        
+        Switch(
+            checked = enabled,
+            onCheckedChange = { onToggle(it) },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+            )
+        )
+    }
+}
+
+@Composable
+fun ColorPickerDialog(
+    initialColor: Color,
+    onColorSelected: (Color) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var red by remember { mutableStateOf(initialColor.red) }
+    var green by remember { mutableStateOf(initialColor.green) }
+    var blue by remember { mutableStateOf(initialColor.blue) }
+    
+    val selectedColor = Color(red, green, blue)
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Choose Color",
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.Bold
+                )
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Color preview
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(selectedColor)
+                        .border(1.dp, Color.White.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                )
+                
+                // RGB sliders
+                ColorSlider(
+                    value = red,
+                    onValueChange = { red = it },
+                    label = "Red",
+                    thumbColor = Color.Red
+                )
+                
+                ColorSlider(
+                    value = green,
+                    onValueChange = { green = it },
+                    label = "Green",
+                    thumbColor = Color.Green
+                )
+                
+                ColorSlider(
+                    value = blue,
+                    onValueChange = { blue = it },
+                    label = "Blue",
+                    thumbColor = Color.Blue
+                )
+                
+                // Hex code
+                val hexCode = String.format("#%02X%02X%02X", 
+                    (red * 255).toInt(), 
+                    (green * 255).toInt(), 
+                    (blue * 255).toInt()
+                )
+                
+                Text(
+                    text = "Hex: $hexCode",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onColorSelected(selectedColor) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Text("Select")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun ColorSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    label: String,
+    thumbColor: Color
+) {
+    Column {
+        Text(
+            text = "$label: ${(value * 255).toInt()}",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            colors = SliderDefaults.colors(
+                thumbColor = thumbColor,
+                activeTrackColor = thumbColor.copy(alpha = 0.7f),
+                inactiveTrackColor = thumbColor.copy(alpha = 0.3f)
+            )
+        )
+    }
+}

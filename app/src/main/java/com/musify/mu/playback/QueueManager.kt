@@ -11,6 +11,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.channels.Channel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -37,8 +39,12 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     // Fast lookup map for duplicate detection and quick access
     private val queueLookup = LinkedHashMap<String, QueueItem>()
 
-    // Thread-safe queue for concurrent operations
-    private val operationQueue = ConcurrentLinkedQueue<QueueOperation>()
+    // Channel for background operations (non-blocking, unbounded)
+    private val operationChannel = Channel<QueueOperation>(Channel.UNLIMITED)
+
+    // Pending operation count for UI feedback
+    private val _pendingOperations = MutableStateFlow(0)
+    val pendingOperations: StateFlow<Int> = _pendingOperations.asStateFlow()
 
     // Mutex for thread-safe queue operations
     private val queueMutex = Mutex()
@@ -139,17 +145,13 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
      * This ensures all operations are processed sequentially and safely
      */
     private suspend fun processOperationQueue() {
-        while (true) {
-            val operation = operationQueue.poll()
-            if (operation != null) {
-                try {
-                    executeOperation(operation)
-                } catch (e: Exception) {
-                    android.util.Log.e("QueueManager", "Error executing operation: $operation", e)
-                }
-            } else {
-                // No operations, wait a bit
-                kotlinx.coroutines.delay(50)
+        for (operation in operationChannel) {
+            try {
+                executeOperation(operation)
+            } catch (e: Exception) {
+                android.util.Log.e("QueueManager", "Error executing operation: $operation", e)
+            } finally {
+                _pendingOperations.update { (it - 1).coerceAtLeast(0) }
             }
         }
     }
@@ -678,11 +680,14 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
      * Queue an add operation for background processing (for bulk operations)
      */
     fun queueAdd(items: List<QueueItem>, position: Int = -1) {
-        operationQueue.offer(QueueOperation.Add(items, position))
+        val sent = operationChannel.trySend(QueueOperation.Add(items, position)).isSuccess
+        if (sent) {
+            _pendingOperations.update { it + 1 }
+        }
     }
     
     /**
      * Get pending operation count for UI feedback
      */
-    fun getPendingOperationCount(): Int = operationQueue.size
+    fun getPendingOperationCount(): Int = pendingOperations.value
 }

@@ -7,6 +7,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
 import androidx.lifecycle.LifecycleOwner
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import com.musify.mu.playback.QueueManager
 
 /**
  * Compose provider for QueueManager integration
@@ -241,17 +242,25 @@ fun rememberQueueOperations(): EnhancedQueueOperations {
  */
 @Composable
 fun rememberPendingOperations(): State<Int> {
-    val queueOperations = rememberQueueOperations()
-    var pendingCount by remember { mutableStateOf(0) }
-    
-    LaunchedEffect(queueOperations) {
-        while (true) {
-            pendingCount = queueOperations.getPendingOperationCount()
-            kotlinx.coroutines.delay(100) // Update every 100ms
+    val queueManager = LocalQueueManager()
+    return if (queueManager != null) {
+        // Prefer event-driven StateFlow over polling
+        queueManager.pendingOperations.collectAsStateWithLifecycle(
+            initialValue = 0,
+            lifecycleOwner = LocalLifecycleOwner.current
+        )
+    } else {
+        // Fallback: minimal polling if QueueManager not yet available
+        val queueOperations = rememberQueueOperations()
+        var pendingCount by remember { mutableStateOf(0) }
+        LaunchedEffect(queueOperations) {
+            while (true) {
+                pendingCount = queueOperations.getPendingOperationCount()
+                kotlinx.coroutines.delay(250)
+            }
         }
+        remember { derivedStateOf { pendingCount } }
     }
-    
-    return remember { derivedStateOf { pendingCount } }
 }
 
 /**

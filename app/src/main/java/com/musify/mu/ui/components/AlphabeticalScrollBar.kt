@@ -47,7 +47,6 @@ fun AlphabeticalScrollBar(
     isVisible: Boolean = true
 ) {
     val hapticFeedback = LocalHapticFeedback.current
-    val density = LocalDensity.current
 
     var isActive by remember { mutableStateOf(false) }
     var selectedLetter by remember { mutableStateOf<String?>(null) }
@@ -121,7 +120,8 @@ fun AlphabeticalScrollBar(
                                         // Instant activation on touch
                                         isActive = true
                                         val y = event.changes.first().position.y
-                                        val index = (y / (size.height / letters.size)).roundToInt()
+                                        val letterHeight = size.height.toFloat() / letters.size.toFloat()
+                                        val index = (y / letterHeight).toInt()
                                             .coerceIn(0, letters.size - 1)
                                         
                                         selectedIndex = index
@@ -141,7 +141,8 @@ fun AlphabeticalScrollBar(
                                     PointerEventType.Move -> {
                                         if (isActive) {
                                             val y = event.changes.first().position.y
-                                            val index = (y / (size.height / letters.size)).roundToInt()
+                                            val letterHeight = size.height.toFloat() / letters.size.toFloat()
+                                            val index = (y / letterHeight).toInt()
                                                 .coerceIn(0, letters.size - 1)
                                             
                                             if (index != selectedIndex) {

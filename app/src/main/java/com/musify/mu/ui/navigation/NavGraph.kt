@@ -23,6 +23,7 @@ sealed class Screen(val route: String) {
     object Lyrics : Screen("lyrics")
     object SeeAll : Screen("see_all/{type}")
     object PlaylistDetails : Screen("playlist/{id}")
+    object Settings : Screen("settings")
 }
 
 @Composable
@@ -100,5 +101,27 @@ fun MusifyNavGraph(
         }
 
         composable(Screen.Lyrics.route) { LyricsView(navController) }
+        
+        // Settings screen
+        composable(
+            route = Screen.Settings.route,
+            enterTransition = {
+                slideInVertically(
+                    initialOffsetY = { -it }, // Start from top
+                    animationSpec = tween(300)
+                ) + fadeIn(animationSpec = tween(300))
+            },
+            exitTransition = {
+                slideOutVertically(
+                    targetOffsetY = { -it }, // Slide up off screen
+                    animationSpec = tween(300)
+                ) + fadeOut(animationSpec = tween(300))
+            }
+        ) {
+            BackHandler(enabled = true) {
+                navController.popBackStack()
+            }
+            SettingsScreen(navController)
+        }
     }
 }
