@@ -72,43 +72,43 @@ fun EnhancedLyricsView(
     val lyricsRepo = remember { LyricsRepository(context) }
     val lyricsStateStore = remember { LyricsStateStore.getInstance(context) }
     val coroutineScope = rememberCoroutineScope()
-    
+
     // Observe lyrics state from the store
     val lyricsState by lyricsStateStore.currentLyrics.collectAsState()
-    
+
     // Local state for UI interactions
     var isEditing by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
     var showFullscreen by remember { mutableStateOf(false) }
-    
+
     // For editing
     var editingText by remember { mutableStateOf("") }
     var currentEditingLine by remember { mutableStateOf<Int?>(null) }
-    
+
     // For syncing
     var isSyncing by remember { mutableStateOf(false) }
     var syncStartTime by remember { mutableStateOf(0L) }
-    
+
     // For scrolling to active lyric
     val listState = rememberLazyListState()
     // Separate state for fullscreen list to avoid conflicts
     val fullListState = rememberLazyListState()
     var activeLineIndex by remember { mutableStateOf(0) }
     val density = LocalDensity.current
-    
+
     // Extract values from lyrics state
     val lyricsText = lyricsState?.text
     val lrcLines = lyricsState?.lrcLines ?: emptyList()
     val isLrc = lyricsState?.isLrc ?: false
     val isLoading = lyricsState?.isLoading ?: false
-    
+
     // Update editing text when lyrics change
     LaunchedEffect(lyricsText) {
         if (!isEditing && lyricsText != null) {
             editingText = lyricsText
         }
     }
-    
+
     // Find active line based on current position and keep it slightly above center in the card
     LaunchedEffect(currentPositionMs, lrcLines) {
         if (lrcLines.isNotEmpty() && !isSyncing) {
@@ -149,7 +149,7 @@ fun EnhancedLyricsView(
             )
         }
     }
-    
+
     // Refresh function for manual refresh
     fun refreshLyrics() {
         mediaId?.let { id ->
@@ -160,7 +160,7 @@ fun EnhancedLyricsView(
             }
         }
     }
-    
+
     // File picker for LRC import
     val lrcFilePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -173,34 +173,40 @@ fun EnhancedLyricsView(
                     val text = inputStream?.use { stream ->
                         BufferedReader(InputStreamReader(stream)).readText()
                     }
-                    
+
                     if (!text.isNullOrBlank()) {
-                        // Parse LRC content
-                        val parsedLines = LrcParser.parse(text)
-                        if (parsedLines.isNotEmpty()) {
-                            // Save to repository
-                            mediaId?.let { id ->
+                        // Check if it's actually LRC format and parse accordingly
+                        val isLrcFormat = LrcParser.isLrcFormat(text)
+                        val parsedLines = if (isLrcFormat) LrcParser.parse(text) else emptyList()
+
+                        // Save to repository regardless of format
+                        mediaId?.let { id ->
+                            if (isLrcFormat) {
                                 lyricsRepo.attachLrc(id, uri)
-                                // Update state store
+                                // Update state store with LRC
                                 lyricsStateStore.updateLyrics(id, text, parsedLines, true)
-                            }
-                        } else {
-                            // Show error
-                            mediaId?.let { id ->
-                                lyricsStateStore.updateLyrics(id, "Invalid LRC format", emptyList(), false)
+                            } else {
+                                // Treat as plain text if no timestamps found
+                                lyricsRepo.attachText(id, text)
+                                lyricsStateStore.updateLyrics(id, text, emptyList(), false)
                             }
                         }
                     }
                 } catch (e: Exception) {
                     // Show error
                     mediaId?.let { id ->
-                        lyricsStateStore.updateLyrics(id, "Error importing LRC file", emptyList(), false)
+                        lyricsStateStore.updateLyrics(
+                            id,
+                            "Error importing LRC file",
+                            emptyList(),
+                            false
+                        )
                     }
                 }
             }
         }
     }
-    
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -221,40 +227,55 @@ fun EnhancedLyricsView(
                 ),
                 color = Color.White
             )
-            
+
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Edit button
                 IconButton(
-                    onClick = { 
+                    onClick = {
                         if (isEditing) {
                             // Save edited lyrics
                             if (lyricsText != editingText) {
                                 coroutineScope.launch {
                                     mediaId?.let { id ->
-                                        if (isLrc) {
+                                        // Auto-detect format based on content
+                                        val isLrcFormat = LrcParser.isLrcFormat(editingText)
+
+                                        if (isLrcFormat) {
                                             // Parse and save as LRC
                                             val parsedLines = LrcParser.parse(editingText)
-                                            if (parsedLines.isNotEmpty()) {
-                                                // Create a temporary file to store the edited LRC
-                                                val safeId = id.hashCode().toString()
-                                                val fileName = "edited_lyrics_${safeId}.lrc"
-                                                context.openFileOutput(fileName, android.content.Context.MODE_PRIVATE).use {
-                                                    it.write(editingText.toByteArray())
-                                                }
-                                                val fileUri = Uri.parse("file://${context.filesDir}/$fileName")
-                                                lyricsRepo.attachLrc(id, fileUri)
-                                                // Update state store
-                                                lyricsStateStore.updateLyrics(id, editingText, parsedLines, true)
+                                            // Create a temporary file to store the edited LRC
+                                            val safeId = id.hashCode().toString()
+                                            val fileName = "edited_lyrics_${safeId}.lrc"
+                                            context.openFileOutput(
+                                                fileName,
+                                                android.content.Context.MODE_PRIVATE
+                                            ).use {
+                                                it.write(editingText.toByteArray())
                                             }
+                                            val fileUri =
+                                                Uri.parse("file://${context.filesDir}/$fileName")
+                                            lyricsRepo.attachLrc(id, fileUri)
+                                            // Update state store
+                                            lyricsStateStore.updateLyrics(
+                                                id,
+                                                editingText,
+                                                parsedLines,
+                                                true
+                                            )
                                         } else {
                                             // Save as plain text
                                             lyricsRepo.attachText(id, editingText)
+                                            // Update state store
+                                            lyricsStateStore.updateLyrics(
+                                                id,
+                                                editingText,
+                                                emptyList(),
+                                                false
+                                            )
                                         }
-                                        // Update state store
-                                        lyricsStateStore.updateLyrics(id, editingText, emptyList(), false)
                                     }
                                 }
                             }
@@ -276,7 +297,7 @@ fun EnhancedLyricsView(
                         tint = Color.White
                     )
                 }
-                
+
                 // Sync button (only visible for LRC)
                 if (isLrc || lyricsText == null || lyricsText == "No lyrics found") {
                     IconButton(
@@ -300,7 +321,7 @@ fun EnhancedLyricsView(
                         )
                     }
                 }
-                
+
                 // Import button
                 IconButton(
                     onClick = { showImportDialog = true },
@@ -314,7 +335,7 @@ fun EnhancedLyricsView(
                         tint = Color.White
                     )
                 }
-                
+
                 // Enlarge button
                 IconButton(
                     onClick = { showFullscreen = true },
@@ -330,7 +351,7 @@ fun EnhancedLyricsView(
                 }
             }
         }
-        
+
         // Lyrics content
         Box(
             modifier = Modifier
@@ -362,26 +383,41 @@ fun EnhancedLyricsView(
                             // Save logic here
                             coroutineScope.launch {
                                 mediaId?.let { id ->
-                                    if (isLrc) {
+                                    // Auto-detect format based on content
+                                    val isLrcFormat = LrcParser.isLrcFormat(editingText)
+
+                                    if (isLrcFormat) {
                                         // Parse and save as LRC
                                         val parsedLines = LrcParser.parse(editingText)
-                                        if (parsedLines.isNotEmpty()) {
-                                            // Create a temporary file to store the edited LRC
-                                            val safeId = id.hashCode().toString()
-                                            val fileName = "edited_lyrics_${safeId}.lrc"
-                                            context.openFileOutput(fileName, android.content.Context.MODE_PRIVATE).use {
-                                                it.write(editingText.toByteArray())
-                                            }
-                                            val fileUri = Uri.parse("file://${context.filesDir}/$fileName")
-                                            lyricsRepo.attachLrc(id, fileUri)
-                                            // Update state store
-                                            lyricsStateStore.updateLyrics(id, editingText, parsedLines, true)
+                                        // Create a temporary file to store the edited LRC
+                                        val safeId = id.hashCode().toString()
+                                        val fileName = "edited_lyrics_${safeId}.lrc"
+                                        context.openFileOutput(
+                                            fileName,
+                                            android.content.Context.MODE_PRIVATE
+                                        ).use {
+                                            it.write(editingText.toByteArray())
                                         }
+                                        val fileUri =
+                                            Uri.parse("file://${context.filesDir}/$fileName")
+                                        lyricsRepo.attachLrc(id, fileUri)
+                                        // Update state store
+                                        lyricsStateStore.updateLyrics(
+                                            id,
+                                            editingText,
+                                            parsedLines,
+                                            true
+                                        )
                                     } else {
                                         // Save as plain text
                                         lyricsRepo.attachText(id, editingText)
                                         // Update state store
-                                        lyricsStateStore.updateLyrics(id, editingText, emptyList(), false)
+                                        lyricsStateStore.updateLyrics(
+                                            id,
+                                            editingText,
+                                            emptyList(),
+                                            false
+                                        )
                                     }
                                 }
                             }
@@ -421,7 +457,7 @@ fun EnhancedLyricsView(
                             currentEditingLine = null
                         }
                     }
-                    
+
                     itemsIndexed(lines) { index, line ->
                         val trimmedLine = line.trim()
                         if (trimmedLine.isNotEmpty() && !trimmedLine.startsWith("[")) {
@@ -435,41 +471,55 @@ fun EnhancedLyricsView(
                                         val minutes = (currentTime / 60000).toInt()
                                         val seconds = ((currentTime % 60000) / 1000).toInt()
                                         val millis = (currentTime % 1000) / 10
-                                        
-                                        val timestamp = String.format("[%02d:%02d.%02d]", minutes, seconds, millis)
+
+                                        val timestamp = String.format(
+                                            "[%02d:%02d.%02d]",
+                                            minutes,
+                                            seconds,
+                                            millis
+                                        )
                                         val newLine = "$timestamp$trimmedLine"
-                                        
+
                                         // Replace this line in the editing text
-                                        val updatedText = lyricsText?.lines()?.map { 
-                                            if (it.trim() == trimmedLine) newLine else it 
+                                        val updatedText = lyricsText?.lines()?.map {
+                                            if (it.trim() == trimmedLine) newLine else it
                                         }?.joinToString("\n") ?: ""
-                                        
+
                                         editingText = updatedText
                                         currentEditingLine = index
                                         syncStartTime = currentTime
-                                        
+
                                         // Re-parse LRC lines
                                         val updatedLrcLines = LrcParser.parse(updatedText)
-                                        
+
                                         // Save to repository
                                         coroutineScope.launch {
                                             mediaId?.let { id ->
                                                 val safeId = id.hashCode().toString()
                                                 val fileName = "synced_lyrics_${safeId}.lrc"
-                                                context.openFileOutput(fileName, android.content.Context.MODE_PRIVATE).use {
+                                                context.openFileOutput(
+                                                    fileName,
+                                                    android.content.Context.MODE_PRIVATE
+                                                ).use {
                                                     it.write(updatedText.toByteArray())
                                                 }
-                                                val fileUri = Uri.parse("file://${context.filesDir}/$fileName")
+                                                val fileUri =
+                                                    Uri.parse("file://${context.filesDir}/$fileName")
                                                 lyricsRepo.attachLrc(id, fileUri)
                                                 // Update state store
-                                                lyricsStateStore.updateLyrics(id, updatedText, updatedLrcLines, true)
+                                                lyricsStateStore.updateLyrics(
+                                                    id,
+                                                    updatedText,
+                                                    updatedLrcLines,
+                                                    true
+                                                )
                                             }
                                         }
                                     }
                                     .background(
-                                        if (trimmedLine.contains("[") && trimmedLine.contains("]")) 
+                                        if (trimmedLine.contains("[") && trimmedLine.contains("]"))
                                             vibrantColor.copy(alpha = 0.3f)
-                                        else 
+                                        else
                                             Color.White.copy(alpha = 0.1f),
                                         RoundedCornerShape(12.dp)
                                     )
@@ -502,26 +552,30 @@ fun EnhancedLyricsView(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         contentPadding = PaddingValues(vertical = 16.dp, horizontal = 12.dp)
                     ) {
-                        items(lrcLines) { line ->
-                            val isActive = lrcLines.indexOf(line) == activeLineIndex
+                        itemsIndexed(lrcLines) { index, line ->
+                            val isActive = index == activeLineIndex
                             val alpha by animateFloatAsState(
                                 targetValue = if (isActive) 1f else 0.6f,
                                 animationSpec = tween(300),
                                 label = "alpha"
                             )
+
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = if (isActive) 0.dp else 8.dp)
+                                    .heightIn(min = if (line.text.isBlank()) 16.dp else 0.dp) // Preserve space for empty lines
                             ) {
                                 Text(
-                                    text = line.text,
+                                    text = if (line.text.isBlank()) "♪" else line.text, // Show musical note for empty lines
                                     style = MaterialTheme.typography.bodyLarge.copy(
                                         fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
                                         fontSize = if (isActive) 18.sp else 16.sp
                                     ),
                                     color = if (isActive)
                                         vibrantColor.copy(alpha = 0.9f)
+                                    else if (line.text.isBlank())
+                                        Color.White.copy(alpha = 0.3f) // Dim empty line indicators
                                     else
                                         Color.White.copy(alpha = alpha),
                                     textAlign = TextAlign.Center,
@@ -547,303 +601,344 @@ fun EnhancedLyricsView(
                     )
                 }
             } else {
-                // Plain text or no lyrics
-                Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 220.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.Black.copy(alpha = 0.2f))
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = lyricsText ?: "No lyrics found",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Color.White,
-                        textAlign = TextAlign.Center
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = { showImportDialog = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = vibrantColor.copy(alpha = 0.8f)
-                            )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Add Lyrics")
-                        }
-                        
-                        // Refresh button
-                        IconButton(
-                            onClick = { 
-                                refreshLyrics()
-                            },
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    dominantColor.copy(alpha = 0.3f),
-                                    CircleShape
-                                )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Refresh,
-                                contentDescription = "Refresh Lyrics",
-                                tint = Color.White
-                            )
-                        }
-                    }
-                }
-            }
-            }
-        }
-    }
-    
-    // Import dialog
-    if (showImportDialog) {
-        Dialog(onDismissRequest = { showImportDialog = false }) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = Color.Black.copy(alpha = 0.7f)
-                ),
-                border = BorderStroke(
-                    width = 1.dp,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.5f),
-                            dominantColor.copy(alpha = 0.3f),
-                            vibrantColor.copy(alpha = 0.3f)
-                        )
-                    )
-                )
-            ) {
-                Column(
+                // Plain text lyrics or no lyrics found
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .heightIn(min = 220.dp, max = 400.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.25f))
                 ) {
-                    Text(
-                        text = "Import Lyrics",
-                        style = MaterialTheme.typography.headlineSmall.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = Color.White
-                    )
-                    
-                    HorizontalDivider(
-                        color = Color.White.copy(alpha = 0.2f),
-                        thickness = 1.dp,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-                    
-                    Button(
-                        onClick = {
-                            lrcFilePicker.launch("*/*")
-                            showImportDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = dominantColor.copy(alpha = 0.8f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.FileUpload,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Import LRC File")
-                    }
-                    
-                    Button(
-                        onClick = {
-                            // Create new lyrics
-                            isEditing = true
-                            editingText = ""
-                            // Update store with empty plain text for this mediaId so UI reflects editing state
-                            mediaId?.let { id ->
-                                coroutineScope.launch {
-                                    lyricsStateStore.updateLyrics(id, "", emptyList(), false)
-                                }
-                            }
-                            showImportDialog = false
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = vibrantColor.copy(alpha = 0.8f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Create,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Create New Lyrics")
-                    }
-                    
-                    TextButton(
-                        onClick = { showImportDialog = false },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Cancel", color = Color.White)
-                    }
-                }
-            }
-        }
-    }
-
-    // Fullscreen lyrics dialog
-    if (showFullscreen) {
-        Dialog(
-            onDismissRequest = { showFullscreen = false },
-            properties = DialogProperties(
-                usePlatformDefaultWidth = false,
-                decorFitsSystemWindows = false
-            )
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-            ) {
-                // Dark glassmorphism background using extracted colors
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    dominantColor.copy(alpha = 0.75f),
-                                    dominantColor.copy(alpha = 0.55f)
-                                )
-                            )
-                        )
-                )
-                GlassBackdrop(
-                    modifier = Modifier.fillMaxSize(),
-                    tintTop = Color.Black.copy(alpha = 0.36f),
-                    tintBottom = Color.Black.copy(alpha = 0.52f),
-                    blurRadius = 40
-                )
-                // Additional scrim to fully mask the player screen beneath
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.8f))
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Lyrics", 
-                            color = Color.White, 
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                        IconButton(onClick = { showFullscreen = false }) {
-                            Icon(
-                                imageVector = Icons.Rounded.Close, 
-                                contentDescription = "Close", 
-                                tint = Color.White,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
-
-                    // Fullscreen list styled like mini card
-                    if (lrcLines.isNotEmpty()) {
-                        Card(
+                    if (!lyricsText.isNullOrBlank()) {
+                        // Display plain text lyrics
+                        LazyColumn(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.25f)),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
-                            LazyColumn(
-                                state = fullListState,
-                                modifier = Modifier
-                                    .fillMaxSize(),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                                contentPadding = PaddingValues(vertical = 16.dp, horizontal = 12.dp)
+                            val lines = lyricsText.lines().filter { it.isNotBlank() }
+                            items(lines) { line ->
+                                Text(
+                                    text = line.trim(),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Color.White,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    } else {
+                        // No lyrics found
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                items(lrcLines) { line ->
-                                    val isActive = lrcLines.indexOf(line) == activeLineIndex
-                                    val alpha by animateFloatAsState(
-                                        targetValue = if (isActive) 1f else 0.6f,
-                                        animationSpec = tween(300),
-                                        label = "alpha"
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = if (isActive) 0.dp else 8.dp)
+                                Text(
+                                    text = "No lyrics found",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Color.White,
+                                    textAlign = TextAlign.Center
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = { showImportDialog = true },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = vibrantColor.copy(alpha = 0.8f)
+                                        )
                                     ) {
-                                        Text(
-                                            text = line.text,
-                                            style = MaterialTheme.typography.bodyLarge.copy(
-                                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                                                fontSize = if (isActive) 18.sp else 16.sp
-                                            ),
-                                            color = if (isActive) vibrantColor.copy(alpha = 0.9f) else Color.White.copy(alpha = alpha),
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .alpha(alpha)
+                                        Icon(
+                                            imageVector = Icons.Rounded.Add,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Add Lyrics")
+                                    }
+
+                                    // Refresh button
+                                    IconButton(
+                                        onClick = {
+                                            refreshLyrics()
+                                        },
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .background(
+                                                dominantColor.copy(alpha = 0.3f),
+                                                CircleShape
+                                            )
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Refresh,
+                                            contentDescription = "Refresh Lyrics",
+                                            tint = Color.White
                                         )
                                     }
                                 }
                             }
                         }
-                    } else {
-                        Box(
+                    }
+                }
+            }
+        }
+
+        // Import dialog
+        if (showImportDialog) {
+            Dialog(onDismissRequest = { showImportDialog = false }) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = Color.Black.copy(alpha = 0.7f)
+                    ),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.5f),
+                                dominantColor.copy(alpha = 0.3f),
+                                vibrantColor.copy(alpha = 0.3f)
+                            )
+                        )
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "Import Lyrics",
+                            style = MaterialTheme.typography.headlineSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = Color.White
+                        )
+
+                        HorizontalDivider(
+                            color = Color.White.copy(alpha = 0.2f),
+                            thickness = 1.dp,
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        )
+
+                        Button(
+                            onClick = {
+                                lrcFilePicker.launch("*/*")
+                                showImportDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = dominantColor.copy(alpha = 0.8f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.FileUpload,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Import LRC File")
+                        }
+
+                        Button(
+                            onClick = {
+                                // Create new lyrics
+                                isEditing = true
+                                editingText = ""
+                                // Update store with empty plain text for this mediaId so UI reflects editing state
+                                mediaId?.let { id ->
+                                    coroutineScope.launch {
+                                        lyricsStateStore.updateLyrics(id, "", emptyList(), false)
+                                    }
+                                }
+                                showImportDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = vibrantColor.copy(alpha = 0.8f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Create,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Create New Lyrics")
+                        }
+
+                        TextButton(
+                            onClick = { showImportDialog = false },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Cancel", color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fullscreen lyrics dialog
+        if (showFullscreen) {
+            Dialog(
+                onDismissRequest = { showFullscreen = false },
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false
+                )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                ) {
+                    // Dark glassmorphism background using extracted colors
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        dominantColor.copy(alpha = 0.75f),
+                                        dominantColor.copy(alpha = 0.55f)
+                                    )
+                                )
+                            )
+                    )
+                    GlassBackdrop(
+                        modifier = Modifier.fillMaxSize(),
+                        tintTop = Color.Black.copy(alpha = 0.36f),
+                        tintBottom = Color.Black.copy(alpha = 0.52f),
+                        blurRadius = 40
+                    )
+                    // Additional scrim to fully mask the player screen beneath
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.8f))
+                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp)
+                    ) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .weight(1f),
-                            contentAlignment = Alignment.Center
+                                .padding(bottom = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (isLoading) {
-                                CircularProgressIndicator(
-                                    color = vibrantColor,
-                                    modifier = Modifier.size(48.dp)
+                            Text(
+                                text = "Lyrics",
+                                color = Color.White,
+                                style = MaterialTheme.typography.headlineMedium.copy(
+                                    fontWeight = FontWeight.Bold
                                 )
-                            } else {
-                                Text(
-                                    text = lyricsText ?: "No lyrics found",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    textAlign = TextAlign.Center
+                            )
+                            IconButton(onClick = { showFullscreen = false }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Close",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
                                 )
+                            }
+                        }
+
+                        // Fullscreen list styled like mini card
+                        if (lrcLines.isNotEmpty()) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color.Black.copy(
+                                        alpha = 0.25f
+                                    )
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                            ) {
+                                LazyColumn(
+                                    state = fullListState,
+                                    modifier = Modifier
+                                        .fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                                    contentPadding = PaddingValues(
+                                        vertical = 16.dp,
+                                        horizontal = 12.dp
+                                    )
+                                ) {
+                                    itemsIndexed(lrcLines) { index, line ->
+                                        val isActive = index == activeLineIndex
+                                        val alpha by animateFloatAsState(
+                                            targetValue = if (isActive) 1f else 0.6f,
+                                            animationSpec = tween(300),
+                                            label = "alpha"
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = if (isActive) 0.dp else 8.dp)
+                                                .heightIn(min = if (line.text.isBlank()) 16.dp else 0.dp)
+                                        ) {
+                                            Text(
+                                                text = if (line.text.isBlank()) "♪" else line.text,
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                                    fontSize = if (isActive) 18.sp else 16.sp
+                                                ),
+                                                color = if (isActive)
+                                                    vibrantColor.copy(alpha = 0.9f)
+                                                else if (line.text.isBlank())
+                                                    Color.White.copy(alpha = 0.3f)
+                                                else
+                                                    Color.White.copy(alpha = alpha),
+                                                textAlign = TextAlign.Center,
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .alpha(alpha)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        color = vibrantColor,
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                } else {
+                                    Text(
+                                        text = lyricsText ?: "No lyrics found",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
                             }
                         }
                     }

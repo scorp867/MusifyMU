@@ -93,14 +93,17 @@ class LyricsStateStore(private val context: Context) {
                         }
                         
                         if (text != null) {
-                            val lrcLines = LrcParser.parse(text)
-                            Log.d("LyricsStateStore", "Parsed ${lrcLines.size} LRC lines")
+                            // Use enhanced detection to determine if this is actually LRC format
+                            val isActuallyLrc = LrcParser.isLrcFormat(text)
+                            val lrcLines = if (isActuallyLrc) LrcParser.parse(text) else emptyList()
+                            
+                            Log.d("LyricsStateStore", "Parsed ${lrcLines.size} LRC lines, isLrc: $isActuallyLrc")
                             
                             LyricsState(
                                 mediaId = mediaId,
                                 text = text,
                                 lrcLines = lrcLines,
-                                isLrc = true,
+                                isLrc = isActuallyLrc,
                                 isLoading = false
                             )
                         } else {
@@ -238,12 +241,15 @@ class LyricsStateStore(private val context: Context) {
                             kotlin.concurrent.thread(name = "persist-lyrics-map") {
                                 try { kotlinx.coroutines.runBlocking { lyricsRepo.attachLrc(mediaId, lrcContentUri) } } catch (_: Exception) {}
                             }
-                            val lrcLines = LrcParser.parse(text)
+                            
+                            val isActuallyLrc = LrcParser.isLrcFormat(text)
+                            val lrcLines = if (isActuallyLrc) LrcParser.parse(text) else emptyList()
+                            
                             return LyricsState(
                                 mediaId = mediaId,
                                 text = text,
                                 lrcLines = lrcLines,
-                                isLrc = true,
+                                isLrc = isActuallyLrc,
                                 isLoading = false
                             )
                         }
@@ -268,12 +274,15 @@ class LyricsStateStore(private val context: Context) {
                                     kotlin.concurrent.thread(name = "persist-lyrics-map") {
                                         try { kotlinx.coroutines.runBlocking { lyricsRepo.attachLrc(mediaId, lrcContentUri) } } catch (_: Exception) {}
                                     }
-                                    val lrcLines = LrcParser.parse(text)
+                                    
+                                    val isActuallyLrc = LrcParser.isLrcFormat(text)
+                                    val lrcLines = if (isActuallyLrc) LrcParser.parse(text) else emptyList()
+                                    
                                     return LyricsState(
                                         mediaId = mediaId,
                                         text = text,
                                         lrcLines = lrcLines,
-                                        isLrc = true,
+                                        isLrc = isActuallyLrc,
                                         isLoading = false
                                     )
                                 }

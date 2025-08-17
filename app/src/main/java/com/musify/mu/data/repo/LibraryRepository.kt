@@ -61,7 +61,11 @@ class LibraryRepository private constructor(private val context: Context, privat
     }
     
     suspend fun removeFromPlaylist(playlistId: Long, mediaId: String) = db.dao().removeItem(playlistId, mediaId)
-    suspend fun playlistTracks(playlistId: Long): List<Track> = db.dao().getPlaylistTracks(playlistId)
+    suspend fun playlistTracks(playlistId: Long): List<Track> {
+        val databaseTracks = db.dao().getPlaylistTracks(playlistId)
+        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        return databaseTracks.filter { track -> currentTrackIds.contains(track.mediaId) }
+    }
     
     // Like/unlike operations
     suspend fun like(mediaId: String) = db.dao().like(Like(mediaId))
@@ -69,7 +73,12 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun isLiked(mediaId: String): Boolean = db.dao().isLiked(mediaId)
     
     // Get favorites from database (these are user-created, not cached)
-    suspend fun favorites(): List<Track> = db.dao().getFavorites()
+    // Filter out deleted tracks by checking against current cached tracks
+    suspend fun favorites(): List<Track> {
+        val databaseFavorites = db.dao().getFavorites()
+        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        return databaseFavorites.filter { track -> currentTrackIds.contains(track.mediaId) }
+    }
     suspend fun saveFavoritesOrder(order: List<FavoritesOrder>) = db.dao().upsertFavoriteOrder(order)
 
     // Get track by media ID from cached data - optimized to avoid multiple getAllTracks calls
@@ -80,8 +89,18 @@ class LibraryRepository private constructor(private val context: Context, privat
     }
 
     // Get recently added/played from database (these track user interactions, not cached)
-    suspend fun recentlyAdded(limit: Int = 20): List<Track> = db.dao().getRecentlyAdded(limit)
-    suspend fun recentlyPlayed(limit: Int = 20): List<Track> = db.dao().getRecentlyPlayed(limit)
+    // Filter out deleted tracks by checking against current cached tracks
+    suspend fun recentlyAdded(limit: Int = 20): List<Track> {
+        val databaseRecent = db.dao().getRecentlyAdded(limit)
+        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
+    }
+    
+    suspend fun recentlyPlayed(limit: Int = 20): List<Track> {
+        val databaseRecent = db.dao().getRecentlyPlayed(limit)
+        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
+    }
     suspend fun recordPlayed(mediaId: String) = db.dao().insertPlayHistoryIfNotRecent(mediaId)
 
     companion object {

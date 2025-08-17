@@ -112,6 +112,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             }
         }
     }
+    
+    // Listen for changes in cached tracks and refresh home screen data
+    LaunchedEffect(Unit) {
+        repo.dataManager.cachedTracks.collectLatest { cachedTracks ->
+            android.util.Log.d("HomeScreen", "Cached tracks changed: ${cachedTracks.size} tracks, refreshing home data")
+            refreshData()
+        }
+    }
 
     // Refresh data when trigger changes
     LaunchedEffect(refreshTrigger) {
