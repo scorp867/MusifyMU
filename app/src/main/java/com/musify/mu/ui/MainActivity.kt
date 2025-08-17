@@ -205,7 +205,17 @@ private fun AppContent(
         mediaController?.let { controller ->
             controller.addListener(object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                    currentTrack = mediaItem?.toTrack()
+                    // Get the full track data from repository to ensure we have the pre-extracted artwork
+                    currentTrack = mediaItem?.let { item ->
+                        val repoTrack = repo.getTrackByMediaId(item.mediaId)
+                        if (repoTrack != null) {
+                            android.util.Log.d("MainActivity", "Found track in repository: ${repoTrack.title}, artUri: ${repoTrack.artUri}")
+                            repoTrack
+                        } else {
+                            android.util.Log.d("MainActivity", "Track not found in repository, using MediaItem: ${item.mediaId}")
+                            item.toTrack()
+                        }
+                    }
                     hasPlayableQueue = (controller.mediaItemCount > 0)
                     if (controller.mediaItemCount > 0) previewTrack = null
                 }
@@ -226,13 +236,31 @@ private fun AppContent(
                 ) {
                     hasPlayableQueue = controller.mediaItemCount > 0
                     if (controller.currentMediaItem != null) {
-                        currentTrack = controller.currentMediaItem?.toTrack()
+                        currentTrack = controller.currentMediaItem?.let { item ->
+                            val repoTrack = repo.getTrackByMediaId(item.mediaId)
+                            if (repoTrack != null) {
+                                android.util.Log.d("MainActivity", "Timeline changed - Found track in repository: ${repoTrack.title}, artUri: ${repoTrack.artUri}")
+                                repoTrack
+                            } else {
+                                android.util.Log.d("MainActivity", "Timeline changed - Track not found in repository: ${item.mediaId}")
+                                item.toTrack()
+                            }
+                        }
                     }
                 }
             })
 
             // Initialize UI state
-            currentTrack = controller.currentMediaItem?.toTrack()
+            currentTrack = controller.currentMediaItem?.let { item ->
+                val repoTrack = repo.getTrackByMediaId(item.mediaId)
+                if (repoTrack != null) {
+                    android.util.Log.d("MainActivity", "Initial state - Found track in repository: ${repoTrack.title}, artUri: ${repoTrack.artUri}")
+                    repoTrack
+                } else {
+                    android.util.Log.d("MainActivity", "Initial state - Track not found in repository: ${item.mediaId}")
+                    item.toTrack()
+                }
+            }
             isPlaying = controller.isPlaying
             hasPlayableQueue = controller.mediaItemCount > 0
             if (controller.mediaItemCount > 0) previewTrack = null

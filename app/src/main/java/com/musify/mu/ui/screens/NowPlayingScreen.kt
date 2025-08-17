@@ -162,7 +162,9 @@ fun NowPlayingScreen(navController: NavController) {
     LaunchedEffect(controller) {
         controller?.let { mediaController ->
             // Initial state
-            currentTrack = mediaController.currentMediaItem?.toTrack()
+            currentTrack = mediaController.currentMediaItem?.let { item ->
+                repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
+            }
             isPlaying = mediaController.isPlaying
             shuffleOn = mediaController.shuffleModeEnabled
             repeatMode = when(mediaController.repeatMode) {
@@ -182,7 +184,9 @@ fun NowPlayingScreen(navController: NavController) {
             // Add listener for real-time updates
             val listener = object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                    currentTrack = mediaItem?.toTrack()
+                    currentTrack = mediaItem?.let { item ->
+                        repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
+                    }
                     currentTrack?.let { t ->
                         // refresh like state on track change
                         coroutineScope.launch { isLiked = repo.isLiked(t.mediaId) }

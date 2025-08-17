@@ -38,7 +38,7 @@ fun SmartArtwork(
             }
             else -> {
                 // Show placeholder - no artwork was found during startup scan
-                android.util.Log.d("SmartArtwork", "Showing placeholder - no artwork extracted during startup")
+                android.util.Log.d("SmartArtwork", "Showing placeholder - no artwork extracted during startup for contentDescription: $contentDescription")
                 R.drawable.ic_music_note
             }
         }

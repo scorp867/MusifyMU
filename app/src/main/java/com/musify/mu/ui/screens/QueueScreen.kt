@@ -63,6 +63,8 @@ fun QueueScreen(navController: NavController) {
     val hapticFeedback = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val repo = remember { com.musify.mu.data.repo.LibraryRepository.get(context) }
 
     // Advanced QueueManager integration with reactive state
     val queueManager = LocalQueueManager()
@@ -343,7 +345,8 @@ fun QueueScreen(navController: NavController) {
                         visualQueueItems, // Use visual queue for display
                         key = { idx, item -> "queue_${idx}_${item.id}" }
                     ) { idx, queueItem ->
-                        val track = queueItem.toTrack()
+                        // Try to get the full track data from repository first to ensure we have pre-extracted artwork
+                        val track = repo.getTrackByMediaId(queueItem.mediaItem.mediaId) ?: queueItem.toTrack()
                         val dismissState = rememberDismissState(
                             confirmStateChange = { value ->
                                 when (value) {
