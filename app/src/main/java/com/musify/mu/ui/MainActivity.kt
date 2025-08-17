@@ -83,10 +83,8 @@ class MainActivity : ComponentActivity() {
                 if (requiredGranted) {
                     android.util.Log.d("MainActivity", "Required media permissions granted - updating UI state")
 
-                    // Initialize background data loading when permissions are granted
-                    val repo = LibraryRepository.get(context)
-                    repo.initializeBackgroundLoading()
-                    android.util.Log.d("MainActivity", "Background data loading initialized after permission grant")
+                    // Data loading is handled automatically on app launch
+                    android.util.Log.d("MainActivity", "Permissions granted - data loading handled automatically")
 
                     // Log optional permissions status
                     val optionalPermissions = PermissionManager.getOptionalPermissions()
@@ -115,10 +113,8 @@ class MainActivity : ComponentActivity() {
                     hasPermissions = true
                     android.util.Log.d("MainActivity", "Required permissions already granted - set hasPermissions to true")
                     
-                    // Initialize background data loading immediately when permissions are available
-                    val repo = LibraryRepository.get(context)
-                    repo.initializeBackgroundLoading()
-                    android.util.Log.d("MainActivity", "Background data loading initialized")
+                    // Data loading is now initialized on app launch automatically
+                    android.util.Log.d("MainActivity", "Permissions granted - data loading handled by app launch")
                 } else {
                     android.util.Log.d("MainActivity", "Requesting all permissions: ${allPermissions.toList()}")
                     permissionLauncher.launch(allPermissions)

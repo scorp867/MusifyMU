@@ -39,7 +39,8 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     LaunchedEffect(playlistId) {
         tracks = repo.playlistTracks(playlistId)
         title = repo.playlists().find { it.id == playlistId }?.name ?: "Playlist"
-        allTracks = repo.getAllTracks()
+        // Don't load all tracks here - it's not needed for playlist display
+        // allTracks = repo.getAllTracks()
     }
 
     // Separate visual state from actual data state for playlists

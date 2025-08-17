@@ -1,18 +1,12 @@
 package com.musify.mu.playback
 
-import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import androidx.annotation.OptIn
-import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -24,7 +18,6 @@ import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.musify.mu.ui.MainActivity
-import com.musify.mu.R
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.data.repo.LyricsStateStore
 import com.musify.mu.data.repo.PlaybackStateStore
@@ -35,9 +28,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import java.io.File
-import java.io.FileOutputStream
 
 class PlayerService : MediaLibraryService() {
 
@@ -59,6 +49,7 @@ class PlayerService : MediaLibraryService() {
     private fun ensurePlayerInitialized() {
         if (_player != null && _queue != null && _player == mediaLibrarySession?.player) return
         android.util.Log.d("PlayerService", "Initializing player and queue")
+        
         val newPlayer = _player ?: ExoPlayer.Builder(this).build().also { _player = it }
         if (_queue == null) _queue = QueueManager(newPlayer, queueStateStore)
         QueueManagerProvider.setInstance(queue)
@@ -72,11 +63,6 @@ class PlayerService : MediaLibraryService() {
                 if (hasValidMedia) {
                     if (isPlaying) audioFocusManager.request() else audioFocusManager.abandon()
                 }
-            }
-
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                // We'll load lyrics in onMediaItemTransition instead
-                // This avoids duplicate loading
             }
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -115,51 +101,7 @@ class PlayerService : MediaLibraryService() {
         lyricsStateStore = LyricsStateStore.getInstance(this)
         // Lazy: player and queue are created on first playback request
         
-        // Add player listener for track changes and queue updates
-        // Attach listeners only when player exists
-        // They will be registered in ensurePlayerInitialized()
-        /*
-        player.addListener(object : androidx.media3.common.Player.Listener {
-            override fun onMediaItemTransition(
-                mediaItem: androidx.media3.common.MediaItem?,
-                reason: Int
-            ) {
-                mediaItem?.let { item ->
-                    // Notify QueueManager of track changes for history tracking
-                    queue.onTrackChanged(item.mediaId)
-                    
-                    // Load lyrics for the new track in background
-                    serviceScope.launch(Dispatchers.IO) {
-                        try {
-                            android.util.Log.d("PlayerService", "Loading lyrics for track: ${item.mediaId}")
-                            lyricsStateStore.loadLyrics(item.mediaId)
-                        } catch (e: Exception) {
-                            android.util.Log.e("PlayerService", "Failed to load lyrics for ${item.mediaId}", e)
-                        }
-                    }
-                }
-            }
-            
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                // Update playback state store when playback state changes
-                when (playbackState) {
-                    androidx.media3.common.Player.STATE_READY -> {
-                        // Ensure lyrics are loaded for current track when player becomes ready
-                        player.currentMediaItem?.let { item ->
-                            serviceScope.launch(Dispatchers.IO) {
-                                try {
-                                    lyricsStateStore.loadLyrics(item.mediaId)
-                                } catch (_: Exception) {}
-                            }
-                        }
-                    }
-                    androidx.media3.common.Player.STATE_ENDED -> {
-                        // Playback ended, could trigger auto-play next or recommendations
-                    }
-                }
-            }
-        })
-        */
+        // Player listeners are attached in ensurePlayerInitialized() when needed
         
         // Initialize audio focus manager
         audioFocusManager = AudioFocusManager(this) { focusChange ->
@@ -250,86 +192,9 @@ class PlayerService : MediaLibraryService() {
             .setSessionActivity(createPlayerActivityIntent())
             .build()
 
-        // Attach minimal listeners to the placeholder player as well, so we log/track before lazy init
-        placeholderPlayer.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                mediaItem?.let { item ->
-                    serviceScope.launch(Dispatchers.IO) {
-                        try {
-                            // Record as played and attempt lyrics load once
-                            repo.recordPlayed(item.mediaId)
-                            if (lastLoadedLyricsId != item.mediaId) {
-                                lastLoadedLyricsId = item.mediaId
-                                android.util.Log.d("PlayerService", "[placeholder] onMediaItemTransition: Loading lyrics for ${item.mediaId}")
-                                lyricsStateStore.loadLyrics(item.mediaId)
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.e("PlayerService", "[placeholder] Failed in transition handler", e)
-                        }
-                    }
-                }
-            }
-        })
+        // Placeholder player is just for session creation, no listeners needed
 
-        /*
-        player.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (hasValidMedia) {
-                    if (isPlaying) {
-                        audioFocusManager.request()
-                    } else {
-                        audioFocusManager.abandon()
-                    }
-                }
-            }
-            
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                // Record the track as played when transitioning to it
-                mediaItem?.let { item ->
-                    serviceScope.launch(Dispatchers.IO) {
-                        repo.recordPlayed(item.mediaId)
-                        // If we advanced to next item, decrement play-next count if needed
-                        queueStateStore.decrementOnAdvance()
-                        
-                        // Load lyrics for the new track
-                        try {
-                            android.util.Log.d("PlayerService", "Loading lyrics for new track: ${item.mediaId}")
-                            lyricsStateStore.loadLyrics(item.mediaId)
-                        } catch (e: Exception) {
-                            android.util.Log.e("PlayerService", "Failed to load lyrics", e)
-                        }
-                    }
-                }
-            }
-            
-            override fun onEvents(player: Player, events: Player.Events) {
-                // Save playback state
-                serviceScope.launch {
-                    val ids = queue.getQueueSnapshot().map { it.id }
-                    val index = player.currentMediaItemIndex
-                    val pos = player.currentPosition
-                    val repeat = player.repeatMode
-                    val shuffle = player.shuffleModeEnabled
-                    val play = player.playWhenReady
-                    kotlinx.coroutines.withContext(Dispatchers.IO) {
-                        stateStore.save(ids, index, pos, repeat, shuffle, play)
-                    }
-                }
-                
-                // Check if we have valid media
-                hasValidMedia = player.mediaItemCount > 0
-                
-                // Handle service lifecycle
-                if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
-                    if (player.mediaItemCount == 0) {
-                        // No media items, stop service
-                        stopForegroundService()
-                        stopSelf()
-                    }
-                }
-            }
-        })
-        */
+        // Player event handling is done in ensurePlayerInitialized()
 
         // We no longer show our own persistent notification; Android system may show media controls if the session is active.
 
@@ -345,28 +210,8 @@ class PlayerService : MediaLibraryService() {
         // Stop the service when app is swiped away from recents
         android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
         
-        // Only operate on player if it's initialized
-        _player?.let { p ->
-            // Stop playback immediately
-            p.stop()
-            p.clearMediaItems()
-        }
-        
-        // Clear queue state in coroutine
-        serviceScope.launch {
-            try {
-                _queue?.clearQueue(keepCurrent = false)
-            } catch (e: Exception) {
-                android.util.Log.e("PlayerService", "Error clearing queue on task removed", e)
-            }
-        }
-        
-        // Abandon audio focus
-        audioFocusManager.abandon()
-        
         // Stop foreground service and clear notifications
-        stopForegroundService()
-        
+        stopForeground(STOP_FOREGROUND_REMOVE)
         // Stop the service completely
         serviceScope.cancel()
         stopSelf()
@@ -452,36 +297,7 @@ class PlayerService : MediaLibraryService() {
     }
     
 
-    
-    private fun loadArtworkBitmap(artworkUri: String): Bitmap? {
-        return try {
-            val uri = Uri.parse(artworkUri)
-            when {
-                uri.scheme == "content" -> {
-                    // Handle content:// URIs (MediaStore)
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        BitmapFactory.decodeStream(input)
-                    }
-                }
-                uri.scheme == "file" -> {
-                    // Handle file:// URIs
-                    BitmapFactory.decodeFile(uri.path)
-                }
-                else -> {
-                    // Try to decode as file path
-                    BitmapFactory.decodeFile(artworkUri)
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("PlayerService", "Failed to load artwork: $artworkUri", e)
-            null
-        }
-    }
-    
-    private fun createNotificationChannel() { /* no-op */ }
-    
     companion object {
-        private const val CHANNEL_ID = "PLAYBACK_CHANNEL"
-        private const val NOTIFICATION_ID = 1001
+        // Service configuration constants
     }
 }

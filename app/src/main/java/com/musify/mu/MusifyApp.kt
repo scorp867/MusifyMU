@@ -1,30 +1,41 @@
 package com.musify.mu
 
 import android.app.Application
-import androidx.work.Configuration
-import androidx.work.WorkManager
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import com.musify.mu.data.media.SimpleBackgroundDataManager
+import com.musify.mu.data.db.AppDatabase
+import com.musify.mu.data.db.DatabaseProvider
+import com.musify.mu.util.CoilImageLoaderConfig
+import com.musify.mu.util.isLowMemoryDevice
 
-class MusifyApp : Application() {
+class MusifyApp : Application(), ImageLoaderFactory {
     // Global application scope for background coroutines
     val applicationScope = CoroutineScope(SupervisorJob())
 
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize WorkManager manually for background tasks
-        try {
-            val config = Configuration.Builder()
-                .setMinimumLoggingLevel(android.util.Log.INFO)
-                .build()
-            WorkManager.initialize(this, config)
-        } catch (e: Exception) {
-            // WorkManager might already be initialized, that's okay
-            android.util.Log.d("MusifyApp", "WorkManager initialization: ${e.message}")
-        }
+        // Note: Data manager will be initialized by LibraryScreen when permissions are granted
+        // This avoids conflicts and ensures proper initialization timing
+        android.util.Log.d("MusifyApp", "Musify app initialized - data manager will be initialized by LibraryScreen")
 
-        // Initialize app components
-        android.util.Log.d("MusifyApp", "App initialized successfully")
+        android.util.Log.d("MusifyApp", "Simple Musify app initialized successfully")
+    }
+
+    /**
+     * Create optimized Coil ImageLoader for artwork caching
+     */
+    override fun newImageLoader(): ImageLoader {
+        return if (isLowMemoryDevice()) {
+            android.util.Log.d("MusifyApp", "Using low-memory ImageLoader configuration")
+            CoilImageLoaderConfig.createLowMemoryImageLoader(this)
+        } else {
+            android.util.Log.d("MusifyApp", "Using optimized ImageLoader configuration")
+            CoilImageLoaderConfig.createOptimizedImageLoader(this)
+        }
     }
 }

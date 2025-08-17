@@ -234,7 +234,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             .collectLatest { _ ->
                 val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
                 val uris = visibleTracks.map { it.mediaId }
-                com.musify.mu.data.media.EmbeddedArtCache.preload(context, uris)
+                // Simple artwork loading - no preloading needed
             }
     }
 }

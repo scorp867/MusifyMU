@@ -65,7 +65,13 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("org.burnoutcrew.composereorderable:reorderable:0.9.6")
 
+    // Coil for lazy image loading with disk caching
     implementation("io.coil-kt:coil-compose:2.5.0")
+    implementation("io.coil-kt:coil:2.5.0")
+    implementation("io.coil-kt:coil-gif:2.5.0")
+    
+    // Glide as alternative for non-Compose usage
+    implementation("com.github.bumptech.glide:glide:4.16.0")
 
     implementation("androidx.room:room-runtime:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
@@ -88,6 +94,13 @@ dependencies {
     implementation("androidx.compose.runtime:runtime-livedata")
 
     implementation("androidx.work:work-runtime-ktx:2.9.0")
+
+    // Unit tests
+    testImplementation("junit:junit:4.13.2")
+
+    // Instrumented Android tests
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
 }
 
 // Room KSP options

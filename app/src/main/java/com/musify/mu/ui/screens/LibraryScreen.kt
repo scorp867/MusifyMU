@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
+import com.musify.mu.data.media.LoadingState
 import com.musify.mu.util.PermissionManager
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.util.toMediaItem
@@ -84,25 +85,17 @@ fun LibraryScreen(
     var isProcessingQueueOps by remember { mutableStateOf(false) }
 
     // Debounced search with visual-only immediate feedback
-    val tracks by remember(searchQuery, allTracks) {
-        mutableStateOf(
-            if (searchQuery.isBlank()) allTracks else allTracks.filter { t ->
-                t.title.contains(searchQuery, ignoreCase = true) ||
-                t.artist.contains(searchQuery, ignoreCase = true) ||
-                t.album.contains(searchQuery, ignoreCase = true)
-            }
-        )
+    val tracks = if (searchQuery.isBlank()) allTracks else allTracks.filter { t ->
+        t.title.contains(searchQuery, ignoreCase = true) ||
+        t.artist.contains(searchQuery, ignoreCase = true) ||
+        t.album.contains(searchQuery, ignoreCase = true)
     }
 
     // Visual tracks for immediate search feedback
-    val visualTracks by remember(visualSearchQuery, allTracks) {
-        mutableStateOf(
-            if (visualSearchQuery.isBlank()) allTracks else allTracks.filter { t ->
-                t.title.contains(visualSearchQuery, ignoreCase = true) ||
-                t.artist.contains(visualSearchQuery, ignoreCase = true) ||
-                t.album.contains(visualSearchQuery, ignoreCase = true)
-            }
-        )
+    val visualTracks = if (visualSearchQuery.isBlank()) allTracks else allTracks.filter { t ->
+        t.title.contains(visualSearchQuery, ignoreCase = true) ||
+        t.artist.contains(visualSearchQuery, ignoreCase = true) ||
+        t.album.contains(visualSearchQuery, ignoreCase = true)
     }
 
     // Debounced search to prevent excessive filtering
@@ -124,64 +117,22 @@ fun LibraryScreen(
     LaunchedEffect(hasPermissions) {
         android.util.Log.d("LibraryScreen", "LaunchedEffect triggered - hasPermissions: $hasPermissions")
         if (hasPermissions) {
-            // Get data from fast cache immediately
-            allTracks = repo.getAllTracks()
-            isLoading = allTracks.isEmpty()
-            android.util.Log.d("LibraryScreen", "Initial load: ${allTracks.size} tracks from cache")
-            
-            // Observe background loading progress
-            repo.loadingProgress.collect { state ->
-                when (state) {
-                    is com.musify.mu.data.media.BackgroundDataManager.LoadingState.Loading -> {
-                        if (allTracks.isEmpty()) {
-                            isLoading = true
-                        }
-                        android.util.Log.d("LibraryScreen", "Background loading: ${state.message}")
-                    }
-                    is com.musify.mu.data.media.BackgroundDataManager.LoadingState.Completed -> {
-                        // Refresh tracks from cache
-                        allTracks = repo.getAllTracks()
-                        isLoading = false
-                        android.util.Log.d("LibraryScreen", "Background loading completed: ${allTracks.size} tracks")
-                        
-                        // If still no tracks after background loading, try manual refresh
-                        if (allTracks.isEmpty()) {
-                            android.util.Log.w("LibraryScreen", "No tracks found after background loading, trying manual refresh...")
-                            coroutineScope.launch {
-                                try {
-                                    isLoading = true
-                                    allTracks = repo.refreshLibrary()
-                                    android.util.Log.d("LibraryScreen", "Manual refresh found ${allTracks.size} tracks")
-                                } catch (e: Exception) {
-                                    android.util.Log.e("LibraryScreen", "Manual refresh failed", e)
-                                } finally {
-                                    isLoading = false
-                                }
-                            }
-                        }
-                    }
-                    is com.musify.mu.data.media.BackgroundDataManager.LoadingState.Error -> {
-                        isLoading = false
-                        android.util.Log.e("LibraryScreen", "Background loading error: ${state.message}")
-                        
-                        // Try manual refresh as fallback
-                        android.util.Log.w("LibraryScreen", "Trying manual refresh after background loading error...")
-                        coroutineScope.launch {
-                            try {
-                                isLoading = true
-                                allTracks = repo.refreshLibrary()
-                                android.util.Log.d("LibraryScreen", "Manual refresh after error found ${allTracks.size} tracks")
-                            } catch (e: Exception) {
-                                android.util.Log.e("LibraryScreen", "Manual refresh after error failed", e)
-                            } finally {
-                                isLoading = false
-                            }
-                        }
-                    }
-                    else -> {
-                        // Idle state
-                    }
+            // Ensure data manager is initialized
+            coroutineScope.launch {
+                try {
+                    android.util.Log.d("LibraryScreen", "Ensuring data manager is initialized...")
+                    repo.dataManager.ensureInitialized()
+                    android.util.Log.d("LibraryScreen", "Data manager ready")
+                } catch (e: Exception) {
+                    android.util.Log.e("LibraryScreen", "Failed to initialize data manager", e)
                 }
+            }
+            
+            // Observe the cached tracks flow for real-time updates (this is the single source of truth)
+            repo.dataManager.cachedTracks.collect { cachedTracks ->
+                android.util.Log.d("LibraryScreen", "Cache updated: ${cachedTracks.size} tracks")
+                allTracks = cachedTracks
+                isLoading = false
             }
         } else {
             android.util.Log.d("LibraryScreen", "No permissions granted, clearing tracks")
@@ -189,18 +140,22 @@ fun LibraryScreen(
             allTracks = emptyList()
         }
     }
-
-    // Prefetch embedded art for visible items
-    LaunchedEffect(listState, tracks) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
-            .distinctUntilChanged()
-            .collectLatest { indexes ->
-                // Combine adjacent ranges and limit batch size to reduce redundant work
-                val uniqueIndexes = indexes.distinct().sorted()
-                val uriBatch = uniqueIndexes.mapNotNull { i -> tracks.getOrNull(i)?.mediaId }.take(40)
-                com.musify.mu.data.media.EmbeddedArtCache.preload(context, uriBatch)
-            }
+    
+    // Debug logging for tracks state
+    LaunchedEffect(allTracks) {
+        android.util.Log.d("LibraryScreen", "allTracks changed: ${allTracks.size} tracks")
+        android.util.Log.d("LibraryScreen", "tracks computed: ${tracks.size} tracks")
+        android.util.Log.d("LibraryScreen", "visualTracks computed: ${visualTracks.size} tracks")
+        android.util.Log.d("LibraryScreen", "isLoading: $isLoading")
+        
+        // Log sample track details for debugging
+        if (allTracks.isNotEmpty()) {
+            val sampleTrack = allTracks.first()
+            android.util.Log.d("LibraryScreen", "Sample track - Title: ${sampleTrack.title}, Artist: ${sampleTrack.artist}, Album: ${sampleTrack.album}, AlbumID: ${sampleTrack.albumId}")
+        }
     }
+
+    // No artwork prefetching needed - all artwork is extracted at app startup
 
     // Background gradient
     val backgroundGradient = Brush.verticalGradient(
@@ -242,6 +197,8 @@ fun LibraryScreen(
             else -> {
                 // Track list with alphabetical scroll bar
                 Box(modifier = Modifier.fillMaxSize()) {
+                    
+
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
@@ -479,11 +436,8 @@ private fun TrackItem(
                     .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                com.musify.mu.ui.components.Artwork(
-                    data = track.artUri,
-                    audioUri = track.mediaId,
-                    cacheKey = track.mediaId,
-                    albumId = track.albumId,
+                com.musify.mu.ui.components.SmartArtwork(
+                    artworkUri = track.artUri, // Use pre-extracted artwork from database
                     contentDescription = track.title,
                     modifier = Modifier.fillMaxSize()
                 )

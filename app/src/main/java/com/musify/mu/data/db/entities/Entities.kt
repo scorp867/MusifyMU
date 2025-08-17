@@ -10,9 +10,23 @@ data class Track(
     val artist: String,
     val album: String,
     val durationMs: Long,
-    val artUri: String?,
+    val artUri: String?, // For lazy loading with Coil/Glide
     val albumId: Long?,
-    val dateAddedSec: Long = 0 // unix seconds from MediaStore
+    val dateAddedSec: Long = 0, // unix seconds from MediaStore
+    // Additional MediaStore fields for complete metadata
+    val artistId: Long? = null,
+    val genre: String? = null,
+    val year: Int? = null,
+    val track: Int? = null, // track number
+    val mimeType: String? = null,
+    val size: Long = 0,
+    val bitrate: Int? = null,
+    val sampleRate: Int? = null,
+    val isMusic: Int = 1,
+    val dateModified: Long = 0,
+    val displayName: String? = null,
+    val relativePath: String? = null,
+    val albumArtist: String? = null
 )
 
 @Entity(tableName = "playlist")

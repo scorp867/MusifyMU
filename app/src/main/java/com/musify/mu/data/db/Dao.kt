@@ -117,4 +117,23 @@ interface AppDao {
 
     @Query("SELECT * FROM track WHERE artUri IS NULL OR artUri = ''")
     suspend fun getTracksMissingArt(): List<Track>
+    
+    // Album info helpers for embedded art extraction
+    @Query("""
+        SELECT album, artist, COUNT(*) as trackCount 
+        FROM track 
+        GROUP BY album, artist 
+        HAVING COUNT(*) > 1
+    """)
+    suspend fun getAlbumsWithMultipleTracks(): List<AlbumInfo>
+    
+    @Query("SELECT * FROM track WHERE album = :album AND artist = :artist")
+    suspend fun getTracksByAlbum(album: String, artist: String): List<Track>
 }
+
+// Simple data class for album info
+data class AlbumInfo(
+    val album: String,
+    val artist: String,
+    val trackCount: Int
+)
