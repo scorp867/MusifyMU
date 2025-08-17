@@ -6,12 +6,9 @@ import com.musify.mu.data.db.entities.Track
 
 /**
  * Convert Track to MediaItem for ExoPlayer.
- * ExoPlayer will automatically extract additional metadata from the audio file.
+ * Includes pre-extracted artwork URI for UI components.
  */
 fun Track.toMediaItem(): MediaItem {
-    // Don't provide artwork URI - let ExoPlayer extract it automatically
-    // This ensures ExoPlayer uses its optimized extraction methods
-    
     return MediaItem.Builder()
         .setMediaId(mediaId)
         .setUri(mediaId) // mediaId stores the content:// URI string
@@ -20,8 +17,8 @@ fun Track.toMediaItem(): MediaItem {
                 .setTitle(title)
                 .setArtist(artist)
                 .setAlbumTitle(album)
-                // Let ExoPlayer extract artwork automatically - this is more reliable
-                // .setArtworkUri(artwork) // Commented out to let ExoPlayer handle it
+                // Include pre-extracted artwork URI so UI components can use it
+                .setArtworkUri(artUri?.let { android.net.Uri.parse(it) })
                 .setGenre(genre)
                 .setReleaseYear(year)
                 .setTrackNumber(track)
