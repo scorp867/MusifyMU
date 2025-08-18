@@ -169,9 +169,28 @@ class PlayerService : MediaLibraryService() {
                 val future = com.google.common.util.concurrent.SettableFuture.create<MutableList<MediaItem>>()
                 serviceScope.launch(Dispatchers.IO) {
                     try {
-                        val resolved = mediaItems.map { it.mediaId }
-                            .mapNotNull { id -> repo.getTrackByMediaId(id)?.toMediaItem() }
-                            .toMutableList()
+                        val resolved = mutableListOf<MediaItem>()
+                        for (item in mediaItems) {
+                            val id = item.mediaId
+                            val dbItem = repo.getTrackByMediaId(id)?.toMediaItem()
+                            if (dbItem != null) {
+                                resolved.add(dbItem)
+                            } else {
+                                // Fallback: keep original if it's a direct URI or has request metadata
+                                val hasDirectUri = (item.localConfiguration?.uri != null)
+                                    || (item.requestMetadata.mediaUri != null)
+                                    || id.startsWith("content://")
+                                    || id.startsWith("file://")
+                                if (hasDirectUri) {
+                                    resolved.add(item)
+                                }
+                            }
+                        }
+                        // If nothing could be resolved, return original items to let player try URIs
+                        if (resolved.isEmpty()) {
+                            resolved.addAll(mediaItems)
+                        }
+                        hasValidMedia = resolved.isNotEmpty()
                         future.set(resolved)
                     } catch (e: Exception) {
                         future.set(mutableListOf())

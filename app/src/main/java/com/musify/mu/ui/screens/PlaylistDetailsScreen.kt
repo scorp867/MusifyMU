@@ -11,6 +11,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
@@ -22,6 +27,7 @@ import kotlinx.coroutines.launch
 import com.musify.mu.ui.components.TrackPickerSheet
 import org.burnoutcrew.reorderable.*
 import org.burnoutcrew.reorderable.ItemPosition
+ 
 import android.content.ContentUris
 import android.provider.MediaStore
 
@@ -39,8 +45,8 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     LaunchedEffect(playlistId) {
         tracks = repo.playlistTracks(playlistId)
         title = repo.playlists().find { it.id == playlistId }?.name ?: "Playlist"
-        // Don't load all tracks here - it's not needed for playlist display
-        // allTracks = repo.getAllTracks()
+        // Load all tracks so TrackPicker has something to show even if the library screen wasn't opened yet
+        allTracks = repo.getAllTracks()
     }
 
     // Separate visual state from actual data state for playlists
@@ -78,22 +84,18 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
             isDragging = true
         },
         onDragEnd = { from, to ->
-            val fromIdx = from  // from is Int in onDragEnd  
-            val toIdx = to      // to is Int in onDragEnd
-            
+            val fromIdx = from
+            val toIdx = to
             if (fromIdx != toIdx) {
-                // Commit actual data change when drag completes
-        scope.launch {
+                scope.launch {
                     try {
-                        // Update actual tracks data
+                        // Commit new visual order to real tracks
                         tracks = visualTracks.toList()
-                        
-                        // TODO: Implement efficient playlist reordering in repository
-            val mediaIds = tracks.map { it.mediaId }
-                        // For now, we maintain the tracks list state
-                        
+                        val mediaIds = tracks.map { it.mediaId }
+                        // Persist order in DB
+                        repo.reorderPlaylist(playlistId, mediaIds)
                     } catch (e: Exception) {
-                        // On failure, revert visual state to match actual data
+                        // Revert on failure
                         visualTracks = tracks
                     } finally {
                         isDragging = false
@@ -101,7 +103,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 }
             } else {
                 isDragging = false
-                visualTracks = tracks // Ensure sync
+                visualTracks = tracks
             }
         }
     )
@@ -115,22 +117,34 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
             })
         }
     ) { padding ->
-        LazyColumn(
-            state = reorderState.listState,
+        // Track on-screen bounds for overlay positioning during drag
+        val itemBounds = remember { mutableStateMapOf<String, Rect>() }
+        var dragOverlayKey by remember { mutableStateOf<String?>(null) }
+        var dragOverlayTrack by remember { mutableStateOf<Track?>(null) }
+        var dragOverlayIndex by remember { mutableStateOf(0) }
+        val density = LocalDensity.current
+
+        Box(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                .reorderable(reorderState),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(visualTracks.size, key = { idx -> "playlist_${playlistId}_${idx}_${visualTracks[idx].mediaId}" }) { idx ->
+            LazyColumn(
+                state = reorderState.listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .reorderable(reorderState),
+                contentPadding = PaddingValues(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+            items(visualTracks.size, key = { idx -> "playlist_${playlistId}_${visualTracks[idx].mediaId}" }) { idx ->
                 val track = visualTracks[idx]
                 var showMenu by remember { mutableStateOf(false) }
                 
-                ReorderableItem(reorderState, key = "playlist_${playlistId}_${idx}_${track.mediaId}") { isDragging ->
+                ReorderableItem(reorderState, key = "playlist_${playlistId}_${track.mediaId}") { isDragging ->
                     Card(
                         modifier = Modifier
+                            .zIndex(if (isDragging) 1f else 0f)
                             .fillMaxWidth()
                             .graphicsLayer {
                                 // Hardware acceleration for smooth drag animations
@@ -143,7 +157,8 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                 }
                                 scaleX = if (isDragging) 1.02f else 1f
                                 scaleY = if (isDragging) 1.02f else 1f
-                                alpha = if (isDragging) 0.95f else 1f
+                                // Keep original visible during drag per request
+                                alpha = 1f
                             },
                         elevation = CardDefaults.cardElevation(
                             defaultElevation = if (isDragging) {
@@ -157,6 +172,24 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                 MaterialTheme.colorScheme.surface
                         )
                     ) {
+                        // Update overlay source on drag state changes
+                        LaunchedEffect(isDragging) {
+                            val key = "playlist_${playlistId}_${track.mediaId}"
+                            if (isDragging) {
+                                dragOverlayKey = key
+                                dragOverlayTrack = track
+                                dragOverlayIndex = idx
+                            } else if (dragOverlayKey == key) {
+                                dragOverlayKey = null
+                                dragOverlayTrack = null
+                            }
+                        }
+                        // Capture bounds for overlay placement
+                        Box(
+                            modifier = Modifier.onGloballyPositioned { coords ->
+                                itemBounds["playlist_${playlistId}_${track.mediaId}"] = coords.boundsInRoot()
+                            }
+                        ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -233,9 +266,13 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                 )
                             }
                         }
+                        }
                     }
                 }
             }
+            }
+
+            // Floating overlay removed per request
         }
     }
 

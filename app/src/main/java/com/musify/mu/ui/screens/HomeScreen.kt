@@ -43,6 +43,7 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import android.content.ContentUris
 import android.provider.MediaStore
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -51,6 +52,7 @@ import kotlinx.coroutines.flow.map
 // Composition local to provide scroll state to child components
 val LocalScrollState = compositionLocalOf<LazyListState?> { null }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -66,6 +68,10 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var refreshTrigger by remember { mutableStateOf(0) }
 
     val scope = rememberCoroutineScope()
+    val cachedTracks by repo.dataManager.cachedTracks.collectAsState(initial = repo.getAllTracks())
+    var songsQuery by remember { mutableStateOf("") }
+    var artistsQuery by remember { mutableStateOf("") }
+    var albumsQuery by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
     // Function to refresh data
@@ -151,6 +157,30 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         )
     )
 
+    // Section tabs below welcome header
+    var selectedSection by remember { mutableStateOf(0) } // 0=LISTS, 1=SONGS, 2=ARTISTS, 3=ALBUMS
+    // Keep state on Home reselect (no reset per request)
+
+    // Derived data for section lists
+    val tracksFiltered = remember(songsQuery, cachedTracks) {
+        if (songsQuery.isBlank()) cachedTracks else cachedTracks.filter { t ->
+            t.title.contains(songsQuery, true) || t.artist.contains(songsQuery, true) || t.album.contains(songsQuery, true)
+        }
+    }
+    val artistsAll = remember(cachedTracks) {
+        cachedTracks
+            .groupBy { it.artist.ifBlank { "Unknown Artist" } }
+            .map { (name, tracks) -> name to tracks.size }
+            .sortedBy { it.first.lowercase() }
+    }
+    val artistsFiltered = remember(artistsQuery, artistsAll) {
+        if (artistsQuery.isBlank()) artistsAll else artistsAll.filter { it.first.contains(artistsQuery, true) }
+    }
+    val albumsAll = remember(cachedTracks) { repo.dataManager.getUniqueAlbums() }
+    val albumsFiltered = remember(albumsQuery, albumsAll) {
+        if (albumsQuery.isBlank()) albumsAll else albumsAll.filter { it.albumName.contains(albumsQuery, true) }
+    }
+
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -159,78 +189,190 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        // Welcome header with animation and settings button
+        // Welcome header with animation (settings button removed per new design)
         item {
             WelcomeHeader(navController)
         }
 
-        if (isLoading) {
-            items(3) {
-                ShimmerCarousel()
+        // Top section tabs (sticky at top)
+        stickyHeader {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
+                val tabs = listOf("LISTS", "SONGS", "ARTISTS", "ALBUMS")
+                TabRow(
+                    selectedTabIndex = selectedSection,
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
+                ) {
+                    tabs.forEachIndexed { index, label ->
+                        Tab(
+                            selected = selectedSection == index,
+                            onClick = { selectedSection = index },
+                            text = { Text(label) }
+                        )
+                    }
+                }
             }
-        } else {
-            item {
-                AnimatedCarousel(
-                    title = "Recently Played",
-                    icon = Icons.Rounded.History,
-                    data = recentPlayed,
-                    onPlay = { tracks, index ->
-                        onPlay(tracks, index)
-                        // Trigger refresh after a short delay to allow the database to update
-                        scope.launch {
-                            kotlinx.coroutines.delay(500)
-                            refreshTrigger++
-                        }
-                    },
-                    haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/recently_played") }
-                )
-            }
+        }
 
-            item {
-                AnimatedCarousel(
-                    title = "Recently Added",
-                    icon = Icons.Rounded.NewReleases,
-                    data = recentAdded,
-                    onPlay = { tracks, index ->
-                        onPlay(tracks, index)
-                        // Trigger refresh after a short delay to allow the database to update
-                        scope.launch {
-                            kotlinx.coroutines.delay(500)
-                            refreshTrigger++
-                        }
-                    },
-                    haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/recently_added") }
-                )
+        when (selectedSection) {
+            0 -> {
+                if (isLoading) {
+                    items(3) { ShimmerCarousel() }
+                } else {
+                    item {
+                        AnimatedCarousel(
+                            title = "Recently Played",
+                            icon = Icons.Rounded.History,
+                            data = recentPlayed,
+                            onPlay = { tracks, index ->
+                                onPlay(tracks, index)
+                                scope.launch {
+                                    kotlinx.coroutines.delay(500)
+                                    refreshTrigger++
+                                }
+                            },
+                            haptic = haptic,
+                            onSeeAll = { navController.navigate("see_all/recently_played") }
+                        )
+                    }
+                    item {
+                        AnimatedCarousel(
+                            title = "Recently Added",
+                            icon = Icons.Rounded.NewReleases,
+                            data = recentAdded,
+                            onPlay = { tracks, index ->
+                                onPlay(tracks, index)
+                                scope.launch {
+                                    kotlinx.coroutines.delay(500)
+                                    refreshTrigger++
+                                }
+                            },
+                            haptic = haptic,
+                            onSeeAll = { navController.navigate("see_all/recently_added") }
+                        )
+                    }
+                    item {
+                        AnimatedCarousel(
+                            title = "Favourites",
+                            icon = Icons.Rounded.Favorite,
+                            data = favorites,
+                            onPlay = { tracks, index ->
+                                onPlay(tracks, index)
+                                scope.launch {
+                                    kotlinx.coroutines.delay(500)
+                                    refreshTrigger++
+                                }
+                            },
+                            haptic = haptic,
+                            onSeeAll = { navController.navigate("see_all/favorites") }
+                        )
+                    }
+                    item {
+                        CustomPlaylistsCarousel(
+                            playlists = customPlaylists,
+                            navController = navController,
+                            haptic = haptic,
+                            onRefresh = { refreshTrigger++ }
+                        )
+                    }
+                }
             }
-
-            item {
-                AnimatedCarousel(
-                    title = "Favourites",
-                    icon = Icons.Rounded.Favorite,
-                    data = favorites,
-                    onPlay = { tracks, index ->
-                        onPlay(tracks, index)
-                        // Trigger refresh after a short delay to allow the database to update
-                        scope.launch {
-                            kotlinx.coroutines.delay(500)
-                            refreshTrigger++
+            1 -> {
+                // SONGS section (Library-like list)
+                item {
+                    OutlinedTextField(
+                        value = songsQuery,
+                        onValueChange = { songsQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search songs") }
+                    )
+                }
+                items(tracksFiltered.size, key = { i -> "songs_${tracksFiltered[i].mediaId}" }) { idx ->
+                    val t = tracksFiltered[idx]
+                    Card(
+                        modifier = Modifier.clickable { onPlay(tracksFiltered, idx) }
+                    ) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Artwork(
+                                data = t.artUri,
+                                audioUri = t.mediaId,
+                                albumId = t.albumId,
+                                contentDescription = t.title,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(t.title, style = MaterialTheme.typography.titleMedium)
+                                Text(t.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                            }
                         }
-                    },
-                    haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/favorites") }
-                )
+                    }
+                }
             }
-
-            // Custom Playlists Carousel (always visible so user can create playlists)
-            item {
-                CustomPlaylistsCarousel(
-                    playlists = customPlaylists,
-                    navController = navController,
-                    haptic = haptic,
-                    onRefresh = { refreshTrigger++ }
-                )
+            2 -> {
+                // ARTISTS section
+                item {
+                    OutlinedTextField(
+                        value = artistsQuery,
+                        onValueChange = { artistsQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search artists") }
+                    )
+                }
+                items(artistsFiltered.size, key = { i -> "artist_${artistsFiltered[i].first}" }) { idx ->
+                    val (name, count) = artistsFiltered[idx]
+                    Card(
+                        modifier = Modifier.clickable {
+                            selectedSection = 1
+                            songsQuery = name
+                        }
+                    ) {
+                        ListItem(
+                            headlineContent = { Text(name) },
+                            supportingContent = { Text("$count songs") }
+                        )
+                    }
+                }
+            }
+            3 -> {
+                // ALBUMS section
+                item {
+                    OutlinedTextField(
+                        value = albumsQuery,
+                        onValueChange = { albumsQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Search albums") }
+                    )
+                }
+                items(albumsFiltered.size, key = { i -> "album_${albumsFiltered[i].albumId}_${albumsFiltered[i].albumName}" }) { idx ->
+                    val a = albumsFiltered[idx]
+                    Card(
+                        modifier = Modifier.clickable {
+                            selectedSection = 1
+                            albumsQuery = a.albumName
+                            songsQuery = a.albumName
+                        }
+                    ) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Artwork(
+                                data = a.artUri,
+                                audioUri = null,
+                                albumId = a.albumId,
+                                contentDescription = a.albumName,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(a.albumName, style = MaterialTheme.typography.titleMedium)
+                                Text(a.artistName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                            }
+                            Text("${a.trackCount}")
+                        }
+                    }
+                }
             }
         }
     }
@@ -246,6 +388,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             }
     }
 }
+
+// (Flattened sections implemented inline above to avoid nested scrollables)
 
 @Composable
 private fun WelcomeHeader(navController: NavController) {
@@ -314,23 +458,7 @@ private fun WelcomeHeader(navController: NavController) {
                     )
                 }
                 
-                // Settings button
-                IconButton(
-                    onClick = { navController.navigate(Screen.Settings.route) },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                            CircleShape
-                        )
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Settings,
-                        contentDescription = "Settings",
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                // Settings button removed per new navigation design
             }
         }
     }

@@ -15,9 +15,9 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Home
-import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,7 +45,7 @@ data class BottomNavItem(
 
 private val items = listOf(
     BottomNavItem(Screen.Home.route, "Home", Icons.Outlined.Home, Icons.Rounded.Home),
-    BottomNavItem(Screen.Library.route, "Library", Icons.Outlined.LibraryMusic, Icons.Rounded.LibraryMusic)
+    BottomNavItem(Screen.Settings.route, "Settings", Icons.Outlined.Settings, Icons.Rounded.Settings)
 )
 
 @Composable
@@ -87,9 +87,20 @@ fun BottomBar(navController: NavController) {
                         .selectable(
                             selected = selected,
                             onClick = {
-                                if (currentRoute != item.route) {
+                                if (item.route == Screen.Home.route) {
+                                    // Pop back to Home if it exists in the back stack (keeps its state)
+                                    val popped = navController.popBackStack(Screen.Home.route, inclusive = false)
+                                    if (!popped) {
+                                        // If Home wasn't in back stack for some reason, navigate to it and attempt to restore state
+                                        navController.navigate(Screen.Home.route) {
+                                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    }
+                                } else if (currentRoute != item.route) {
                                     navController.navigate(item.route) {
-                                        popUpTo(Screen.Library.route) { saveState = true }
+                                        popUpTo(navController.graph.startDestinationId) { saveState = true }
                                         launchSingleTop = true
                                         restoreState = true
                                     }

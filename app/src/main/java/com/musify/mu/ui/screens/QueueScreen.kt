@@ -53,6 +53,11 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.platform.LocalDensity
+ 
 import android.content.ContentUris
 import android.provider.MediaStore
 
@@ -323,14 +328,22 @@ fun QueueScreen(navController: NavController) {
                         maxScrollSpeed = 400f
                     )
 
-                LazyColumn(
-                    state = state.listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .reorderable(state),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                // Track on-screen bounds for each item and render a floating overlay while dragging
+                val itemBounds = remember { mutableStateMapOf<String, Rect>() }
+                var dragOverlayKey by remember { mutableStateOf<String?>(null) }
+                var dragOverlayTrack by remember { mutableStateOf<Track?>(null) }
+                var dragOverlayIndex by remember { mutableStateOf(0) }
+                val density = LocalDensity.current
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = state.listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .reorderable(state),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                     if (queueState.playNextCount > 0 && queueState.currentIndex + 1 < visualQueueItems.size) {
                         item(key = "queue_section_playnext_header") {
                             Text(
@@ -343,7 +356,7 @@ fun QueueScreen(navController: NavController) {
                     }
                     itemsIndexed(
                         visualQueueItems, // Use visual queue for display
-                        key = { idx, item -> "queue_${idx}_${item.id}" }
+                        key = { _, item -> "queue_${item.id}" }
                     ) { idx, queueItem ->
                         // Try to get the full track data from repository first to ensure we have pre-extracted artwork
                         val track = repo.getTrackByMediaId(queueItem.mediaItem.mediaId) ?: queueItem.toTrack()
@@ -421,7 +434,16 @@ fun QueueScreen(navController: NavController) {
                                 EnhancedSwipeBackground(dismissState.dismissDirection)
                             },
                             dismissContent = {
-                                ReorderableItem(state, key = "queue_${idx}_${queueItem.id}") { isDragging ->
+                                ReorderableItem(state, key = "queue_${queueItem.id}") { isDragging ->
+                                    val itemKey = "queue_${queueItem.id}"
+                                    if (isDragging) {
+                                        dragOverlayKey = itemKey
+                                        dragOverlayTrack = track
+                                        dragOverlayIndex = idx
+                                    } else if (dragOverlayKey == itemKey) {
+                                        dragOverlayKey = null
+                                        dragOverlayTrack = null
+                                    }
                                     EnhancedQueueTrackItem(
                                         track = track,
                                         isCurrentlyPlaying = idx == queueState.currentIndex,
@@ -435,7 +457,13 @@ fun QueueScreen(navController: NavController) {
                                             controller?.seekToDefaultPosition(idx)
                                         },
                                         reorderState = state,
-                                        config = dragConfig
+                                        config = dragConfig,
+                                        modifier = Modifier
+                                            .zIndex(if (isDragging) 2f else 0f)
+                                            .onGloballyPositioned { coordinates ->
+                                                itemBounds[itemKey] = coordinates.boundsInRoot()
+                                            }
+                                            .graphicsLayer { if (isDragging) alpha = 0f }
                                     )
                                 }
                             }
@@ -449,6 +477,38 @@ fun QueueScreen(navController: NavController) {
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                                 modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 4.dp)
                             )
+                        }
+                    }
+                    }
+
+                    // Floating overlay for the dragged item
+                    val overlayKey = dragOverlayKey
+                    val overlayTrack = dragOverlayTrack
+                    if (overlayKey != null && overlayTrack != null) {
+                        val rect = itemBounds[overlayKey]
+                        if (rect != null) {
+                            val xDp = with(density) { rect.left.toDp() }
+                            val yDp = with(density) { rect.top.toDp() }
+                            val wDp = with(density) { rect.width.toDp() }
+                            val hDp = with(density) { rect.height.toDp() }
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = xDp, y = yDp)
+                                    .width(wDp)
+                                    .height(hDp)
+                                    .zIndex(10f)
+                            ) {
+                                EnhancedQueueTrackItem(
+                                    track = overlayTrack,
+                                    isCurrentlyPlaying = dragOverlayIndex == queueState.currentIndex,
+                                    isDragging = true,
+                                    isMarkedPlayNext = false,
+                                    position = dragOverlayIndex + 1,
+                                    onClick = {},
+                                    reorderState = state,
+                                    config = dragConfig
+                                )
+                            }
                         }
                     }
                 }

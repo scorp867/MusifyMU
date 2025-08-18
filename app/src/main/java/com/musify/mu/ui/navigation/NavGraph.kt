@@ -45,7 +45,7 @@ fun MusifyNavGraph(
         modifier = modifier
     ) {
         composable(Screen.Home.route) { HomeScreen(navController, onPlay) }
-        composable(Screen.Library.route) { LibraryScreen(navController, onPlay, hasPermissions) }
+        // Removed Library from bottom nav per new design
         composable(Screen.Search.route) { SearchScreen(navController, onPlay) }
 
         // Queue screen as a modal overlay - only accessible from player screen

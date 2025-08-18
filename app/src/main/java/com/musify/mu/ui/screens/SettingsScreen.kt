@@ -1,5 +1,6 @@
 package com.musify.mu.ui.screens
 
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
@@ -452,7 +453,7 @@ fun SettingsScreen(navController: NavController) {
                             
                             // Version
                             Text(
-                                text = "Version 1.0",
+                                text = "Version 2.0",
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                             )

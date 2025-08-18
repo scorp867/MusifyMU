@@ -49,11 +49,37 @@ import android.net.Uri
 class MainActivity : ComponentActivity() {
     
     private var mediaController: MediaController? = null
+    private var pendingOpenUri: android.net.Uri? = null
+
+    private fun handleViewIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_VIEW) {
+            val uri = intent.data
+            if (uri != null) {
+                // Remember for when controller is ready
+                pendingOpenUri = uri
+                tryPlayPendingOpenUri()
+            }
+        }
+    }
+
+    fun tryPlayPendingOpenUri() {
+        val uri = pendingOpenUri ?: return
+        val controller = mediaController ?: return
+        try {
+            controller.setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+            controller.prepare()
+            controller.play()
+            pendingOpenUri = null
+        } catch (_: Exception) { }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Capture any incoming VIEW intent (open with Musify)
+        handleViewIntent(intent)
 
         setContent {
             val context = this@MainActivity
@@ -132,6 +158,8 @@ class MainActivity : ComponentActivity() {
                     val controller = controllerFuture.await()
                     mediaController = controller
                     controllerState = controller
+                    // Try to play any pending file open request now that controller is ready
+                    tryPlayPendingOpenUri()
                 } catch (e: Exception) {
                     android.util.Log.e("MainActivity", "Failed to connect to MediaController", e)
                 }
@@ -160,6 +188,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+    
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleViewIntent(intent)
     }
     
     override fun onDestroy() {
@@ -194,6 +228,15 @@ private fun AppContent(
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     val stateStore = remember { PlaybackStateStore(context) }
+
+    // Initialize library data on app launch (after permissions are granted)
+    LaunchedEffect(hasPermissions) {
+        if (hasPermissions) {
+            try {
+                repo.dataManager.ensureInitialized()
+            } catch (_: Exception) { }
+        }
+    }
 
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }

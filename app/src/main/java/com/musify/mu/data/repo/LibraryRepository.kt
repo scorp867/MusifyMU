@@ -64,7 +64,19 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun playlistTracks(playlistId: Long): List<Track> {
         val databaseTracks = db.dao().getPlaylistTracks(playlistId)
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        // If cache is empty (e.g., before first scan completes), show DB results to avoid empty playlists
+        if (currentTrackIds.isEmpty()) return databaseTracks
+        // Otherwise, filter out tracks that no longer exist on device
         return databaseTracks.filter { track -> currentTrackIds.contains(track.mediaId) }
+    }
+
+    // Persist a new playlist order by replacing positions via REPLACE insert
+    suspend fun reorderPlaylist(playlistId: Long, orderedMediaIds: List<String>) {
+        if (orderedMediaIds.isEmpty()) return
+        val items = orderedMediaIds.mapIndexed { index, mediaId ->
+            PlaylistItem(playlistId = playlistId, mediaId = mediaId, position = index)
+        }
+        db.dao().addItems(items)
     }
     
     // Like/unlike operations

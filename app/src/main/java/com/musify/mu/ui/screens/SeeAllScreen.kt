@@ -8,12 +8,20 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
+ 
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,16 +48,20 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         }
     }
 
-    val reorderState = if (type == "favorites") rememberReorderableLazyListState(onMove = { from, to ->
-        tracks = tracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
-        // Auto-save the new order immediately
-        scope.launch {
-            val order = tracks.mapIndexed { index, track -> 
-                com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index) 
+    val reorderState = if (type == "favorites") rememberReorderableLazyListState(
+        onMove = { from, to ->
+            tracks = tracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
+        },
+        onDragEnd = { _, _ ->
+            // Persist once after drop
+            scope.launch {
+                val order = tracks.mapIndexed { index, track ->
+                    com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index)
+                }
+                repo.saveFavoritesOrder(order)
             }
-            repo.saveFavoritesOrder(order)
         }
-    }) else null
+    ) else null
 
     Scaffold(
         topBar = {
@@ -57,22 +69,31 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         }
     ) { padding ->
         if (type == "favorites") {
-            LazyColumn(
-                state = reorderState!!.listState,
-                modifier = Modifier
-                    .padding(padding)
-                    .fillMaxSize()
-                    .reorderable(reorderState),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(tracks.size, key = { idx -> "seeall_${type}_${idx}_${tracks[idx].mediaId}" }) { idx ->
+            // Track bounds for floating overlay during drag
+            val itemBounds = remember { mutableStateMapOf<String, Rect>() }
+            var dragOverlayKey by remember { mutableStateOf<String?>(null) }
+            var dragOverlayTrack by remember { mutableStateOf<Track?>(null) }
+            var dragOverlayIndex by remember { mutableStateOf(0) }
+            val density = LocalDensity.current
+
+            Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+                LazyColumn(
+                    state = reorderState!!.listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .reorderable(reorderState),
+                    contentPadding = PaddingValues(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                items(tracks.size, key = { idx -> "seeall_${type}_${tracks[idx].mediaId}" }) { idx ->
                     val track = tracks[idx]
-                    ReorderableItem(reorderState, key = "seeall_${type}_${idx}_${track.mediaId}") { isDragging ->
+                    ReorderableItem(reorderState, key = "seeall_${type}_${track.mediaId}") { isDragging ->
                         Card(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .zIndex(if (isDragging) 1f else 0f)
+                                .fillMaxWidth(),
                             elevation = CardDefaults.cardElevation(
-                                defaultElevation = if (isDragging) 8.dp else 2.dp
+                                defaultElevation = if (isDragging) 10.dp else 2.dp
                             ),
                             colors = CardDefaults.cardColors(
                                 containerColor = if (isDragging) 
@@ -81,10 +102,25 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                     MaterialTheme.colorScheme.surface
                             )
                         ) {
+                            // Update overlay context while dragging
+                            LaunchedEffect(isDragging) {
+                                val key = "seeall_${type}_${track.mediaId}"
+                                if (isDragging) {
+                                    dragOverlayKey = key
+                                    dragOverlayTrack = track
+                                    dragOverlayIndex = idx
+                                } else if (dragOverlayKey == key) {
+                                    dragOverlayKey = null
+                                    dragOverlayTrack = null
+                                }
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onPlay(tracks, idx) }
+                                    .onGloballyPositioned { coords ->
+                                        itemBounds["seeall_${type}_${track.mediaId}"] = coords.boundsInRoot()
+                                    }
                                     .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -126,6 +162,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                         }
                     }
                 }
+                }
+
+                // Floating overlay removed per request
             }
         } else {
             LazyColumn(
