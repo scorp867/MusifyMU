@@ -198,15 +198,6 @@ class MainActivity : ComponentActivity() {
     
     override fun onDestroy() {
         super.onDestroy()
-        // Stop the PlayerService when the main activity is destroyed (app swiped away)
-        try {
-            val serviceIntent = Intent(this, PlayerService::class.java)
-            stopService(serviceIntent)
-            android.util.Log.d("MainActivity", "PlayerService stopped")
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Error stopping PlayerService", e)
-        }
-        
         // Ensure MediaController is properly released
         try {
             mediaController?.release()
@@ -381,7 +372,12 @@ private fun AppContent(
     val isQueueScreen = currentRoute == com.musify.mu.ui.navigation.Screen.Queue.route
     val shouldHideBottomBar = isPlayerScreen || isQueueScreen
 
-    androidx.compose.runtime.CompositionLocalProvider(com.musify.mu.playback.LocalMediaController provides mediaController) {
+    val currentMediaId = currentTrack?.mediaId
+    androidx.compose.runtime.CompositionLocalProvider(
+        com.musify.mu.playback.LocalMediaController provides mediaController,
+        com.musify.mu.playback.LocalPlaybackMediaId provides currentMediaId,
+        com.musify.mu.playback.LocalIsPlaying provides isPlaying
+    ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = androidx.compose.material3.MaterialTheme.colorScheme.background
@@ -435,7 +431,13 @@ private fun AppContent(
                                         }
                                     },
                                     onExpand = {
-                                        navController.navigate(com.musify.mu.ui.navigation.Screen.NowPlaying.route)
+                                        val target = com.musify.mu.ui.navigation.Screen.NowPlaying.route
+                                        // Navigate only if we're not already showing it
+                                        if (navController.currentDestination?.route != target) {
+                                            navController.navigate(target) {
+                                                launchSingleTop = true
+                                            }
+                                        }
                                     }
                                 )
                             }

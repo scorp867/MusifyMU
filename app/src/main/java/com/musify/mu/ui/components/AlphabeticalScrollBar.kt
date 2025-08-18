@@ -44,7 +44,14 @@ fun AlphabeticalScrollBar(
     letters: List<String>,
     onLetterSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
-    isVisible: Boolean = true
+    isVisible: Boolean = true,
+    expandFullHeight: Boolean = true,
+    barWidth: androidx.compose.ui.unit.Dp = 32.dp,
+    innerWidth: androidx.compose.ui.unit.Dp = 28.dp,
+    letterBoxSize: androidx.compose.ui.unit.Dp = 18.dp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 11.sp,
+    verticalPadding: androidx.compose.ui.unit.Dp = 6.dp,
+    cornerRadius: androidx.compose.ui.unit.Dp = 14.dp
 ) {
     val hapticFeedback = LocalHapticFeedback.current
 
@@ -60,14 +67,8 @@ fun AlphabeticalScrollBar(
         label = "scroll_bar_alpha"
     )
 
-    val scale by animateFloatAsState(
-        targetValue = if (isActive) 1.05f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessHigh // Instant response
-        ),
-        label = "scroll_bar_scale"
-    )
+    // Disable expansion on hold per request
+    val scale = 1f
 
     val elevation by animateDpAsState(
         targetValue = if (isActive) 12.dp else 6.dp,
@@ -78,17 +79,23 @@ fun AlphabeticalScrollBar(
         label = "scroll_bar_elevation"
     )
 
-    Box(
-        modifier = modifier
-            .alpha(alpha)
+    val containerModifier = if (expandFullHeight) {
+        modifier
             .fillMaxHeight()
-            .width(32.dp)
+            .width(barWidth)
+    } else {
+        modifier
+            .width(barWidth)
+    }
+
+    Box(
+        modifier = containerModifier.alpha(alpha)
     ) {
         // Main scroll bar with hardware acceleration
         Card(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(28.dp)
+                .width(innerWidth)
                 .graphicsLayer {
                     scaleX = scale
                     scaleY = scale
@@ -104,7 +111,7 @@ fun AlphabeticalScrollBar(
                     MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
             ),
             elevation = CardDefaults.cardElevation(defaultElevation = elevation),
-            shape = RoundedCornerShape(14.dp)
+            shape = RoundedCornerShape(cornerRadius)
         ) {
             Column(
                 modifier = Modifier
@@ -172,15 +179,19 @@ fun AlphabeticalScrollBar(
                             }
                         }
                     }
-                    .padding(vertical = 6.dp),
+                    .padding(vertical = verticalPadding),
                 verticalArrangement = Arrangement.SpaceEvenly,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                letters.forEachIndexed { index, letter ->
+                // Ensure # is at the top
+                val orderedLetters = if (letters.firstOrNull() == "#") letters else listOf("#") + letters.filter { it != "#" }
+                orderedLetters.forEachIndexed { index, letter ->
                     EnhancedLetterItem(
                         letter = letter,
                         isSelected = selectedIndex == index,
-                        isActive = isActive
+                        isActive = isActive,
+                        letterBoxSize = letterBoxSize,
+                        fontSize = fontSize
                     )
                 }
             }
@@ -214,7 +225,9 @@ fun AlphabeticalScrollBar(
 private fun EnhancedLetterItem(
     letter: String,
     isSelected: Boolean,
-    isActive: Boolean
+    isActive: Boolean,
+    letterBoxSize: androidx.compose.ui.unit.Dp = 18.dp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 11.sp
 ) {
     // Hardware accelerated animations with ultra-fast response
     val backgroundColor by animateColorAsState(
@@ -248,7 +261,7 @@ private fun EnhancedLetterItem(
 
     Box(
         modifier = Modifier
-            .size(18.dp)
+            .size(letterBoxSize)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -264,7 +277,7 @@ private fun EnhancedLetterItem(
     ) {
         Text(
             text = letter,
-            fontSize = 11.sp,
+            fontSize = fontSize,
             fontWeight = if (isSelected && isActive) FontWeight.Bold else FontWeight.Medium,
             color = textColor,
             textAlign = TextAlign.Center

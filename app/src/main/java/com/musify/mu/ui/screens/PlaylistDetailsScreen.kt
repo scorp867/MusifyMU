@@ -134,8 +134,8 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 modifier = Modifier
                     .fillMaxSize()
                     .reorderable(reorderState),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
             items(visualTracks.size, key = { idx -> "playlist_${playlistId}_${visualTracks[idx].mediaId}" }) { idx ->
                 val track = visualTracks[idx]
@@ -190,81 +190,56 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                 itemBounds["playlist_${playlistId}_${track.mediaId}"] = coords.boundsInRoot()
                             }
                         ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPlay(visualTracks, idx) }
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val fallbackAlbumArt = track.albumId?.let { id ->
-                                android.net.Uri.parse("content://media/external/audio/albumart/$id")
-                            }
-                            com.musify.mu.ui.components.Artwork(
-                                data = track.artUri,
-                                audioUri = track.mediaId,
-                                albumId = track.albumId,
-                                contentDescription = track.title,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            
-                            Spacer(modifier = Modifier.width(12.dp))
-                            
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = track.title,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = track.artist,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                            }
-                            
-                            Box {
-                                IconButton(onClick = { showMenu = true }) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = "More")
-                                }
-                                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                    DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = {
-                                        // Visual-only removal - immediate UI feedback
-                                        removeOperations = removeOperations + track.mediaId
-                                        visualTracks = visualTracks.filter { it.mediaId != track.mediaId }
-                                        showMenu = false
-                                        
-                                        // Perform actual removal in background
-                                        scope.launch {
-                                            try {
-                                            repo.removeFromPlaylist(playlistId, track.mediaId)
-                                                // Reload actual tracks from database
-                                                val newTracks = repo.playlistTracks(playlistId)
-                                                tracks = newTracks
-                                                // Success - remove from pending operations
-                                                removeOperations = removeOperations - track.mediaId
-                                            } catch (e: Exception) {
-                                                // On failure, revert visual state
-                                                visualTracks = tracks
-                                                removeOperations = removeOperations - track.mediaId
-                                                // Show error feedback
+                        val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                        com.musify.mu.ui.components.CompactTrackRow(
+                            title = track.title,
+                            subtitle = track.artist,
+                            artData = track.artUri,
+                            contentDescription = track.title,
+                            isPlaying = isPlaying,
+                            onClick = { onPlay(visualTracks, idx) },
+                            trailingContent = {
+                                Box {
+                                    IconButton(onClick = { showMenu = true }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = "More")
+                                    }
+                                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                        DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = {
+                                            // Visual-only removal - immediate UI feedback
+                                            removeOperations = removeOperations + track.mediaId
+                                            visualTracks = visualTracks.filter { it.mediaId != track.mediaId }
+                                            showMenu = false
+                                            
+                                            // Perform actual removal in background
+                                            scope.launch {
+                                                try {
+                                                repo.removeFromPlaylist(playlistId, track.mediaId)
+                                                    // Reload actual tracks from database
+                                                    val newTracks = repo.playlistTracks(playlistId)
+                                                    tracks = newTracks
+                                                    // Success - remove from pending operations
+                                                    removeOperations = removeOperations - track.mediaId
+                                                } catch (e: Exception) {
+                                                    // On failure, revert visual state
+                                                    visualTracks = tracks
+                                                    removeOperations = removeOperations - track.mediaId
+                                                    // Show error feedback
+                                                }
                                             }
-                                        }
-                                    })
+                                        })
+                                    }
                                 }
                             }
-                            
-                            IconButton(
-                                onClick = { },
-                                modifier = Modifier.detectReorderAfterLongPress(reorderState)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.DragHandle,
-                                    contentDescription = "Drag to reorder",
-                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                )
-                            }
+                        )
+                        IconButton(
+                            onClick = { },
+                            modifier = Modifier.detectReorderAfterLongPress(reorderState)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.DragHandle,
+                                contentDescription = "Drag to reorder",
+                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
                         }
                         }
                     }

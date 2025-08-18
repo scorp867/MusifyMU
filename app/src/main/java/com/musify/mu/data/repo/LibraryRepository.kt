@@ -1,6 +1,7 @@
 package com.musify.mu.data.repo
 
 import android.content.Context
+import org.json.JSONArray
 import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.db.entities.*
@@ -124,5 +125,42 @@ class LibraryRepository private constructor(private val context: Context, privat
                     INSTANCE = it 
                 }
             }
+    }
+
+    // ----- Search history (persisted locally, independent of play history) -----
+    private val searchPrefs by lazy { context.getSharedPreferences("search_history_prefs", Context.MODE_PRIVATE) }
+    private val searchKey = "history"
+
+    fun getSearchHistory(max: Int = 20): List<String> {
+        return try {
+            val raw = searchPrefs.getString(searchKey, "[]") ?: "[]"
+            val arr = JSONArray(raw)
+            val out = mutableListOf<String>()
+            for (i in 0 until arr.length()) {
+                val q = arr.optString(i).orEmpty()
+                if (q.isNotBlank()) out += q
+            }
+            out.take(max)
+        } catch (_: Exception) { emptyList() }
+    }
+
+    fun addSearchHistory(query: String, max: Int = 20) {
+        val q = query.trim()
+        if (q.isBlank()) return
+        val current = getSearchHistory(max).toMutableList()
+        current.removeAll { it.equals(q, ignoreCase = true) }
+        current.add(0, q)
+        while (current.size > max) current.removeLastOrNull()
+        saveSearchHistory(current)
+    }
+
+    fun clearSearchHistory() {
+        searchPrefs.edit().putString(searchKey, "[]").apply()
+    }
+
+    private fun saveSearchHistory(list: List<String>) {
+        val arr = JSONArray()
+        list.forEach { arr.put(it) }
+        searchPrefs.edit().putString(searchKey, arr.toString()).apply()
     }
 }

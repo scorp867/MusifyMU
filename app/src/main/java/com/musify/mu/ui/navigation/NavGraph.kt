@@ -24,6 +24,8 @@ sealed class Screen(val route: String) {
     object SeeAll : Screen("see_all/{type}")
     object PlaylistDetails : Screen("playlist/{id}")
     object Settings : Screen("settings")
+    object ArtistDetails : Screen("artist_details/{name}")
+    object AlbumDetails : Screen("album_details/{album}/{artist}")
 }
 
 @Composable
@@ -78,6 +80,20 @@ fun MusifyNavGraph(
         composable(Screen.PlaylistDetails.route) { backStackEntry ->
             val id = backStackEntry.arguments?.getString("id")?.toLongOrNull() ?: -1L
             PlaylistDetailsScreen(navController = navController, playlistId = id, onPlay = onPlay)
+        }
+
+        composable(Screen.ArtistDetails.route) { backStackEntry ->
+            val raw = backStackEntry.arguments?.getString("name") ?: ""
+            val name = try { java.net.URLDecoder.decode(raw, "UTF-8") } catch (_: Exception) { raw }
+            ArtistDetailsScreen(navController = navController, artist = name, onPlay = onPlay)
+        }
+
+        composable(Screen.AlbumDetails.route) { backStackEntry ->
+            val rawAlbum = backStackEntry.arguments?.getString("album") ?: ""
+            val rawArtist = backStackEntry.arguments?.getString("artist") ?: ""
+            val album = try { java.net.URLDecoder.decode(rawAlbum, "UTF-8") } catch (_: Exception) { rawAlbum }
+            val artist = try { java.net.URLDecoder.decode(rawArtist, "UTF-8") } catch (_: Exception) { rawArtist }
+            AlbumDetailsScreen(navController = navController, album = album, artist = artist, onPlay = onPlay)
         }
 
         // Player screen as a modal overlay - doesn't participate in bottom navigation

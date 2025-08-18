@@ -55,6 +55,7 @@ interface AppDao {
     )
     suspend fun getRecentlyPlayed(limit: Int): List<Track>
 
+
     // Playlists
     @Insert
     suspend fun createPlaylist(playlist: Playlist): Long

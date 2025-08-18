@@ -149,7 +149,13 @@ fun NowPlayingBar(
                     modifier = Modifier
                         .size(56.dp)
                         .clip(RoundedCornerShape(12.dp))
-                )
+                ) {
+                    if (isPlaying) {
+                        Box(modifier = Modifier.matchParentSize()) {
+                            PlayingIndicator(modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp))
+                        }
+                    }
+                }
 
                 Spacer(Modifier.width(12.dp))
 

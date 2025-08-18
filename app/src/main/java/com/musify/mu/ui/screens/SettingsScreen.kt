@@ -41,10 +41,26 @@ fun SettingsScreen(navController: NavController) {
     val scope = rememberCoroutineScope()
     
     // State for settings
-    var useCustomTheme by remember { mutableStateOf(themeManager.useCustomTheme) }
-    var customPrimaryColor by remember { mutableStateOf(Color(themeManager.customPrimaryColor)) }
-    var customSecondaryColor by remember { mutableStateOf(Color(themeManager.customSecondaryColor)) }
-    var customBackgroundColor by remember { mutableStateOf(Color(themeManager.customBackgroundColor)) }
+    val useCustomTheme by themeManager.useCustomThemeState
+    val dynamicEnabled by themeManager.useSystemDynamicColorsState
+    var customPrimaryColor by remember { mutableStateOf(Color(themeManager.customPrimaryColorState.value)) }
+    var customSecondaryColor by remember { mutableStateOf(Color(themeManager.customSecondaryColorState.value)) }
+    var customBackgroundColor by remember { mutableStateOf(Color(themeManager.customBackgroundColorState.value)) }
+    // Live preview: persist immediately when colors change, and ensure custom theme is on
+    LaunchedEffect(customPrimaryColor, customSecondaryColor, customBackgroundColor, dynamicEnabled, useCustomTheme) {
+        if (useCustomTheme && !dynamicEnabled) {
+            scope.launch {
+                themeManager.setCustomColors(
+                    DynamicColors(
+                        primary = customPrimaryColor,
+                        secondary = customSecondaryColor,
+                        surface = customBackgroundColor
+                    )
+                )
+            }
+        }
+    }
+
     var useAnimatedBackgrounds by remember { mutableStateOf(themeManager.useAnimatedBackgrounds) }
     var customLayoutEnabled by remember { mutableStateOf(themeManager.customLayoutEnabled) }
     var homeLayoutConfig by remember { mutableStateOf(themeManager.homeLayoutConfig) }
@@ -57,6 +73,7 @@ fun SettingsScreen(navController: NavController) {
     var themeExpanded by remember { mutableStateOf(false) }
     var layoutExpanded by remember { mutableStateOf(false) }
     var animationExpanded by remember { mutableStateOf(false) }
+    var fontsExpanded by remember { mutableStateOf(false) }
     
     // Background gradient
     val backgroundGradient = Brush.verticalGradient(
@@ -100,6 +117,8 @@ fun SettingsScreen(navController: NavController) {
                     )
                 }
                 
+                
+
                 Spacer(modifier = Modifier.width(16.dp))
                 
                 Text(
@@ -117,6 +136,60 @@ fun SettingsScreen(navController: NavController) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
+                // Fonts section (properly inside list)
+                item {
+                    SettingsSection(
+                        title = "Fonts",
+                        icon = Icons.Rounded.FontDownload,
+                        isExpanded = fontsExpanded,
+                        onExpandToggle = { fontsExpanded = !fontsExpanded }
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            val currentKey by themeManager.fontFamilyKeyState
+                            val options = listOf(
+                                "inter" to "Inter",
+                                "outfit" to "Outfit",
+                                "poppins" to "Poppins",
+                                "playfair" to "Playfair Display",
+                                "jetbrains_mono" to "JetBrains Mono"
+                            )
+                            options.forEach { (key, label) ->
+                                val selected = currentKey == key
+                                val previewFamily = com.musify.mu.ui.theme.provideAppFontFamily(key)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { scope.launch { themeManager.setFontFamilyKey(key) } }
+                                        .background(
+                                            if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                            else Color.Transparent
+                                        )
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(selected = selected, onClick = { scope.launch { themeManager.setFontFamilyKey(key) } })
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(text = label, style = MaterialTheme.typography.titleMedium)
+                                        Text(
+                                            text = "The quick brown fox jumps over the lazy dog.",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = previewFamily),
+                                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                    if (selected) {
+                                        Icon(imageVector = Icons.Rounded.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
                 // Theme customization section
                 item {
                     SettingsSection(
@@ -129,6 +202,29 @@ fun SettingsScreen(navController: NavController) {
                             modifier = Modifier.fillMaxWidth(),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
+                            // System dynamic colors toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Use System Dynamic Colors",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                )
+                                Switch(
+                                    checked = dynamicEnabled,
+                                    onCheckedChange = {
+                                        scope.launch { themeManager.setUseSystemDynamicColors(it) }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                    )
+                                )
+                            }
+
                             // Custom theme toggle
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -144,7 +240,6 @@ fun SettingsScreen(navController: NavController) {
                                 Switch(
                                     checked = useCustomTheme,
                                     onCheckedChange = {
-                                        useCustomTheme = it
                                         scope.launch {
                                             themeManager.setUseCustomTheme(it)
                                         }
@@ -190,8 +285,48 @@ fun SettingsScreen(navController: NavController) {
                                             showColorPicker = true
                                         }
                                     )
+
+                                    // Preset color schemes
+                                    Text(
+                                        text = "Presets",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onBackground
+                                    )
+                                    val presets = listOf(
+                                        // 6 elegant, high-contrast dark-toned schemes (no light backgrounds)
+                                        DynamicColors(Color(0xFF1E40AF), Color(0xFFEAB308), Color(0xFF0C1B3A)), // Royal Blue / Gold / Deep Navy
+                                        DynamicColors(Color(0xFF6D28D9), Color(0xFFF59E0B), Color(0xFF1A1033)), // Imperial Purple / Amber / Midnight Purple
+                                        DynamicColors(Color(0xFFB91C1C), Color(0xFFB45309), Color(0xFF2A0E12)), // Crimson / Bronze / Deep Maroon
+                                        DynamicColors(Color(0xFF0D9488), Color(0xFF2563EB), Color(0xFF0B2E2B)), // Teal / Azure / Dark Teal
+                                        DynamicColors(Color(0xFF065F46), Color(0xFF9333EA), Color(0xFF0F1C16)), // Emerald / Amethyst / Forest Night
+                                        DynamicColors(Color(0xFF4338CA), Color(0xFF06B6D4), Color(0xFF0E1A24))  // Indigo / Cyan / Charcoal Blue
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        presets.forEach { preset ->
+                                            val selected = preset.primary == customPrimaryColor &&
+                                                preset.secondary == customSecondaryColor &&
+                                                preset.surface == customBackgroundColor
+                                            ColorPresetSwatch(
+                                                preset = preset,
+                                                selected = selected,
+                                                onClick = {
+                                                    customPrimaryColor = preset.primary
+                                                    customSecondaryColor = preset.secondary
+                                                    customBackgroundColor = preset.surface
+                                                }
+                                            )
+                                        }
+                                    }
                                     
                                     // Apply button
+                                    val applied = useCustomTheme &&
+                                        Color(themeManager.customPrimaryColorState.value) == customPrimaryColor &&
+                                        Color(themeManager.customSecondaryColorState.value) == customSecondaryColor &&
+                                        Color(themeManager.customBackgroundColorState.value) == customBackgroundColor
+
                                     Button(
                                         onClick = {
                                             scope.launch {
@@ -205,11 +340,12 @@ fun SettingsScreen(navController: NavController) {
                                             }
                                         },
                                         modifier = Modifier.fillMaxWidth(),
+                                        enabled = !applied && !dynamicEnabled,
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = MaterialTheme.colorScheme.primary
                                         )
                                     ) {
-                                        Text("Apply Theme")
+                                        Text(if (applied) "Applied" else "Apply Theme")
                                     }
                                 }
                             }
@@ -625,6 +761,45 @@ fun SettingsSection(
                     content()
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ColorPresetSwatch(
+    preset: DynamicColors,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(Color.Transparent)
+            .clickable { onClick() }
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                shape = CircleShape
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        // Three-color ring representation
+        Row(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxHeight().background(preset.primary))
+            Box(Modifier.weight(1f).fillMaxHeight().background(preset.secondary))
+            Box(Modifier.weight(1f).fillMaxHeight().background(preset.surface))
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = "Selected",
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier
+                    .size(18.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .clip(CircleShape)
+            )
         }
     }
 }

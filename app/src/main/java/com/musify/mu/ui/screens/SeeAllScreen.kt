@@ -82,8 +82,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                     modifier = Modifier
                         .fillMaxSize()
                         .reorderable(reorderState),
-                    contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                 items(tracks.size, key = { idx -> "seeall_${type}_${tracks[idx].mediaId}" }) { idx ->
                     val track = tracks[idx]
@@ -114,51 +114,31 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                     dragOverlayTrack = null
                                 }
                             }
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onPlay(tracks, idx) }
-                                    .onGloballyPositioned { coords ->
-                                        itemBounds["seeall_${type}_${track.mediaId}"] = coords.boundsInRoot()
+                            val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                            com.musify.mu.ui.components.CompactTrackRow(
+                                title = track.title,
+                                subtitle = track.artist,
+                                artData = track.artUri,
+                                contentDescription = track.title,
+                                isPlaying = isPlaying,
+                                showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
+                                onClick = { onPlay(tracks, idx) },
+                                modifier = Modifier.onGloballyPositioned { coords ->
+                                    itemBounds["seeall_${type}_${track.mediaId}"] = coords.boundsInRoot()
+                                },
+                                trailingContent = {
+                                    IconButton(
+                                        onClick = { },
+                                        modifier = Modifier.detectReorderAfterLongPress(reorderState)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DragHandle,
+                                            contentDescription = "Drag to reorder",
+                                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
                                     }
-                                    .padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                com.musify.mu.ui.components.Artwork(
-                                    data = track.artUri,
-                                    audioUri = track.mediaId,
-                                    albumId = track.albumId,
-                                    contentDescription = track.title,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                                
-                                Spacer(modifier = Modifier.width(12.dp))
-                                
-                                Column(
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = track.title,
-                                        style = MaterialTheme.typography.titleMedium
-                                    )
-                                    Text(
-                                        text = track.artist,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                    )
                                 }
-                                
-                                IconButton(
-                                    onClick = { },
-                                    modifier = Modifier.detectReorderAfterLongPress(reorderState)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DragHandle,
-                                        contentDescription = "Drag to reorder",
-                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                    )
-                                }
-                            }
+                            )
                         }
                     }
                 }
@@ -171,8 +151,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize(),
-                contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 items(tracks.size) { idx ->
                     val track = tracks[idx]
@@ -180,37 +160,16 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                         modifier = Modifier.fillMaxWidth(),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onPlay(tracks, idx) }
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            com.musify.mu.ui.components.Artwork(
-                                data = track.artUri,
-                                audioUri = track.mediaId,
-                                albumId = track.albumId,
-                                contentDescription = track.title,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            
-                            Spacer(modifier = Modifier.width(12.dp))
-                            
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = track.title,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                Text(
-                                    text = track.artist,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                            }
-                        }
+                        val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                        com.musify.mu.ui.components.CompactTrackRow(
+                            title = track.title,
+                            subtitle = track.artist,
+                            artData = track.artUri,
+                            contentDescription = track.title,
+                            isPlaying = isPlaying,
+                            showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
+                            onClick = { onPlay(tracks, idx) }
+                        )
                     }
                 }
             }

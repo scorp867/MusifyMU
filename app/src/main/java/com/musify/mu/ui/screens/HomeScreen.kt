@@ -5,6 +5,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -16,7 +17,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,9 +32,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+ 
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.navigation.NavController
@@ -52,7 +60,7 @@ import kotlinx.coroutines.flow.map
 // Composition local to provide scroll state to child components
 val LocalScrollState = compositionLocalOf<LazyListState?> { null }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -68,10 +76,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var refreshTrigger by remember { mutableStateOf(0) }
 
     val scope = rememberCoroutineScope()
+    var showSearchSheet by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val cachedTracks by repo.dataManager.cachedTracks.collectAsState(initial = repo.getAllTracks())
-    var songsQuery by remember { mutableStateOf("") }
-    var artistsQuery by remember { mutableStateOf("") }
-    var albumsQuery by remember { mutableStateOf("") }
+    
     val listState = rememberLazyListState()
 
     // Function to refresh data
@@ -158,40 +167,38 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     )
 
     // Section tabs below welcome header
-    var selectedSection by remember { mutableStateOf(0) } // 0=LISTS, 1=SONGS, 2=ARTISTS, 3=ALBUMS
+    var selectedSection by rememberSaveable { mutableStateOf(0) } // 0=LISTS, 1=SONGS, 2=ARTISTS, 3=ALBUMS
     // Keep state on Home reselect (no reset per request)
+    
+    
 
     // Derived data for section lists
-    val tracksFiltered = remember(songsQuery, cachedTracks) {
-        if (songsQuery.isBlank()) cachedTracks else cachedTracks.filter { t ->
-            t.title.contains(songsQuery, true) || t.artist.contains(songsQuery, true) || t.album.contains(songsQuery, true)
-        }
-    }
+    val tracksFiltered = remember(cachedTracks) { cachedTracks }
     val artistsAll = remember(cachedTracks) {
         cachedTracks
             .groupBy { it.artist.ifBlank { "Unknown Artist" } }
             .map { (name, tracks) -> name to tracks.size }
             .sortedBy { it.first.lowercase() }
     }
-    val artistsFiltered = remember(artistsQuery, artistsAll) {
-        if (artistsQuery.isBlank()) artistsAll else artistsAll.filter { it.first.contains(artistsQuery, true) }
-    }
+    val artistsFiltered = remember(artistsAll) { artistsAll }
     val albumsAll = remember(cachedTracks) { repo.dataManager.getUniqueAlbums() }
-    val albumsFiltered = remember(albumsQuery, albumsAll) {
-        if (albumsQuery.isBlank()) albumsAll else albumsAll.filter { it.albumName.contains(albumsQuery, true) }
-    }
+    val albumsFiltered = remember(albumsAll) { albumsAll }
+
+    
+
+    Box(modifier = Modifier.fillMaxSize().background(backgroundGradient)) {
+    val endPadding = 16.dp
 
     LazyColumn(
         state = listState,
         modifier = Modifier
-            .fillMaxSize()
-            .background(backgroundGradient),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+            .fillMaxSize(),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = endPadding, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Welcome header with animation (settings button removed per new design)
         item {
-            WelcomeHeader(navController)
+            WelcomeHeader(onSearchClick = { showSearchSheet = true })
         }
 
         // Top section tabs (sticky at top)
@@ -221,113 +228,89 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             0 -> {
                 if (isLoading) {
                     items(3) { ShimmerCarousel() }
-                } else {
-                    item {
-                        AnimatedCarousel(
-                            title = "Recently Played",
-                            icon = Icons.Rounded.History,
-                            data = recentPlayed,
-                            onPlay = { tracks, index ->
-                                onPlay(tracks, index)
-                                scope.launch {
-                                    kotlinx.coroutines.delay(500)
-                                    refreshTrigger++
-                                }
-                            },
-                            haptic = haptic,
-                            onSeeAll = { navController.navigate("see_all/recently_played") }
-                        )
-                    }
-                    item {
-                        AnimatedCarousel(
-                            title = "Recently Added",
-                            icon = Icons.Rounded.NewReleases,
-                            data = recentAdded,
-                            onPlay = { tracks, index ->
-                                onPlay(tracks, index)
-                                scope.launch {
-                                    kotlinx.coroutines.delay(500)
-                                    refreshTrigger++
-                                }
-                            },
-                            haptic = haptic,
-                            onSeeAll = { navController.navigate("see_all/recently_added") }
-                        )
-                    }
-                    item {
-                        AnimatedCarousel(
-                            title = "Favourites",
-                            icon = Icons.Rounded.Favorite,
-                            data = favorites,
-                            onPlay = { tracks, index ->
-                                onPlay(tracks, index)
-                                scope.launch {
-                                    kotlinx.coroutines.delay(500)
-                                    refreshTrigger++
-                                }
-                            },
-                            haptic = haptic,
-                            onSeeAll = { navController.navigate("see_all/favorites") }
-                        )
-                    }
-                    item {
-                        CustomPlaylistsCarousel(
-                            playlists = customPlaylists,
-                            navController = navController,
-                            haptic = haptic,
-                            onRefresh = { refreshTrigger++ }
-                        )
-                    }
-                }
+        } else {
+            item {
+                AnimatedCarousel(
+                    title = "Recently Played",
+                    icon = Icons.Rounded.History,
+                    data = recentPlayed,
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/recently_played") }
+                )
+            }
+            item {
+                AnimatedCarousel(
+                    title = "Recently Added",
+                    icon = Icons.Rounded.NewReleases,
+                    data = recentAdded,
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/recently_added") }
+                )
+            }
+            item {
+                AnimatedCarousel(
+                    title = "Favourites",
+                    icon = Icons.Rounded.Favorite,
+                    data = favorites,
+                    onPlay = { tracks, index ->
+                        onPlay(tracks, index)
+                        scope.launch {
+                            kotlinx.coroutines.delay(500)
+                            refreshTrigger++
+                        }
+                    },
+                    haptic = haptic,
+                    onSeeAll = { navController.navigate("see_all/favorites") }
+                )
+            }
+            item {
+                CustomPlaylistsCarousel(
+                    playlists = customPlaylists,
+                    navController = navController,
+                    haptic = haptic,
+                    onRefresh = { refreshTrigger++ }
+                )
+            }
+        }
             }
             1 -> {
                 // SONGS section (Library-like list)
-                item {
-                    OutlinedTextField(
-                        value = songsQuery,
-                        onValueChange = { songsQuery = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Search songs") }
-                    )
-                }
                 items(tracksFiltered.size, key = { i -> "songs_${tracksFiltered[i].mediaId}" }) { idx ->
                     val t = tracksFiltered[idx]
-                    Card(
-                        modifier = Modifier.clickable { onPlay(tracksFiltered, idx) }
-                    ) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Artwork(
-                                data = t.artUri,
-                                audioUri = t.mediaId,
-                                albumId = t.albumId,
-                                contentDescription = t.title,
-                                modifier = Modifier.size(48.dp)
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(t.title, style = MaterialTheme.typography.titleMedium)
-                                Text(t.artist, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                            }
-                        }
-                    }
+                    val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                    com.musify.mu.ui.components.CompactTrackRow(
+                        title = t.title,
+                        subtitle = t.artist,
+                        artData = t.artUri,
+                        contentDescription = t.title,
+                        isPlaying = isPlaying,
+                        showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
+                        onClick = { onPlay(tracksFiltered, idx) }
+                    )
                 }
             }
             2 -> {
                 // ARTISTS section
-                item {
-                    OutlinedTextField(
-                        value = artistsQuery,
-                        onValueChange = { artistsQuery = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Search artists") }
-                    )
-                }
                 items(artistsFiltered.size, key = { i -> "artist_${artistsFiltered[i].first}" }) { idx ->
                     val (name, count) = artistsFiltered[idx]
                     Card(
                         modifier = Modifier.clickable {
-                            selectedSection = 1
-                            songsQuery = name
+                            val encoded = java.net.URLEncoder.encode(name, "UTF-8")
+                            navController.navigate("artist_details/$encoded")
                         }
                     ) {
                         ListItem(
@@ -339,21 +322,13 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             }
             3 -> {
                 // ALBUMS section
-                item {
-                    OutlinedTextField(
-                        value = albumsQuery,
-                        onValueChange = { albumsQuery = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Search albums") }
-                    )
-                }
                 items(albumsFiltered.size, key = { i -> "album_${albumsFiltered[i].albumId}_${albumsFiltered[i].albumName}" }) { idx ->
                     val a = albumsFiltered[idx]
                     Card(
                         modifier = Modifier.clickable {
-                            selectedSection = 1
-                            albumsQuery = a.albumName
-                            songsQuery = a.albumName
+                            val albumEnc = java.net.URLEncoder.encode(a.albumName, "UTF-8")
+                            val artistEnc = java.net.URLEncoder.encode(a.artistName, "UTF-8")
+                            navController.navigate("album_details/$albumEnc/$artistEnc")
                         }
                     ) {
                         Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -377,6 +352,169 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         }
     }
 
+    if (showSearchSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSearchSheet = false },
+            sheetState = sheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Tabs for Songs / Artists / Albums
+                var searchTab by remember { mutableStateOf(0) }
+                // Load search history
+                val searchHistory = remember(refreshTrigger) { repo.getSearchHistory() }
+                TabRow(selectedTabIndex = searchTab) {
+                    Tab(selected = searchTab == 0, onClick = { searchTab = 0 }, text = { Text("Songs") })
+                    Tab(selected = searchTab == 1, onClick = { searchTab = 1 }, text = { Text("Artists") })
+                    Tab(selected = searchTab == 2, onClick = { searchTab = 2 }, text = { Text("Albums") })
+                }
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search songs, artists, albums") },
+                    singleLine = true
+                )
+                // Save to history when user picks a result
+                val commitQuery: (String) -> Unit = { q ->
+                    if (q.isNotBlank()) repo.addSearchHistory(q)
+                }
+
+                // When query is blank, only show search history (no recent results)
+                if (searchQuery.isBlank() && searchHistory.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("Search history", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(searchHistory.size) { i ->
+                            AssistChip(onClick = { searchQuery = searchHistory[i] }, label = { Text(searchHistory[i]) })
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { repo.clearSearchHistory(); refreshTrigger++ }) { Text("Clear history") }
+                    }
+                }
+
+                when (searchTab) {
+                    0 -> { // Songs
+                        val results = remember(searchQuery, cachedTracks) {
+                            if (searchQuery.isBlank()) emptyList() else cachedTracks.filter { t ->
+                                t.title.contains(searchQuery, true) ||
+                                t.artist.contains(searchQuery, true) ||
+                                t.album.contains(searchQuery, true)
+                            }
+                        }
+                        if (results.isEmpty()) {
+                            Text(
+                                text = if (searchQuery.isBlank()) "" else "No results",
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(results.size, key = { i -> "search_${results[i].mediaId}" }) { idx ->
+                                    val t = results[idx]
+                                    ListItem(
+                                        headlineContent = { Text(t.title) },
+                                        supportingContent = { Text(t.artist) },
+                                        leadingContent = {
+                                            Artwork(
+                                                data = t.artUri,
+                                                audioUri = t.mediaId,
+                                                albumId = t.albumId,
+                                                contentDescription = t.title,
+                                                modifier = Modifier.size(40.dp)
+                                            )
+                                        },
+                                        modifier = Modifier.clickable {
+                                            commitQuery(searchQuery.ifBlank { t.title })
+                                            onPlay(results, idx)
+                                        }
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                    1 -> { // Artists
+                        val results = remember(searchQuery, artistsAll) {
+                            if (searchQuery.isBlank()) emptyList() else artistsAll.filter { it.first.contains(searchQuery, true) }
+                        }
+                        if (results.isEmpty()) {
+                            Text(
+                                text = if (searchQuery.isBlank()) "" else "No results",
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(results.size, key = { i -> "artist_res_${results[i].first}" }) { idx ->
+                                    val (name, count) = results[idx]
+                                    ListItem(
+                                        headlineContent = { Text(name) },
+                                        supportingContent = { Text("$count songs") },
+                                        leadingContent = {
+                                            Icon(imageVector = Icons.Rounded.Person, contentDescription = null)
+                                        },
+                                        modifier = Modifier.clickable {
+                                            searchTab = 0
+                                            searchQuery = name
+                                            commitQuery(name)
+                                        }
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                    2 -> { // Albums
+                        val results = remember(searchQuery, albumsAll) {
+                            if (searchQuery.isBlank()) emptyList() else albumsAll.filter { it.albumName.contains(searchQuery, true) }
+                        }
+                        if (results.isEmpty()) {
+                            Text(
+                                text = if (searchQuery.isBlank()) "" else "No results",
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        } else {
+                            Spacer(Modifier.height(8.dp))
+                            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                items(results.size, key = { i -> "album_res_${results[i].albumId}_${results[i].albumName}" }) { idx ->
+                                    val a = results[idx]
+                                    ListItem(
+                                        headlineContent = { Text(a.albumName) },
+                                        supportingContent = { Text(a.artistName) },
+                                        leadingContent = {
+                                            Artwork(
+                                                data = a.artUri,
+                                                audioUri = null,
+                                                albumId = a.albumId,
+                                                contentDescription = a.albumName,
+                                                modifier = Modifier.size(40.dp)
+                                            )
+                                        },
+                                        modifier = Modifier.clickable {
+                                            searchTab = 0
+                                            searchQuery = a.albumName
+                                            commitQuery(a.albumName)
+                                        }
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Alphabetical scroll bar removed per request
+    }
+
     // Prefetch embedded art for visible recent lists (row-based prefetch for the main column)
     LaunchedEffect(listState, recentAdded, recentPlayed, favorites) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
@@ -392,7 +530,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
 // (Flattened sections implemented inline above to avoid nested scrollables)
 
 @Composable
-private fun WelcomeHeader(navController: NavController) {
+private fun WelcomeHeader(onSearchClick: () -> Unit) {
     val infiniteTransition = rememberInfiniteTransition(label = "welcome")
     val shimmer by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -449,6 +587,13 @@ private fun WelcomeHeader(navController: NavController) {
                             ),
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )
+                        Spacer(modifier = Modifier.weight(1f))
+                        IconButton(onClick = onSearchClick) {
+                            Icon(
+                                imageVector = Icons.Rounded.Search,
+                                contentDescription = "Search"
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(

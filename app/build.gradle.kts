@@ -101,6 +101,8 @@ dependencies {
     // Instrumented Android tests
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    // Google Fonts for Compose (downloadable fonts)
+    implementation("androidx.compose.ui:ui-text-google-fonts:1.6.8")
 }
 
 // Room KSP options
