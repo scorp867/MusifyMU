@@ -224,6 +224,10 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
         return queueManager?.getQueueSnapshot() ?: emptyList()
     }
     
+    fun getVisibleToCombinedIndexMapping(visibleIndex: Int): Int {
+        return queueManager?.getVisibleToCombinedIndexMapping(visibleIndex) ?: -1
+    }
+    
     fun onTrackChanged(mediaId: String) {
         queueManager?.onTrackChanged(mediaId)
     }
