@@ -796,151 +796,46 @@ fun NowPlayingScreen(navController: NavController) {
                 // Sticky header with now playing and play/pause
                 val currentQueueItem = controller?.currentMediaItem
                 val t = currentQueueItem?.let { repo.getTrackByMediaId(it.mediaId) ?: it.toTrack() }
-                // Prepare visual list and drag handlers
+                
+                // Simplified queue state management
                 val qState by rememberQueueState()
-                fun mapVisualToCombinedIndex(visualIndex: Int): Int {
-                    val pn = qState.playNextCount
-                    val cur = qState.currentIndex
-                    return if (visualIndex < pn) cur + 1 + visualIndex else cur + 1 + pn + (visualIndex - pn)
-                }
-                // Derive visible list from model so it always reflects current song and play-next
-                val baseVisible = remember(qState.currentIndex, qState.playNextCount, qState.totalItems, controller?.currentMediaItem?.mediaId) {
+                val queueItems = remember(qState.currentIndex, qState.playNextCount, qState.totalItems, controller?.currentMediaItem?.mediaId) {
                     queueOps.getVisibleQueue()
                 }
-                // Keep local visual list stable while dragging to avoid jank
-                var isDraggingLocal by remember { mutableStateOf(false) }
-                var dragVisual by remember { mutableStateOf(baseVisible) }
-                var currentDraggedId by remember { mutableStateOf<String?>(null) }
-                LaunchedEffect(baseVisible) {
-                    if (!isDraggingLocal) dragVisual = baseVisible
-                }
+                
+                // Reorderable state with simplified logic
                 val reorderState = rememberReorderableLazyListState(
                     onMove = { from, to ->
-                        isDraggingLocal = true
-                        android.util.Log.d(
-                            "QueueScreenDBG",
-                            "NP:onMove from=${from.index} to=${to.index} beforeSize=${dragVisual.size}"
-                        )
-                        val list = dragVisual.toMutableList()
-                        if (from.index in list.indices) {
-                            val item = list.removeAt(from.index)
-                            val insertIndex = to.index.coerceIn(0, list.size)
-                            list.add(insertIndex, item)
-                            dragVisual = list
-                        }
+                        android.util.Log.d("QueueScreenDBG", "NP: onMove from=${from.index} to=${to.index}")
                     },
                     onDragEnd = { from, to ->
-                        // Resolve dragged item by ID using tracked dragged id; fallback to target index
-                        val clampedTo = to.coerceIn(0, (dragVisual.size - 1).coerceAtLeast(0))
-                        val dragged = currentDraggedId?.let { id -> dragVisual.find { it.id == id } } ?: dragVisual.getOrNull(clampedTo)
-                        android.util.Log.d(
-                            "QueueScreenDBG",
-                            "NP:onDragEnd commit fromVisual=$from toVisual=$to dropClamped=$clampedTo draggedId=${dragged?.id}"
-                        )
+                        android.util.Log.d("QueueScreenDBG", "NP: onDragEnd from=$from to=$to")
                         coroutineScope.launch {
                             try {
-                                val snapBefore = queueOps.getQueueSnapshot()
-                                val visibleBefore = queueOps.getVisibleQueue()
-                                val combinedIndices = visibleBefore.map { v -> snapBefore.indexOfFirst { it.id == v.id } }
-                                val lastCombined = (snapBefore.size - 1).coerceAtLeast(0)
-                                val targetCombinedRaw = combinedIndices.getOrElse(clampedTo) { (combinedIndices.lastOrNull() ?: lastCombined).coerceAtMost(lastCombined) }
-                                val targetCombined = targetCombinedRaw.coerceIn(0, lastCombined)
-
-                                val fromItem = dragged?.let { d -> snapBefore.find { it.id == d.id } }
-                                if (fromItem != null) {
-                                    val fromCombined = snapBefore.indexOfFirst { it.id == fromItem.id }
-                                    val pnIndices = snapBefore.withIndex()
-                                        .filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }
-                                        .map { it.index }
-                                    val userIndices = snapBefore.withIndex()
-                                        .filter { it.value.source == QueueManager.QueueSource.USER_QUEUE }
-                                        .map { it.index }
-                                    val hasPn = pnIndices.isNotEmpty()
-                                    val pnStart = if (hasPn) pnIndices.first() else -1
-                                    val pnEndExclusive = if (hasPn) pnIndices.last() + 1 else -1
-                                    val hasUser = userIndices.isNotEmpty()
-                                    val userStart = if (hasUser) userIndices.first() else -1
-                                    val userEndExclusive = if (hasUser) userIndices.last() + 1 else -1
-                                    val droppingIntoPlayNext = hasPn && targetCombined in pnStart until pnEndExclusive
-                                    val droppingIntoUser = hasUser && targetCombined in userStart until userEndExclusive
-
-                                    if (fromItem.source != QueueManager.QueueSource.PLAY_NEXT && droppingIntoPlayNext) {
-                                        // Main -> Play Next
-                                        android.util.Log.d("QueueScreenDBG", "NP: moving ${fromItem.id} Main->PlayNext target=$targetCombined")
-                                        queueOps.removeItemById(fromItem.id)
-                                        queueOps.playNextWithContext(items = listOf(fromItem.mediaItem), context = fromItem.context)
-                                        val snap2 = queueOps.getQueueSnapshot()
-                                        val pn2 = snap2.withIndex().filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }.map { it.index }
-                                        if (pn2.isNotEmpty()) {
-                                            val pnStart2 = pn2.first()
-                                            val pnEnd2 = pn2.last() + 1
-                                            val appendedIdx = snap2.indexOfLast { it.source == QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
-                                            if (appendedIdx >= 0) {
-                                                val desired = targetCombined.coerceIn(pnStart2, pnEnd2 - 1)
-                                                if (appendedIdx != desired) queueOps.moveItem(appendedIdx, desired)
-                                            }
-                                        }
-                                    } else if (fromItem.source != QueueManager.QueueSource.USER_QUEUE && droppingIntoUser) {
-                                        // Main or PN -> User Queue
-                                        android.util.Log.d("QueueScreenDBG", "NP: moving ${fromItem.id} ->UserQueue target=$targetCombined")
-                                        queueOps.removeItemById(fromItem.id)
-                                        val ctx = qState.context ?: QueueContextHelper.createSearchContext("drag_to_userqueue")
-                                        queueOps.addToUserQueueWithContext(items = listOf(fromItem.mediaItem), context = ctx)
-                                        val snapU = queueOps.getQueueSnapshot()
-                                        val uIdxs = snapU.withIndex().filter { it.value.source == QueueManager.QueueSource.USER_QUEUE }.map { it.index }
-                                        if (uIdxs.isNotEmpty()) {
-                                            val uStart = uIdxs.first()
-                                            val uEnd = uIdxs.last() + 1
-                                            val appended = snapU.indexOfLast { it.source == QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
-                                            if (appended >= 0) {
-                                                val desired = targetCombined.coerceIn(uStart, uEnd - 1)
-                                                if (appended != desired) queueOps.moveItem(appended, desired)
-                                            }
-                                        }
-                                    } else if (fromItem.source == QueueManager.QueueSource.PLAY_NEXT && !(hasPn && targetCombined in pnStart until pnEndExclusive)) {
-                                        // Play Next -> Main
-                                        android.util.Log.d("QueueScreenDBG", "NP: moving ${fromItem.id} PlayNext->Main target=$targetCombined")
-                                        queueOps.removeItemById(fromItem.id)
-                                        var snap3 = queueOps.getQueueSnapshot()
-                                        var mainIdx = snap3.indexOfFirst { it.source != QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
-                                        if (mainIdx < 0) {
-                                            queueOps.addToEndWithContext(items = listOf(fromItem.mediaItem), context = fromItem.context)
-                                            snap3 = queueOps.getQueueSnapshot()
-                                            mainIdx = snap3.indexOfLast { it.source != QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
-                                        }
-                                        val pn3 = snap3.withIndex().filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }.map { it.index }
-                                        val pnEnd3 = if (pn3.isNotEmpty()) pn3.last() + 1 else 0
-                                        var desired = targetCombined
-                                        if (pn3.isNotEmpty() && desired in (pn3.first() until pnEnd3)) desired = pnEnd3
-                                        if (mainIdx >= 0 && mainIdx != desired) queueOps.moveItem(mainIdx, desired)
-                                    } else if (fromItem.source == QueueManager.QueueSource.USER_QUEUE && !(hasUser && targetCombined in userStart until userEndExclusive)) {
-                                        // User Queue -> Main (adjust if landing inside PN segment)
-                                        android.util.Log.d("QueueScreenDBG", "NP: moving ${fromItem.id} UserQueue->Main target=$targetCombined")
-                                        queueOps.removeItemById(fromItem.id)
-                                        var snapM = queueOps.getQueueSnapshot()
-                                        var mainIdx = snapM.indexOfFirst { it.source != QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
-                                        if (mainIdx < 0) {
-                                            queueOps.addToEndWithContext(items = listOf(fromItem.mediaItem), context = fromItem.context)
-                                            snapM = queueOps.getQueueSnapshot()
-                                            mainIdx = snapM.indexOfLast { it.source != QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
-                                        }
-                                        val pnM = snapM.withIndex().filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }.map { it.index }
-                                        val pnEndM = if (pnM.isNotEmpty()) pnM.last() + 1 else 0
-                                        var desired = targetCombined
-                                        if (pnM.isNotEmpty() && desired in (pnM.first() until pnEndM)) desired = pnEndM
-                                        if (mainIdx >= 0 && mainIdx != desired) queueOps.moveItem(mainIdx, desired)
-                                    } else {
-                                        // Intra segment move based on real combined indices
-                                        android.util.Log.d("QueueScreenDBG", "NP: moving within segment from=$fromCombined to=$targetCombined id=${fromItem.id}")
-                                        if (fromCombined != targetCombined) queueOps.moveItem(fromCombined, targetCombined)
-                                    }
+                                val visibleQueue = queueOps.getVisibleQueue()
+                                
+                                // Validate indices
+                                if (from < 0 || to < 0 || from >= visibleQueue.size || to >= visibleQueue.size || from == to) {
+                                    android.util.Log.w("QueueScreenDBG", "Invalid drag indices: from=$from to=$to size=${visibleQueue.size}")
+                                    return@launch
                                 }
-                            } finally {
-                                // Reset drag list to model snapshot
-                                dragVisual = queueOps.getVisibleQueue()
-                                android.util.Log.d("QueueScreenDBG", "NP: after commit visibleSize=${dragVisual.size}")
-                                isDraggingLocal = false
-                                currentDraggedId = null
+                                
+                                // Use the proper index mapping
+                                val fromIndexInSnapshot = queueOps.getVisibleToCombinedIndexMapping(from)
+                                val toIndexInSnapshot = queueOps.getVisibleToCombinedIndexMapping(to)
+                                
+                                if (fromIndexInSnapshot < 0 || toIndexInSnapshot < 0) {
+                                    android.util.Log.w("QueueScreenDBG", "Invalid index mapping: from=$fromIndexInSnapshot to=$toIndexInSnapshot")
+                                    return@launch
+                                }
+                                
+                                android.util.Log.d("QueueScreenDBG", "Moving item from $fromIndexInSnapshot to $toIndexInSnapshot")
+                                
+                                // Perform the move
+                                queueOps.moveItem(fromIndexInSnapshot, toIndexInSnapshot)
+                                
+                            } catch (e: Exception) {
+                                android.util.Log.e("QueueScreenDBG", "Error during drag operation", e)
                             }
                         }
                     }
@@ -981,9 +876,8 @@ fun NowPlayingScreen(navController: NavController) {
                             }
                         }
                     }
-                    // Visible queue content from manager; recompute when queueState changes so
-                    // the list always shows only items after the current one
-                    itemsIndexed(dragVisual, key = { _, item -> "queue_${item.id}_${item.addedAt}" }) { idx, qi ->
+                    // Use simplified queue items with stable keys
+                    itemsIndexed(queueItems, key = { _, item -> "queue_${item.id}" }) { idx, qi ->
                         val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
                         val dismissState = rememberDismissState(
                             confirmStateChange = { value ->
@@ -991,12 +885,9 @@ fun NowPlayingScreen(navController: NavController) {
                                     DismissValue.DismissedToEnd -> {
                                         android.util.Log.d("QueueScreenDBG", "NP: swipe right (Play Next) id=${qi.id}")
                                         val ctx = qState.context
-                                        // run in coroutine, and convert track to MediaItem
                                         coroutineScope.launch {
                                             queueOps.playNextWithContext(items = listOf(vt.toMediaItem()), context = ctx)
-                                            // refresh from model after commit
-                                            dragVisual = queueOps.getVisibleQueue()
-                                            android.util.Log.d("QueueScreenDBG", "NP: after swipe right visibleSize=${dragVisual.size}")
+                                            android.util.Log.d("QueueScreenDBG", "NP: after swipe right")
                                         }
                                         false
                                     }
@@ -1004,8 +895,7 @@ fun NowPlayingScreen(navController: NavController) {
                                         android.util.Log.d("QueueScreenDBG", "NP: swipe left (Remove) id=${qi.id}")
                                         coroutineScope.launch {
                                             queueOps.removeItemById(qi.id)
-                                            dragVisual = queueOps.getVisibleQueue()
-                                            android.util.Log.d("QueueScreenDBG", "NP: after remove visibleSize=${dragVisual.size}")
+                                            android.util.Log.d("QueueScreenDBG", "NP: after remove")
                                         }
                                         true
                                     }
@@ -1013,10 +903,7 @@ fun NowPlayingScreen(navController: NavController) {
                                 }
                             }
                         )
-                        ReorderableItem(reorderState, key = "queue_${qi.id}_${qi.addedAt}") { isDragging ->
-                            LaunchedEffect(isDragging) {
-                                if (isDragging) currentDraggedId = qi.id else if (currentDraggedId == qi.id) currentDraggedId = null
-                            }
+                        ReorderableItem(reorderState, key = "queue_${qi.id}") { isDragging ->
                             SwipeToDismiss(
                                 state = dismissState,
                                 directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
@@ -1041,10 +928,16 @@ fun NowPlayingScreen(navController: NavController) {
                                     ) { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                                 },
                                 dismissContent = {
+                                    // Fixed: Remove the alpha = 0f that was hiding the dragged item
                                     Box(
                                         modifier = Modifier
                                             .zIndex(if (isDragging) 1f else 0f)
-                                            .graphicsLayer { if (isDragging) alpha = 0f }
+                                            .graphicsLayer { 
+                                                // Apply visual feedback for dragging without hiding the item
+                                                scaleX = if (isDragging) 1.02f else 1f
+                                                scaleY = if (isDragging) 1.02f else 1f
+                                                shadowElevation = if (isDragging) 8.dp.toPx() else 0f
+                                            }
                                     ) {
                                         com.musify.mu.ui.components.CompactTrackRow(
                                             title = vt.title,

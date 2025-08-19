@@ -666,6 +666,18 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         android.util.Log.d(logTag, "getVisibleQueue pri=${priorityList.size} user=${userList.size} mainTail=${(mainAll.size - start).coerceAtLeast(0)} visible=${visible.size}")
         return visible
     }
+    
+    /**
+     * Get the index mapping from visible queue position to combined queue position
+     */
+    fun getVisibleToCombinedIndexMapping(visibleIndex: Int): Int {
+        val visibleQueue = getVisibleQueue()
+        if (visibleIndex < 0 || visibleIndex >= visibleQueue.size) return -1
+        
+        val item = visibleQueue[visibleIndex]
+        val combinedQueue = getCombinedQueue()
+        return combinedQueue.indexOfFirst { it.id == item.id }
+    }
 
     // Private helper methods
 
