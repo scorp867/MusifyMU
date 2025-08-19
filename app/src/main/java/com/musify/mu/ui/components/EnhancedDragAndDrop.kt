@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlin.math.pow
 
 /**
  * Enhanced drag and drop component with smooth animations and dynamic feedback
