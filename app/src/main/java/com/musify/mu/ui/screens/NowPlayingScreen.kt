@@ -934,7 +934,7 @@ fun NowPlayingScreen(navController: NavController) {
                         }
                     }
                     // Use simplified queue items with stable keys
-                    itemsIndexed(queueItems, key = { _, item -> "queue_${item.id}" }) { idx, qi ->
+                    itemsIndexed(queueItems, key = { idx, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}_$idx" }) { idx, qi ->
                         val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
                         val dismissState = rememberDismissState(
                             confirmStateChange = { value ->
@@ -960,7 +960,7 @@ fun NowPlayingScreen(navController: NavController) {
                                 }
                             }
                         )
-                        ReorderableItem(reorderState, key = "queue_${qi.id}") { isDragging ->
+                        ReorderableItem(reorderState, key = "queue_${qi.id}_${qi.addedAt}_${qi.source.name}_$idx") { isDragging ->
                             SwipeToDismiss(
                                 state = dismissState,
                                 directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),

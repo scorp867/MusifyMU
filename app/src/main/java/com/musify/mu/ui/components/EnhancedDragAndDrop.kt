@@ -20,7 +20,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import kotlin.math.pow
+// Using simple quadratic acceleration instead of pow
 
 /**
  * Enhanced drag and drop component with smooth animations and dynamic feedback
@@ -257,16 +257,16 @@ object EnhancedDragAndDrop {
             
             when {
                 dragY < scrollThreshold -> {
-                    // Enhanced upward scroll with exponential acceleration
+                    // Enhanced upward scroll with quadratic acceleration
                     val proximity = ((scrollThreshold - dragY) / scrollThreshold).coerceIn(0f, 1f)
-                    val acceleratedProximity = kotlin.math.pow(proximity.toDouble(), accelerationCurve.toDouble()).toFloat()
+                    val acceleratedProximity = proximity * proximity // Simple quadratic acceleration
                     val scrollSpeed = (acceleratedProximity * maxScrollSpeed).coerceIn(100f, maxScrollSpeed)
                     performSmoothScroll(scrollSpeed, isUpward = true)
                 }
                 dragY > containerHeight - scrollThreshold -> {
-                    // Enhanced downward scroll with exponential acceleration
+                    // Enhanced downward scroll with quadratic acceleration
                     val proximity = ((dragY - (containerHeight - scrollThreshold)) / scrollThreshold).coerceIn(0f, 1f)
-                    val acceleratedProximity = kotlin.math.pow(proximity.toDouble(), accelerationCurve.toDouble()).toFloat()
+                    val acceleratedProximity = proximity * proximity // Simple quadratic acceleration
                     val scrollSpeed = (acceleratedProximity * maxScrollSpeed).coerceIn(100f, maxScrollSpeed)
                     performSmoothScroll(scrollSpeed, isUpward = false)
                 }
