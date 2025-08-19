@@ -263,6 +263,24 @@ fun QueueScreen(navController: NavController) {
                             duration = SnackbarDuration.Short
                         )
                     }
+
+                    is QueueManager.QueueChangeEvent.QueueCleanup -> {
+                        android.util.Log.d(
+                            "QueueScreenDBG",
+                            "QueueCleanup removed=${change.removedCount} kept=${change.keptCount}"
+                        )
+                        if (change.removedCount > 0) {
+                            val message = if (change.keptCount > 0) {
+                                "Cleaned ${change.removedCount} played songs (kept ${change.keptCount})"
+                            } else {
+                                "Cleaned ${change.removedCount} played songs"
+                            }
+                            snackbarHostState.showSnackbar(
+                                message = message,
+                                duration = SnackbarDuration.Short
+                            )
+                        }
+                    }
                 }
             }
             // After any queue change event, refresh lists immediately on main thread
@@ -721,37 +739,97 @@ fun QueueScreen(navController: NavController) {
                                                         }
                                                         .graphicsLayer { clip = false },
                                                     extraArtOverlay = {
-                                                        if (queueItem.source == QueueManager.QueueSource.PLAY_NEXT) {
-                                                            Box(
-                                                                modifier = Modifier
-                                                                    .align(Alignment.TopEnd)
-                                                                    .padding(2.dp)
-                                                            ) {
-                                                                Surface(
-                                                                    color = MaterialTheme.colorScheme.tertiary,
-                                                                    shape = RoundedCornerShape(6.dp),
+                                                        // Enhanced visual indicators for different queue types
+                                                        when (queueItem.source) {
+                                                            QueueManager.QueueSource.PLAY_NEXT -> {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .align(Alignment.TopEnd)
+                                                                        .padding(2.dp)
                                                                 ) {
-                                                                    Row(
-                                                                        verticalAlignment = Alignment.CenterVertically,
-                                                                        modifier = Modifier.padding(
-                                                                            horizontal = 6.dp,
-                                                                            vertical = 2.dp
-                                                                        )
+                                                                    Surface(
+                                                                        color = MaterialTheme.colorScheme.tertiary,
+                                                                        shape = RoundedCornerShape(6.dp),
                                                                     ) {
-                                                                        Icon(
-                                                                            imageVector = Icons.Rounded.SkipNext,
-                                                                            contentDescription = null,
-                                                                            tint = MaterialTheme.colorScheme.onTertiary,
-                                                                            modifier = Modifier.size(
-                                                                                12.dp
+                                                                        Row(
+                                                                            verticalAlignment = Alignment.CenterVertically,
+                                                                            modifier = Modifier.padding(
+                                                                                horizontal = 6.dp,
+                                                                                vertical = 2.dp
                                                                             )
-                                                                        )
-                                                                        Spacer(Modifier.width(4.dp))
-                                                                        Text(
-                                                                            text = "NEXT",
-                                                                            style = MaterialTheme.typography.labelSmall,
-                                                                            color = MaterialTheme.colorScheme.onTertiary
-                                                                        )
+                                                                        ) {
+                                                                            Icon(
+                                                                                imageVector = Icons.Rounded.SkipNext,
+                                                                                contentDescription = null,
+                                                                                tint = MaterialTheme.colorScheme.onTertiary,
+                                                                                modifier = Modifier.size(12.dp)
+                                                                            )
+                                                                            Spacer(Modifier.width(4.dp))
+                                                                            Text(
+                                                                                text = "NEXT",
+                                                                                style = MaterialTheme.typography.labelSmall,
+                                                                                color = MaterialTheme.colorScheme.onTertiary
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            
+                                                            QueueManager.QueueSource.USER_QUEUE -> {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .align(Alignment.TopEnd)
+                                                                        .padding(2.dp)
+                                                                ) {
+                                                                    Surface(
+                                                                        color = MaterialTheme.colorScheme.secondary,
+                                                                        shape = RoundedCornerShape(6.dp),
+                                                                    ) {
+                                                                        Row(
+                                                                            verticalAlignment = Alignment.CenterVertically,
+                                                                            modifier = Modifier.padding(
+                                                                                horizontal = 6.dp,
+                                                                                vertical = 2.dp
+                                                                            )
+                                                                        ) {
+                                                                            Icon(
+                                                                                imageVector = Icons.Rounded.Person,
+                                                                                contentDescription = null,
+                                                                                tint = MaterialTheme.colorScheme.onSecondary,
+                                                                                modifier = Modifier.size(12.dp)
+                                                                            )
+                                                                            Spacer(Modifier.width(4.dp))
+                                                                            Text(
+                                                                                text = "YOU",
+                                                                                style = MaterialTheme.typography.labelSmall,
+                                                                                color = MaterialTheme.colorScheme.onSecondary
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            
+                                                            else -> {
+                                                                // Show isolation status for main queue items
+                                                                if (queueItem.isIsolated) {
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .align(Alignment.TopStart)
+                                                                            .padding(2.dp)
+                                                                    ) {
+                                                                        Surface(
+                                                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                                                            shape = RoundedCornerShape(6.dp),
+                                                                        ) {
+                                                                            Icon(
+                                                                                imageVector = Icons.Rounded.Lock,
+                                                                                contentDescription = "Protected from source changes",
+                                                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                                                modifier = Modifier
+                                                                                    .size(16.dp)
+                                                                                    .padding(2.dp)
+                                                                            )
+                                                                        }
                                                                     }
                                                                 }
                                                             }
