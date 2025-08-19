@@ -36,12 +36,15 @@ class AppThemeManager private constructor(context: Context) {
     val customLayoutEnabled: Boolean
         get() = _customLayoutEnabled.value
     
-    val homeLayoutConfig: List<String>
-        get() {
+    private val _homeLayoutConfigState = mutableStateOf(
+        run {
             val defaultLayout = listOf("welcome", "recentlyPlayed", "recentlyAdded", "favorites", "playlists")
             val savedLayout = prefs.getString(KEY_HOME_LAYOUT_CONFIG, null)
-            return savedLayout?.split(",") ?: defaultLayout
+            savedLayout?.split(",") ?: defaultLayout
         }
+    )
+    val homeLayoutConfigState: State<List<String>> get() = _homeLayoutConfigState
+    val homeLayoutConfig: List<String> get() = _homeLayoutConfigState.value
     
     // Animation settings
     private val _useAnimatedBackgrounds = mutableStateOf(prefs.getBoolean(KEY_USE_ANIMATED_BACKGROUNDS, false))
@@ -92,6 +95,7 @@ class AppThemeManager private constructor(context: Context) {
     
     suspend fun setHomeLayoutConfig(config: List<String>) = withContext(Dispatchers.IO) {
         prefs.edit().putString(KEY_HOME_LAYOUT_CONFIG, config.joinToString(",")).apply()
+        _homeLayoutConfigState.value = config
     }
     
     // Animation settings methods

@@ -31,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.content.ContentUris
 import android.provider.MediaStore
+import com.musify.mu.playback.LocalMediaController
 
 @Composable
 fun NowPlayingBar(
@@ -44,6 +45,21 @@ fun NowPlayingBar(
     modifier: Modifier = Modifier
 ) {
     if (currentTrack == null) return
+
+    // Non-interactive progress for mini-player
+    val controller = LocalMediaController.current
+    var miniProgress by remember { mutableStateOf(0f) }
+    LaunchedEffect(controller) {
+        controller?.let { c ->
+            while (true) {
+                val dur = c.duration
+                if (dur > 0) {
+                    miniProgress = (c.currentPosition.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
+                }
+                delay(300)
+            }
+        }
+    }
 
     // Animation for pulsing play button
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -102,16 +118,38 @@ fun NowPlayingBar(
         }
     }
 
+    // Thin progress line above mini-player
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f))
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(miniProgress)
+                .height(2.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(MaterialTheme.colorScheme.primary)
+        )
+    }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
             .shadow(
-                elevation = 8.dp,
+                elevation = 6.dp,
                 spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(14.dp)
             )
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable { onExpand() }
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
@@ -130,7 +168,7 @@ fun NowPlayingBar(
         Box(
             modifier = Modifier
                 .background(gradient)
-                .padding(12.dp)
+                .padding(10.dp)
         ) {
             Row(
                 modifier = Modifier
@@ -140,15 +178,15 @@ fun NowPlayingBar(
                     },
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Album artwork with rounded corners
+                // Album artwork with rounded corners (compact)
                 Artwork(
                     data = currentTrack.artUri,
                     audioUri = currentTrack.mediaId,
                     albumId = currentTrack.albumId,
                     contentDescription = currentTrack.title,
                     modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(10.dp))
                 ) {
                     if (isPlaying) {
                         Box(modifier = Modifier.matchParentSize()) {
@@ -182,7 +220,7 @@ fun NowPlayingBar(
 
                 Spacer(Modifier.width(8.dp))
 
-                // Media control buttons with animations
+                // Media control buttons with animations (compact)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -191,7 +229,7 @@ fun NowPlayingBar(
                     IconButton(
                         onClick = { onPlayPause() },
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(36.dp)
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
@@ -201,20 +239,20 @@ fun NowPlayingBar(
                             imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                             contentDescription = if (isPlaying) "Pause" else "Play",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
                     // Next button
                     IconButton(
                         onClick = { onNext() },
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.SkipNext,
                             contentDescription = "Next",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }

@@ -63,7 +63,8 @@ fun SettingsScreen(navController: NavController) {
 
     var useAnimatedBackgrounds by remember { mutableStateOf(themeManager.useAnimatedBackgrounds) }
     var customLayoutEnabled by remember { mutableStateOf(themeManager.customLayoutEnabled) }
-    var homeLayoutConfig by remember { mutableStateOf(themeManager.homeLayoutConfig) }
+    val homeLayoutConfigState by remember { mutableStateOf(themeManager.homeLayoutConfigState) }
+    var homeLayoutConfig by remember { mutableStateOf(homeLayoutConfigState.value) }
     
     // Color picker state
     var showColorPicker by remember { mutableStateOf(false) }
@@ -397,9 +398,8 @@ fun SettingsScreen(navController: NavController) {
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalArrangement = Arrangement.spacedBy(16.dp)
                                 ) {
-                                    // Layout options
+                                    // Layout options (welcome header is fixed and not configurable)
                                     val sections = listOf(
-                                        "welcome" to "Welcome Header",
                                         "recentlyPlayed" to "Recently Played",
                                         "recentlyAdded" to "Recently Added",
                                         "favorites" to "Favorites",
@@ -427,8 +427,7 @@ fun SettingsScreen(navController: NavController) {
                                     TextButton(
                                         onClick = {
                                             homeLayoutConfig = listOf(
-                                                "welcome", "recentlyPlayed", "recentlyAdded", 
-                                                "favorites", "playlists"
+                                                "recentlyPlayed", "recentlyAdded", "favorites", "playlists"
                                             )
                                             scope.launch {
                                                 themeManager.setHomeLayoutConfig(homeLayoutConfig)
@@ -492,7 +491,9 @@ fun SettingsScreen(navController: NavController) {
                                     val animationStyles = listOf(
                                         "waves" to "Wave Effect",
                                         "particles" to "Particle Effect",
-                                        "pulse" to "Pulse Effect"
+                                        "pulse" to "Pulse Effect",
+                                        "neon_grid" to "Neon Grid",
+                                        "orbit_rings" to "Orbit Rings"
                                     )
                                     
                                     var selectedAnimation by remember { 
@@ -531,11 +532,25 @@ fun SettingsScreen(navController: NavController) {
                                             
                                             Spacer(modifier = Modifier.width(8.dp))
                                             
-                                            Text(
-                                                text = name,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onBackground
-                                            )
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = name,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onBackground
+                                                )
+                                                Spacer(Modifier.height(8.dp))
+                                                // Inline animated preview (pauses when playback paused)
+                                                com.musify.mu.ui.components.AnimatedBackgroundPreview(
+                                                    styleKey = key,
+                                                    isPlaying = true,
+                                                    primaryColor = MaterialTheme.colorScheme.primary,
+                                                    secondaryColor = MaterialTheme.colorScheme.secondary,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(60.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                )
+                                            }
                                         }
                                     }
                                 }

@@ -45,15 +45,22 @@ class PlayerService : MediaLibraryService() {
 
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
     private var hasValidMedia = false
+    private var currentMediaIdCache: String? = null
 
     private fun ensurePlayerInitialized() {
         if (_player != null && _queue != null && _player == mediaLibrarySession?.player) return
         android.util.Log.d("PlayerService", "Initializing player and queue")
-        
+
         val newPlayer = _player ?: ExoPlayer.Builder(this).build().also { _player = it }
-        if (_queue == null) _queue = QueueManager(newPlayer, queueStateStore)
+
+        // Snapshot any existing queue to migrate to the real player-bound manager
+        val prevItems = _queue?.getQueueSnapshot()?.map { it.mediaItem } ?: emptyList()
+        val prevIndex = _queue?.getCurrentIndex() ?: 0
+
+        // Always bind QueueManager to the actual player used by the session
+        _queue = QueueManager(newPlayer, queueStateStore)
         QueueManagerProvider.setInstance(queue)
-        
+
         // Update the session with the new player
         mediaLibrarySession?.player = newPlayer
 
@@ -67,7 +74,24 @@ class PlayerService : MediaLibraryService() {
             
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 mediaItem?.let { item ->
+                    // Auto-remove finished PLAY_NEXT item only on auto-advance
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                        val finishedMediaId = currentMediaIdCache
+                        if (finishedMediaId != null) {
+                            serviceScope.launch(Dispatchers.Main) {
+                                try { queue.removeFirstPlayNextByMediaId(finishedMediaId) } catch (_: Exception) { }
+                            }
+                        }
+                    }
+                    // Update current cached id to new current
+                    currentMediaIdCache = item.mediaId
                     queue.onTrackChanged(item.mediaId)
+                    // If the playlist was externally changed, resync; otherwise keep our sources intact
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                        serviceScope.launch(Dispatchers.Main) {
+                            try { queue.syncFromPlayer(player) } catch (_: Exception) { }
+                        }
+                    }
                     serviceScope.launch(Dispatchers.IO) {
                         // Record track as played
                         repo.recordPlayed(item.mediaId)
@@ -89,6 +113,23 @@ class PlayerService : MediaLibraryService() {
                 }
             }
         })
+
+        // Migrate previous queue (if any) into the new manager without starting playback
+        if (prevItems.isNotEmpty()) {
+            serviceScope.launch(Dispatchers.Main) {
+                try {
+                    queue.setQueue(
+                        items = prevItems,
+                        startIndex = prevIndex.coerceAtLeast(0),
+                        play = false,
+                        startPosMs = 0L,
+                        context = null
+                    )
+                } catch (e: Exception) {
+                    android.util.Log.w("PlayerService", "Failed to migrate previous queue", e)
+                }
+            }
+        }
     }
 
     @OptIn(UnstableApi::class)

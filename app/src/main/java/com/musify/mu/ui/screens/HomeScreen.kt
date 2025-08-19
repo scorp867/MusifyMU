@@ -169,8 +169,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     // Section tabs below welcome header
     var selectedSection by rememberSaveable { mutableStateOf(0) } // 0=LISTS, 1=SONGS, 2=ARTISTS, 3=ALBUMS
     // Keep state on Home reselect (no reset per request)
-    
-    
+    val themeManager = remember { com.musify.mu.ui.theme.AppThemeManager.getInstance(context) }
+    val customLayoutEnabled = themeManager.customLayoutEnabled
+    val homeLayoutOrder by remember { mutableStateOf(themeManager.homeLayoutConfigState) }
 
     // Derived data for section lists
     val tracksFiltered = remember(cachedTracks) { cachedTracks }
@@ -228,64 +229,58 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             0 -> {
                 if (isLoading) {
                     items(3) { ShimmerCarousel() }
-        } else {
-            item {
-                AnimatedCarousel(
-                    title = "Recently Played",
-                    icon = Icons.Rounded.History,
-                    data = recentPlayed,
-                    onPlay = { tracks, index ->
-                        onPlay(tracks, index)
-                        scope.launch {
-                            kotlinx.coroutines.delay(500)
-                            refreshTrigger++
+                } else {
+                    val listsOrder = if (customLayoutEnabled) homeLayoutOrder.value else listOf("welcome","recentlyPlayed","recentlyAdded","favorites","playlists")
+                    listsOrder.forEach { sectionKey ->
+                        when (sectionKey) {
+                            "welcome" -> item { /* header already shown above; skip to avoid duplicate */ }
+                            "recentlyPlayed" -> item {
+                                if (recentPlayed.isNotEmpty()) {
+                                    AnimatedCarousel(
+                                        title = "Recently Played",
+                                        icon = Icons.Rounded.History,
+                                        data = recentPlayed,
+                                        onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
+                                        haptic = haptic,
+                                        onSeeAll = { navController.navigate("see_all/recently_played") }
+                                    )
+                                }
+                            }
+                            "recentlyAdded" -> item {
+                                if (recentAdded.isNotEmpty()) {
+                                    AnimatedCarousel(
+                                        title = "Recently Added",
+                                        icon = Icons.Rounded.NewReleases,
+                                        data = recentAdded,
+                                        onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
+                                        haptic = haptic,
+                                        onSeeAll = { navController.navigate("see_all/recently_added") }
+                                    )
+                                }
+                            }
+                            "favorites" -> item {
+                                if (favorites.isNotEmpty()) {
+                                    AnimatedCarousel(
+                                        title = "Favourites",
+                                        icon = Icons.Rounded.Favorite,
+                                        data = favorites,
+                                        onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
+                                        haptic = haptic,
+                                        onSeeAll = { navController.navigate("see_all/favorites") }
+                                    )
+                                }
+                            }
+                            "playlists" -> item {
+                                CustomPlaylistsCarousel(
+                                    playlists = customPlaylists,
+                                    navController = navController,
+                                    haptic = haptic,
+                                    onRefresh = { refreshTrigger++ }
+                                )
+                            }
                         }
-                    },
-                    haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/recently_played") }
-                )
-            }
-            item {
-                AnimatedCarousel(
-                    title = "Recently Added",
-                    icon = Icons.Rounded.NewReleases,
-                    data = recentAdded,
-                    onPlay = { tracks, index ->
-                        onPlay(tracks, index)
-                        scope.launch {
-                            kotlinx.coroutines.delay(500)
-                            refreshTrigger++
-                        }
-                    },
-                    haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/recently_added") }
-                )
-            }
-            item {
-                AnimatedCarousel(
-                    title = "Favourites",
-                    icon = Icons.Rounded.Favorite,
-                    data = favorites,
-                    onPlay = { tracks, index ->
-                        onPlay(tracks, index)
-                        scope.launch {
-                            kotlinx.coroutines.delay(500)
-                            refreshTrigger++
-                        }
-                    },
-                    haptic = haptic,
-                    onSeeAll = { navController.navigate("see_all/favorites") }
-                )
-            }
-            item {
-                CustomPlaylistsCarousel(
-                    playlists = customPlaylists,
-                    navController = navController,
-                    haptic = haptic,
-                    onRefresh = { refreshTrigger++ }
-                )
-            }
-        }
+                    }
+                }
             }
             1 -> {
                 // SONGS section (Library-like list)

@@ -396,6 +396,138 @@ class SimpleMediaStoreScanner(
     }
 
     /**
+     * Streaming variant of scan that reports progress batches via callback while scanning.
+     * Returns the final complete list at the end.
+     */
+    suspend fun scanTracksStreaming(onProgress: (List<Track>) -> Unit): List<Track> = withContext(Dispatchers.IO) {
+        val all = scanTracksWithProgress(onProgress)
+        all
+    }
+
+    private suspend fun scanTracksWithProgress(onProgress: (List<Track>) -> Unit): List<Track> {
+        try {
+            val tracks = mutableListOf<Track>()
+            val requiredPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                android.Manifest.permission.READ_MEDIA_AUDIO
+            } else {
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+            val hasPermission = ContextCompat.checkSelfPermission(context, requiredPermission) == PackageManager.PERMISSION_GRANTED
+            if (!hasPermission) return emptyList()
+
+            val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1"
+            val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+
+            val emitBatch: () -> Unit = {
+                // Emit a snapshot to avoid concurrent modification
+                onProgress(tracks.toList())
+            }
+
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                BASIC_PROJECTION,
+                selection,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val titleIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+
+                var sinceLastEmit = 0
+                while (cursor.moveToNext()) {
+                    try {
+                        val id = cursor.getLong(idIndex)
+                        val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                        val title = cursor.getString(titleIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val artist = cursor.getString(artistIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val duration = cursor.getLong(durationIndex)
+                        val albumId = cursor.getLong(albumIdIndex)
+                        if (duration >= 0) {
+                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                            tracks.add(
+                                Track(
+                                    mediaId = contentUri.toString(),
+                                    title = title,
+                                    artist = artist,
+                                    album = album,
+                                    durationMs = duration,
+                                    artUri = artworkUri,
+                                    albumId = albumId
+                                )
+                            )
+                            sinceLastEmit++
+                            if (sinceLastEmit >= 25) {
+                                emitBatch()
+                                sinceLastEmit = 0
+                            }
+                        }
+                    } catch (_: Exception) { }
+                }
+            }
+
+            // Broader query if initial returned none
+            if (tracks.isEmpty()) {
+                context.contentResolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    BASIC_PROJECTION,
+                    null,
+                    null,
+                    sortOrder
+                )?.use { cursor ->
+                    val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val titleIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    var sinceLastEmit = 0
+                    while (cursor.moveToNext()) {
+                        try {
+                            val id = cursor.getLong(idIndex)
+                            val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                            val title = cursor.getString(titleIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val artist = cursor.getString(artistIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val duration = cursor.getLong(durationIndex)
+                            val albumId = cursor.getLong(albumIdIndex)
+                            if (duration >= 0) {
+                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                tracks.add(
+                                    Track(
+                                        mediaId = contentUri.toString(),
+                                        title = title,
+                                        artist = artist,
+                                        album = album,
+                                        durationMs = duration,
+                                        artUri = artworkUri,
+                                        albumId = albumId
+                                    )
+                                )
+                                sinceLastEmit++
+                                if (sinceLastEmit >= 25) {
+                                    onProgress(tracks.toList())
+                                    sinceLastEmit = 0
+                                }
+                            }
+                        } catch (_: Exception) { }
+                    }
+                }
+            }
+
+            // Final emit
+            onProgress(tracks.toList())
+            return tracks
+        } catch (_: Exception) {
+            return emptyList()
+        }
+    }
+
+    /**
      * Content observer for real-time MediaStore changes
      */
     private class MediaStoreContentObserver(

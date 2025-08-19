@@ -202,9 +202,11 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             currentContext = context
 
             // Create queue items with proper positioning and context
+            val baseTime = System.currentTimeMillis()
             val queueItems = items.mapIndexed { index, mediaItem ->
                 QueueItem(
                     mediaItem = mediaItem,
+                    addedAt = baseTime + index,
                     position = index,
                     source = when (context?.type) {
                         ContextType.ALBUM -> QueueSource.ALBUM
@@ -262,6 +264,8 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     suspend fun addToEnd(items: List<MediaItem>, context: PlayContext? = null) = queueMutex.withLock {
         try {
+            val baseTime = System.currentTimeMillis()
+            var offset = 0
             val queueItems = items.mapNotNull { mediaItem ->
                 // Prevent duplicates
                 if (queueLookup.containsKey(mediaItem.mediaId)) {
@@ -269,6 +273,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                 } else {
                     QueueItem(
                         mediaItem = mediaItem,
+                        addedAt = baseTime + (offset++),
                         position = mainQueue.size + playNextQueue.size,
                         source = QueueSource.USER_ADDED,
                         context = context ?: currentContext
@@ -297,15 +302,13 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     suspend fun playNext(items: List<MediaItem>, context: PlayContext? = null) = queueMutex.withLock {
         try {
-            val queueItems = items.mapNotNull { mediaItem ->
-                // Remove from main queue if exists, we'll add to play-next
-                queueLookup.remove(mediaItem.mediaId)?.let { existing ->
-                    mainQueue.remove(existing)
-                    _queueChanges.postValue(QueueChangeEvent.ItemRemoved(existing, existing.position))
-                }
-
+            val baseTime = System.currentTimeMillis()
+            var offset = 0
+            val queueItems = items.map { mediaItem ->
+                // Keep originals; add duplicates to play-next segment
                 QueueItem(
                     mediaItem = mediaItem,
+                    addedAt = baseTime + (offset++),
                     source = QueueSource.PLAY_NEXT,
                     context = context ?: currentContext
                 )
@@ -313,15 +316,15 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
             if (queueItems.isEmpty()) return@withLock
 
-            // Add to play-next queue (LIFO for multiple items)
-            queueItems.reversed().forEach { item ->
-                playNextQueue.addFirst(item)
+            // Add to play-next queue FIFO
+            val existingPlayNext = playNextQueue.size
+            queueItems.forEach { item ->
+                playNextQueue.addLast(item)
                 queueLookup[item.id] = item
-                _queueChanges.postValue(QueueChangeEvent.ItemAdded(item, currentIndex + 1))
             }
 
-            // Insert after current item in player
-            val insertIndex = (player.currentMediaItemIndex + 1)
+            // Insert after current item + existing play-next items in player timeline
+            val insertIndex = (player.currentMediaItemIndex + 1 + existingPlayNext)
                 .coerceAtMost(player.mediaItemCount)
             player.addMediaItems(insertIndex, queueItems.map { it.mediaItem })
 
@@ -518,6 +521,65 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         val current = getCombinedQueue().getOrNull(currentIndex)
         _currentItem.postValue(current)
         return current
+    }
+
+    fun isPlayNextIndex(index: Int): Boolean {
+        return getCombinedQueue().getOrNull(index)?.source == QueueSource.PLAY_NEXT
+    }
+
+    suspend fun removeFirstPlayNextByMediaId(mediaId: String) = queueMutex.withLock {
+        val idx = getCombinedQueue().indexOfFirst { it.source == QueueSource.PLAY_NEXT && it.mediaItem.mediaId == mediaId }
+        if (idx >= 0) removeAt(idx)
+    }
+
+    /**
+     * Synchronize internal queues from the player's current media items.
+     * This is used when a controller externally sets a new playlist so our
+     * state reflects the true player timeline.
+     */
+    suspend fun syncFromPlayer(newPlayer: ExoPlayer) = queueMutex.withLock {
+        try {
+            val count = newPlayer.mediaItemCount
+            val items = (0 until count).mapNotNull { idx -> newPlayer.getMediaItemAt(idx) }
+            // Preserve existing sources/metadata by matching existing combined queue by mediaId (in order)
+            val existingCombined = getCombinedQueue().toMutableList()
+            val buckets = LinkedHashMap<String, ArrayDeque<QueueItem>>()
+            existingCombined.forEach { qi ->
+                val dq = buckets.getOrPut(qi.id) { ArrayDeque() }
+                dq.addLast(qi)
+            }
+
+            mainQueue.clear()
+            playNextQueue.clear()
+            queueLookup.clear()
+            originalOrder.clear()
+
+            items.forEachIndexed { index, mediaItem ->
+                val preserved = buckets[mediaItem.mediaId]?.removeFirstOrNull()
+                val qi = preserved?.copy(mediaItem = mediaItem, position = index)
+                    ?: QueueItem(
+                        mediaItem = mediaItem,
+                        position = index,
+                        source = QueueSource.USER_ADDED,
+                        context = currentContext
+                    )
+                when (qi.source) {
+                    QueueSource.PLAY_NEXT -> playNextQueue.addLast(qi)
+                    else -> mainQueue.addLast(qi)
+                }
+                queueLookup[qi.id] = qi
+                originalOrder.addLast(qi.copy())
+            }
+
+            currentIndex = newPlayer.currentMediaItemIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+            shuffleEnabled = newPlayer.shuffleModeEnabled
+            repeatMode = newPlayer.repeatMode
+
+            updateUIState()
+            _queueChanges.postValue(QueueChangeEvent.QueueReordered(getCombinedQueue()))
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Failed to sync from player", e)
+        }
     }
 
     fun getVisibleQueue(): List<QueueItem> {

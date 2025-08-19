@@ -83,25 +83,32 @@ fun QueueScreen(navController: NavController) {
     var isDragging by remember { mutableStateOf(false) }
     var visualQueueItems by remember { mutableStateOf<List<QueueManager.QueueItem>>(emptyList()) }
     
-    // Get real-time queue data from QueueManager with fallback to controller
-    val queueItems = remember(queueManager, controller) {
-        derivedStateOf { 
-            val queueManagerItems = queueOperations.getVisibleQueue()
-            if (queueManagerItems.isEmpty() && controller != null) {
-                // Fallback: Get items directly from MediaController
-                (0 until controller.mediaItemCount).mapNotNull { idx ->
-                    controller.getMediaItemAt(idx)?.let { mediaItem ->
-                        QueueManager.QueueItem(
-                            mediaItem = mediaItem,
-                            position = idx,
-                            source = QueueManager.QueueSource.USER_ADDED
-                        )
-                    }
+    // Real-time queue data tracked as State and updated on queue events
+    var queueItems by remember { mutableStateOf<List<QueueManager.QueueItem>>(emptyList()) }
+    fun computeQueueItems(): List<QueueManager.QueueItem> {
+        val items = queueOperations.getVisibleQueue()
+        if (items.isNotEmpty()) return items
+        val c = controller
+        return if (c != null) {
+            (0 until c.mediaItemCount).mapNotNull { idx ->
+                c.getMediaItemAt(idx)?.let { mediaItem ->
+                    QueueManager.QueueItem(
+                        mediaItem = mediaItem,
+                        position = idx,
+                        source = QueueManager.QueueSource.USER_ADDED
+                    )
                 }
-            } else {
-                queueManagerItems
             }
-        }
+        } else emptyList()
+    }
+    LaunchedEffect(controller, queueManager) {
+        queueItems = computeQueueItems()
+    }
+
+    // Recompute on any queue state change (e.g., count/index/shuffle/repeat)
+    LaunchedEffect(queueState) {
+        queueItems = computeQueueItems()
+        if (!isDragging) visualQueueItems = queueItems
     }
     
     // Initialize QueueManager with controller data if needed
@@ -123,13 +130,14 @@ fun QueueScreen(navController: NavController) {
                     startPosMs = 0L,
                     context = null
                 )
+                queueItems = computeQueueItems()
             }
         }
     }
     
     // Debug: Log queue state
-    LaunchedEffect(queueItems.value, queueState) {
-        android.util.Log.d("QueueScreen", "Queue items count: ${queueItems.value.size}")
+    LaunchedEffect(queueItems, queueState) {
+        android.util.Log.d("QueueScreen", "Queue items count: ${queueItems.size}")
         android.util.Log.d("QueueScreen", "Queue state total: ${queueState.totalItems}")
         android.util.Log.d("QueueScreen", "Controller items: ${controller?.mediaItemCount ?: 0}")
     }
@@ -149,11 +157,11 @@ fun QueueScreen(navController: NavController) {
     }
 
     // Sync visual queue with real queue data
-    LaunchedEffect(queueItems.value) {
-                    if (!isDragging) {
-            visualQueueItems = queueItems.value.toList()
-                }
-            }
+    LaunchedEffect(queueItems) {
+        if (!isDragging) {
+            visualQueueItems = queueItems.toList()
+        }
+    }
 
     // React to queue changes for real-time updates
     LaunchedEffect(queueChanges) {
@@ -198,6 +206,9 @@ fun QueueScreen(navController: NavController) {
                     }
                 }
             }
+            // After any queue change event, refresh lists immediately on main thread
+            queueItems = computeQueueItems()
+            if (!isDragging) visualQueueItems = queueItems
         }
     }
 
@@ -238,7 +249,7 @@ fun QueueScreen(navController: NavController) {
             val fromIdx = from  // from is Int in onDragEnd
             val toIdx = to      // to is Int in onDragEnd
             
-            if (fromIdx != toIdx && fromIdx < queueItems.value.size && toIdx <= queueItems.value.size) {
+            if (fromIdx != toIdx && fromIdx < queueItems.size && toIdx <= queueItems.size) {
                 scope.launch {
                     try {
                         // Use QueueManager's move function for immediate execution
@@ -250,7 +261,7 @@ fun QueueScreen(navController: NavController) {
                         )
                     } catch (e: Exception) {
                         // Revert visual state on error
-                        visualQueueItems = queueItems.value.toList()
+                        visualQueueItems = queueItems.toList()
                         
                         snackbarHostState.showSnackbar(
                             message = "Failed to move track: ${e.message}",
@@ -262,7 +273,7 @@ fun QueueScreen(navController: NavController) {
                 }
             } else {
                 isDragging = false
-                visualQueueItems = queueItems.value.toList()
+                visualQueueItems = queueItems.toList()
             }
         }
     )
@@ -340,6 +351,7 @@ fun QueueScreen(navController: NavController) {
                         state = state.listState,
                         modifier = Modifier
                             .fillMaxSize()
+                            .graphicsLayer { clip = false }
                             .reorderable(state),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -356,7 +368,7 @@ fun QueueScreen(navController: NavController) {
                     }
                     itemsIndexed(
                         visualQueueItems, // Use visual queue for display
-                        key = { _, item -> "queue_${item.id}" }
+                        key = { _, item -> "queue_${item.id}_${item.addedAt}" }
                     ) { idx, queueItem ->
                         // Try to get the full track data from repository first to ensure we have pre-extracted artwork
                         val track = repo.getTrackByMediaId(queueItem.mediaItem.mediaId) ?: queueItem.toTrack()
@@ -434,8 +446,8 @@ fun QueueScreen(navController: NavController) {
                                 EnhancedSwipeBackground(dismissState.dismissDirection)
                             },
                             dismissContent = {
-                                ReorderableItem(state, key = "queue_${queueItem.id}") { isDragging ->
-                                    val itemKey = "queue_${queueItem.id}"
+                                ReorderableItem(state, key = "queue_${queueItem.id}_${queueItem.addedAt}") { isDragging ->
+                                    val itemKey = "queue_${queueItem.id}_${queueItem.addedAt}"
                                     if (isDragging) {
                                         dragOverlayKey = itemKey
                                         dragOverlayTrack = track
@@ -459,7 +471,8 @@ fun QueueScreen(navController: NavController) {
                                         reorderState = state,
                                         config = dragConfig,
                                         modifier = Modifier
-                                            .zIndex(if (isDragging) 2f else 0f)
+                                            .zIndex(if (isDragging) 10f else 0f)
+                                            .graphicsLayer { clip = false }
                                             .onGloballyPositioned { coordinates ->
                                                 itemBounds[itemKey] = coordinates.boundsInRoot()
                                             }
@@ -496,7 +509,8 @@ fun QueueScreen(navController: NavController) {
                                     .offset(x = xDp, y = yDp)
                                     .width(wDp)
                                     .height(hDp)
-                                    .zIndex(10f)
+                                    .zIndex(100f)
+                                    .graphicsLayer { clip = false }
                             ) {
                                 EnhancedQueueTrackItem(
                                     track = overlayTrack,

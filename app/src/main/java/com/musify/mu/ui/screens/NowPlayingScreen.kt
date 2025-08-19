@@ -57,6 +57,7 @@ fun NowPlayingScreen(navController: NavController) {
     var progress by remember { mutableStateOf(0f) }
     var duration by remember { mutableStateOf(0L) }
     var isLiked by remember { mutableStateOf(false) }
+    var userSeeking by remember { mutableStateOf(false) }
     
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
@@ -218,16 +219,16 @@ fun NowPlayingScreen(navController: NavController) {
             
             mediaController.addListener(listener)
             
-            // Continuous progress updates - use ticker for smoother updates
+            // Continuous progress updates - pause updates while user is seeking
             launch {
                 while (true) {
                     try {
-                        if (mediaController.isPlaying) {
-                            val currentPos = mediaController.currentPosition
-                            val dur = mediaController.duration
-                            if (dur > 0) {
+                        val currentPos = mediaController.currentPosition
+                        val dur = mediaController.duration
+                        if (dur > 0) {
+                            duration = dur
+                            if (!userSeeking) {
                                 progress = (currentPos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
-                                duration = dur
                             }
                         }
                         // Update every 150ms to reduce main-thread churn without visible regression
@@ -409,101 +410,59 @@ fun NowPlayingScreen(navController: NavController) {
                 
                 Spacer(modifier = Modifier.height(32.dp))
                 
-                // Song info
+                // Song info (fixed height to avoid control panel shifting)
                 currentTrack?.let { track ->
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = track.title,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 28.sp
-                            ),
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Text(
-                            text = track.artist,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White.copy(alpha = 0.8f),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = track.title,
+                                style = MaterialTheme.typography.headlineMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 28.sp
+                                ),
+                                color = Color.White,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            
+                            Spacer(modifier = Modifier.height(8.dp))
+                            
+                            Text(
+                                text = track.artist,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White.copy(alpha = 0.8f),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }
-            
-            // Player controls section
+
+            // Add spacing so the control panel sits lower and doesn't shift with title height
+            Spacer(modifier = Modifier.height(44.dp))
+
+            // Player controls section - merged glass panel with thin seek bar inside
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Progress bar
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                ) {
-                    // Seekable progress bar
-                    Slider(
-                        value = progress,
-                        onValueChange = { newProgress ->
-                            progress = newProgress
-                        },
-                        onValueChangeFinished = {
-                            // Seek to the new position
-                            controller?.let { mediaController ->
-                                if (mediaController.duration > 0) {
-                                    val seekPosition = (progress * mediaController.duration).toLong()
-                                    mediaController.seekTo(seekPosition)
-                                }
-                            }
-                        },
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.White,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.3f)
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    // Time indicators
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = formatDuration((progress * duration).toLong()),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.8f)
-                        )
-                        
-                        Text(
-                            text = formatDuration(duration),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.8f)
-                        )
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(24.dp))
-                
-                // Control panel
+                // Unified glass panel
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(100.dp)
+                        .height(206.dp)
                         .clip(RoundedCornerShape(25.dp))
                         .background(
                             brush = Brush.verticalGradient(
@@ -524,13 +483,62 @@ fun NowPlayingScreen(navController: NavController) {
                             shape = RoundedCornerShape(25.dp)
                         )
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 32.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        // Thin seek bar inside panel
+                        Slider(
+                            value = progress,
+                            onValueChange = { newProgress ->
+                                userSeeking = true
+                                progress = newProgress
+                            },
+                            onValueChangeFinished = {
+                                controller?.let { c ->
+                                    if (c.duration > 0) c.seekTo((progress * c.duration).toLong())
+                                }
+                                userSeeking = false
+                            },
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White.copy(alpha = 0.9f),
+                                activeTrackColor = Color.White,
+                                inactiveTrackColor = Color.White.copy(alpha = 0.25f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(24.dp)
+                        )
+
+                        // Time row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = formatDuration((progress * duration).toLong()),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                            Text(
+                                text = formatDuration(duration),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // Controls row
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                         // Shuffle
                         IconButton(
                             onClick = {
@@ -645,91 +653,43 @@ fun NowPlayingScreen(navController: NavController) {
                                 modifier = Modifier.size(24.dp)
                             )
                         }
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // Bottom action buttons - pill shaped with requested layout
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                ) {
-                    // Pill-shaped container
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(60.dp)
-                            .clip(RoundedCornerShape(30.dp))
-                            .background(
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.White.copy(alpha = 0.15f),
-                                        Color.White.copy(alpha = 0.08f)
-                                    )
-                                )
-                            )
-                            .border(
-                                width = 1.dp,
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.White.copy(alpha = 0.3f),
-                                        Color.White.copy(alpha = 0.1f)
-                                    )
-                                ),
-                                shape = RoundedCornerShape(30.dp)
-                            )
-                    ) {
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+
+                        // Actions directly inside the glass panel (no pill)
                         Row(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 20.dp),
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Share button (left)
-                            IconButton(
-                                onClick = { /* Share song */ },
-                                modifier = Modifier.size(40.dp)
-                            ) {
+                            IconButton(onClick = { /* Share song */ }) {
                                 Icon(
                                     imageVector = Icons.Rounded.Share,
                                     contentDescription = "Share",
-                                    tint = Color.White.copy(alpha = 0.8f),
-                                    modifier = Modifier.size(22.dp)
+                                    tint = Color.White.copy(alpha = 0.85f)
                                 )
                             }
-                            
-                            // Queue button (center)
-                            IconButton(
-                                onClick = { navController.navigate(Screen.Queue.route) },
-                                modifier = Modifier.size(40.dp)
-                            ) {
+                            IconButton(onClick = { navController.navigate(Screen.Queue.route) }) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                                     contentDescription = "Queue",
-                                    tint = Color.White.copy(alpha = 0.8f),
-                                    modifier = Modifier.size(22.dp)
+                                    tint = Color.White.copy(alpha = 0.85f)
                                 )
                             }
-                            
-                            // Like button (right)
-                            IconButton(
-                                onClick = {
-                                    val t = currentTrack ?: return@IconButton
-                                    coroutineScope.launch {
-                                        if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
-                                        isLiked = !isLiked
-                                    }
-                                },
-                                modifier = Modifier.size(40.dp)
-                            ) {
+                            IconButton(onClick = {
+                                val t = currentTrack ?: return@IconButton
+                                coroutineScope.launch {
+                                    if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
+                                    isLiked = !isLiked
+                                }
+                            }) {
                                 Icon(
                                     imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                                     contentDescription = if (isLiked) "Unlike" else "Like",
-                                    tint = if (isLiked) vibrantTransition.value else Color.White.copy(alpha = 0.8f),
-                                    modifier = Modifier.size(22.dp)
+                                    tint = if (isLiked) vibrantTransition.value else Color.White.copy(alpha = 0.85f)
                                 )
                             }
                         }

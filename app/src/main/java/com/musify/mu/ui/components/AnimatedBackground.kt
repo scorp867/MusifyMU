@@ -22,8 +22,9 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Animated background component that reacts to music
- * Supports different animation styles: waves, particles, pulse
+ * Animated background component that reacts to music.
+ * Supports styles: waves, particles, pulse, neon_grid, orbit_rings.
+ * All animations pause when not playing and resume from the last state.
  */
 @Composable
 fun AnimatedBackground(
@@ -45,6 +46,28 @@ fun AnimatedBackground(
             "waves" -> WaveAnimation(isPlaying, primaryColor, secondaryColor)
             "particles" -> ParticleAnimation(isPlaying, primaryColor, secondaryColor)
             "pulse" -> PulseAnimation(isPlaying, primaryColor, secondaryColor)
+            "neon_grid" -> NeonGridAnimation(isPlaying, primaryColor, secondaryColor)
+            "orbit_rings" -> OrbitRingsAnimation(isPlaying, primaryColor, secondaryColor)
+            else -> WaveAnimation(isPlaying, primaryColor, secondaryColor)
+        }
+    }
+}
+
+@Composable
+fun AnimatedBackgroundPreview(
+    styleKey: String,
+    isPlaying: Boolean,
+    primaryColor: Color,
+    secondaryColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier) {
+        when (styleKey) {
+            "waves" -> WaveAnimation(isPlaying, primaryColor, secondaryColor)
+            "particles" -> ParticleAnimation(isPlaying, primaryColor, secondaryColor)
+            "pulse" -> PulseAnimation(isPlaying, primaryColor, secondaryColor)
+            "neon_grid" -> NeonGridAnimation(isPlaying, primaryColor, secondaryColor)
+            "orbit_rings" -> OrbitRingsAnimation(isPlaying, primaryColor, secondaryColor)
             else -> WaveAnimation(isPlaying, primaryColor, secondaryColor)
         }
     }
@@ -57,32 +80,28 @@ private fun WaveAnimation(
     secondaryColor: Color,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "wave")
-    
-    // Animation speed depends on whether music is playing
-    val speed = if (isPlaying) 1500 else 3000
-    
-    // Animate wave phase
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 2 * PI.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(speed, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "phase"
-    )
-    
-    // Animate wave amplitude
-    val amplitude by infiniteTransition.animateFloat(
-        initialValue = if (isPlaying) 25f else 15f,
-        targetValue = if (isPlaying) 40f else 20f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(speed, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "amplitude"
-    )
+    var phase by remember { mutableStateOf(0f) }
+    var amplitude by remember { mutableStateOf(25f) }
+    var ampIncreasing by remember { mutableStateOf(true) }
+    val playing by rememberUpdatedState(isPlaying)
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (playing) {
+                // Advance phase and amplitude without resetting when paused
+                phase = (phase + 0.08f) % (2 * PI.toFloat())
+                val minAmp = 15f
+                val maxAmp = 40f
+                val delta = 0.6f
+                amplitude = (if (ampIncreasing) amplitude + delta else amplitude - delta)
+                    .coerceIn(minAmp, maxAmp)
+                if (amplitude <= minAmp + 0.1f) ampIncreasing = true
+                if (amplitude >= maxAmp - 0.1f) ampIncreasing = false
+            }
+            // ~60 FPS when playing, slower idle otherwise
+            kotlinx.coroutines.delay(if (playing) 16L else 50L)
+        }
+    }
     
     Canvas(modifier = modifier.fillMaxSize()) {
         val width = size.width
@@ -181,19 +200,16 @@ private fun ParticleAnimation(
         }
     }
     
-    // Animation speed depends on whether music is playing
-    val speed = if (isPlaying) 3000 else 6000
-    
-    val infiniteTransition = rememberInfiniteTransition(label = "particles")
-    val progress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(speed, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "progress"
-    )
+    var progress by remember { mutableStateOf(0f) }
+    val playing by rememberUpdatedState(isPlaying)
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (playing) {
+                progress = (progress + 0.004f) % 1f
+            }
+            kotlinx.coroutines.delay(if (playing) 16L else 50L)
+        }
+    }
     
     Canvas(modifier = modifier.fillMaxSize()) {
         val width = size.width
@@ -220,21 +236,20 @@ private fun PulseAnimation(
     secondaryColor: Color,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    
-    // Animation speed depends on whether music is playing
-    val speed = if (isPlaying) 800 else 2000
-    
-    // Animate pulse scale
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(speed, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "scale"
-    )
+    var scale by remember { mutableStateOf(0f) }
+    var forward by remember { mutableStateOf(true) }
+    val playing by rememberUpdatedState(isPlaying)
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (playing) {
+                val delta = 0.02f
+                scale = (if (forward) scale + delta else scale - delta).coerceIn(0f, 1f)
+                if (scale <= 0.01f) forward = true
+                if (scale >= 0.99f) forward = false
+            }
+            kotlinx.coroutines.delay(if (playing) 16L else 50L)
+        }
+    }
     
     Canvas(modifier = modifier.fillMaxSize()) {
         val width = size.width
@@ -252,6 +267,112 @@ private fun PulseAnimation(
                 radius = radius,
                 center = center,
                 style = Stroke(width = 4.dp.toPx())
+            )
+        }
+    }
+}
+
+@Composable
+private fun NeonGridAnimation(
+    isPlaying: Boolean,
+    primaryColor: Color,
+    secondaryColor: Color,
+    modifier: Modifier = Modifier
+) {
+    var t by remember { mutableStateOf(0f) }
+    val playing by rememberUpdatedState(isPlaying)
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (playing) t = (t + 1f) % 10000f
+            kotlinx.coroutines.delay(if (playing) 16L else 50L)
+        }
+    }
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        val cell = (minOf(w, h) / 10f).coerceAtLeast(40f)
+        val offset = (t % cell)
+        val base = primaryColor.copy(alpha = 0.10f)
+        val glow = secondaryColor.copy(alpha = 0.18f)
+
+        // Vertical lines
+        var x = -cell + offset
+        while (x < w + cell) {
+            drawLine(
+                color = base,
+                start = Offset(x, 0f),
+                end = Offset(x, h),
+                strokeWidth = 1.5f
+            )
+            // subtle glow
+            drawLine(
+                color = glow,
+                start = Offset(x + 2f, 0f),
+                end = Offset(x + 2f, h),
+                strokeWidth = 1f
+            )
+            x += cell
+        }
+
+        // Horizontal lines
+        var y = -cell + offset
+        while (y < h + cell) {
+            drawLine(
+                color = base,
+                start = Offset(0f, y),
+                end = Offset(w, y),
+                strokeWidth = 1.5f
+            )
+            drawLine(
+                color = glow,
+                start = Offset(0f, y + 2f),
+                end = Offset(w, y + 2f),
+                strokeWidth = 1f
+            )
+            y += cell
+        }
+    }
+}
+
+@Composable
+private fun OrbitRingsAnimation(
+    isPlaying: Boolean,
+    primaryColor: Color,
+    secondaryColor: Color,
+    modifier: Modifier = Modifier
+) {
+    var t by remember { mutableStateOf(0f) }
+    val playing by rememberUpdatedState(isPlaying)
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (playing) t += 0.02f
+            kotlinx.coroutines.delay(if (playing) 16L else 50L)
+        }
+    }
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        val c = Offset(w / 2f, h / 2f)
+        val numRings = 4
+        val maxR = minOf(w, h) * 0.45f
+        val ringStroke = 2.dp.toPx()
+
+        for (i in 0 until numRings) {
+            val r = maxR * (0.35f + i / (numRings.toFloat()))
+            val color = if (i % 2 == 0) primaryColor.copy(alpha = 0.18f) else secondaryColor.copy(alpha = 0.18f)
+            // ring
+            drawCircle(color = color, radius = r, center = c, style = Stroke(width = ringStroke))
+
+            // moving node along the ring
+            val angle = t * (0.8f + 0.2f * i) + i * 1.2f
+            val px = c.x + r * kotlin.math.cos(angle)
+            val py = c.y + r * kotlin.math.sin(angle)
+            drawCircle(
+                color = color.copy(alpha = 0.5f),
+                radius = 4.dp.toPx(),
+                center = Offset(px, py)
             )
         }
     }
