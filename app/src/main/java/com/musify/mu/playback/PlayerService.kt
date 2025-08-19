@@ -79,7 +79,12 @@ class PlayerService : MediaLibraryService() {
                         val finishedMediaId = currentMediaIdCache
                         if (finishedMediaId != null) {
                             serviceScope.launch(Dispatchers.Main) {
-                                try { queue.removeFirstPlayNextByMediaId(finishedMediaId) } catch (_: Exception) { }
+                                try {
+                                    val removed = queue.consumePlayNextHeadIfMatches(finishedMediaId)
+                                    if (removed) {
+                                        queueStateStore.decrementOnAdvance()
+                                    }
+                                } catch (_: Exception) { }
                             }
                         }
                     }
@@ -119,7 +124,7 @@ class PlayerService : MediaLibraryService() {
             serviceScope.launch(Dispatchers.Main) {
                 try {
                     queue.setQueue(
-                        items = prevItems,
+                        items = prevItems.toMutableList(),
                         startIndex = prevIndex.coerceAtLeast(0),
                         play = false,
                         startPosMs = 0L,
@@ -321,7 +326,7 @@ class PlayerService : MediaLibraryService() {
                 if (items.isNotEmpty()) {
                     val validStartIndex = startIndex.coerceIn(0, items.size - 1)
                     val validStartPos = if (startPos > 0L) startPos else 0L
-                    serviceScope.launch { queue.setQueue(items, validStartIndex, play = true, startPosMs = validStartPos) }
+                    serviceScope.launch { queue.setQueue(items.toMutableList(), validStartIndex, play = true, startPosMs = validStartPos) }
                     hasValidMedia = true
                 }
             } catch (e: Exception) {

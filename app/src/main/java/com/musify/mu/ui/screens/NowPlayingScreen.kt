@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.media3.common.Player
 import androidx.navigation.NavController
 import androidx.palette.graphics.Palette
@@ -34,6 +35,7 @@ import coil.ImageLoader
 import coil.request.ImageRequest
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
+import com.musify.mu.util.toMediaItem
 import com.musify.mu.util.toTrack
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
@@ -43,7 +45,30 @@ import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.AnimatedBackground
 import com.musify.mu.ui.components.EnhancedLyricsView
 import com.musify.mu.ui.navigation.Screen
+import org.burnoutcrew.reorderable.rememberReorderableLazyListState
+import org.burnoutcrew.reorderable.reorderable
+import org.burnoutcrew.reorderable.ReorderableItem
+import org.burnoutcrew.reorderable.detectReorderAfterLongPress
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.ExperimentalFoundationApi
+import com.musify.mu.playback.rememberQueueState
+import com.musify.mu.playback.rememberQueueOperations
+import com.musify.mu.playback.rememberCurrentItem
+import com.musify.mu.playback.QueueContextHelper
+import com.musify.mu.playback.QueueManager
+import androidx.compose.material.DismissDirection
+import androidx.compose.material.DismissValue
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
+    ExperimentalMaterialApi::class
+)
 @Composable
 fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
@@ -223,10 +248,10 @@ fun NowPlayingScreen(navController: NavController) {
             launch {
                 while (true) {
                     try {
-                        val currentPos = mediaController.currentPosition
-                        val dur = mediaController.duration
-                        if (dur > 0) {
-                            duration = dur
+                            val currentPos = mediaController.currentPosition
+                            val dur = mediaController.duration
+                            if (dur > 0) {
+                                duration = dur
                             if (!userSeeking) {
                                 progress = (currentPos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
                             }
@@ -250,6 +275,12 @@ fun NowPlayingScreen(navController: NavController) {
             vibrantTransition.value.copy(alpha = 0.2f)
         )
     )
+
+    var showQueue by remember { mutableStateOf(false) }
+    LaunchedEffect(showQueue) {
+        if (showQueue) android.util.Log.d("QueueScreenDBG", "Queue modal opened")
+        else android.util.Log.d("QueueScreenDBG", "Queue modal closed")
+    }
 
     Box(
         modifier = Modifier
@@ -418,36 +449,36 @@ fun NowPlayingScreen(navController: NavController) {
                             .height(120.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = track.title,
-                                style = MaterialTheme.typography.headlineMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 28.sp
-                                ),
-                                color = Color.White,
-                                textAlign = TextAlign.Center,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            
-                            Spacer(modifier = Modifier.height(8.dp))
-                            
-                            Text(
-                                text = track.artist,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color.White.copy(alpha = 0.8f),
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = track.title,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 28.sp
+                            ),
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            text = track.artist,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color.White.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         }
                     }
                 }
             }
-
+            
             // Add spacing so the control panel sits lower and doesn't shift with title height
             Spacer(modifier = Modifier.height(44.dp))
 
@@ -490,55 +521,55 @@ fun NowPlayingScreen(navController: NavController) {
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         // Thin seek bar inside panel
-                        Slider(
-                            value = progress,
-                            onValueChange = { newProgress ->
+                    Slider(
+                        value = progress,
+                        onValueChange = { newProgress ->
                                 userSeeking = true
-                                progress = newProgress
-                            },
-                            onValueChangeFinished = {
+                            progress = newProgress
+                        },
+                        onValueChangeFinished = {
                                 controller?.let { c ->
                                     if (c.duration > 0) c.seekTo((progress * c.duration).toLong())
                                 }
                                 userSeeking = false
-                            },
-                            colors = SliderDefaults.colors(
+                        },
+                        colors = SliderDefaults.colors(
                                 thumbColor = Color.White.copy(alpha = 0.9f),
-                                activeTrackColor = Color.White,
+                            activeTrackColor = Color.White,
                                 inactiveTrackColor = Color.White.copy(alpha = 0.25f)
-                            ),
+                        ),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(24.dp)
-                        )
-
+                    )
+                    
                         // Time row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = formatDuration((progress * duration).toLong()),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.8f)
-                            )
-                            Text(
-                                text = formatDuration(duration),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.8f)
-                            )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = formatDuration((progress * duration).toLong()),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                        Text(
+                            text = formatDuration(duration),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
                         }
 
                         Spacer(Modifier.height(8.dp))
 
                         // Controls row
-                        Row(
-                            modifier = Modifier
+                    Row(
+                        modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         // Shuffle
                         IconButton(
                             onClick = {
@@ -672,7 +703,7 @@ fun NowPlayingScreen(navController: NavController) {
                                     tint = Color.White.copy(alpha = 0.85f)
                                 )
                             }
-                            IconButton(onClick = { navController.navigate(Screen.Queue.route) }) {
+                            IconButton(onClick = { showQueue = true }) {
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                                     contentDescription = "Queue",
@@ -680,11 +711,11 @@ fun NowPlayingScreen(navController: NavController) {
                                 )
                             }
                             IconButton(onClick = {
-                                val t = currentTrack ?: return@IconButton
-                                coroutineScope.launch {
-                                    if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
-                                    isLiked = !isLiked
-                                }
+                                    val t = currentTrack ?: return@IconButton
+                                    coroutineScope.launch {
+                                        if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
+                                        isLiked = !isLiked
+                                    }
                             }) {
                                 Icon(
                                     imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
@@ -753,6 +784,306 @@ fun NowPlayingScreen(navController: NavController) {
             
             // Add space at bottom to ensure scrolling works properly
             Spacer(modifier = Modifier.height(100.dp))
+        }
+        if (showQueue) {
+            val queueOps = com.musify.mu.playback.rememberQueueOperations()
+            ModalBottomSheet(
+                onDismissRequest = { showQueue = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false),
+                containerColor = MaterialTheme.colorScheme.surface,
+                dragHandle = { BottomSheetDefaults.DragHandle() }
+            ) {
+                // Sticky header with now playing and play/pause
+                val currentQueueItem = controller?.currentMediaItem
+                val t = currentQueueItem?.let { repo.getTrackByMediaId(it.mediaId) ?: it.toTrack() }
+                // Prepare visual list and drag handlers
+                val qState by rememberQueueState()
+                fun mapVisualToCombinedIndex(visualIndex: Int): Int {
+                    val pn = qState.playNextCount
+                    val cur = qState.currentIndex
+                    return if (visualIndex < pn) cur + 1 + visualIndex else cur + 1 + pn + (visualIndex - pn)
+                }
+                // Derive visible list from model so it always reflects current song and play-next
+                val baseVisible = remember(qState.currentIndex, qState.playNextCount, qState.totalItems, controller?.currentMediaItem?.mediaId) {
+                    queueOps.getVisibleQueue()
+                }
+                // Keep local visual list stable while dragging to avoid jank
+                var isDraggingLocal by remember { mutableStateOf(false) }
+                var dragVisual by remember { mutableStateOf(baseVisible) }
+                var currentDraggedId by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(baseVisible) {
+                    if (!isDraggingLocal) dragVisual = baseVisible
+                }
+                val reorderState = rememberReorderableLazyListState(
+                    onMove = { from, to ->
+                        isDraggingLocal = true
+                        android.util.Log.d(
+                            "QueueScreenDBG",
+                            "NP:onMove from=${from.index} to=${to.index} beforeSize=${dragVisual.size}"
+                        )
+                        val list = dragVisual.toMutableList()
+                        if (from.index in list.indices) {
+                            val item = list.removeAt(from.index)
+                            val insertIndex = to.index.coerceIn(0, list.size)
+                            list.add(insertIndex, item)
+                            dragVisual = list
+                        }
+                    },
+                    onDragEnd = { from, to ->
+                        // Resolve dragged item by ID using tracked dragged id; fallback to target index
+                        val clampedTo = to.coerceIn(0, (dragVisual.size - 1).coerceAtLeast(0))
+                        val dragged = currentDraggedId?.let { id -> dragVisual.find { it.id == id } } ?: dragVisual.getOrNull(clampedTo)
+                        android.util.Log.d(
+                            "QueueScreenDBG",
+                            "NP:onDragEnd commit fromVisual=$from toVisual=$to dropClamped=$clampedTo draggedId=${dragged?.id}"
+                        )
+                        coroutineScope.launch {
+                            try {
+                                val snapBefore = queueOps.getQueueSnapshot()
+                                val visibleBefore = queueOps.getVisibleQueue()
+                                val combinedIndices = visibleBefore.map { v -> snapBefore.indexOfFirst { it.id == v.id } }
+                                val lastCombined = (snapBefore.size - 1).coerceAtLeast(0)
+                                val targetCombinedRaw = combinedIndices.getOrElse(clampedTo) { (combinedIndices.lastOrNull() ?: lastCombined).coerceAtMost(lastCombined) }
+                                val targetCombined = targetCombinedRaw.coerceIn(0, lastCombined)
+
+                                val fromItem = dragged?.let { d -> snapBefore.find { it.id == d.id } }
+                                if (fromItem != null) {
+                                    val fromCombined = snapBefore.indexOfFirst { it.id == fromItem.id }
+                                    val pnIndices = snapBefore.withIndex()
+                                        .filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }
+                                        .map { it.index }
+                                    val userIndices = snapBefore.withIndex()
+                                        .filter { it.value.source == QueueManager.QueueSource.USER_QUEUE }
+                                        .map { it.index }
+                                    val hasPn = pnIndices.isNotEmpty()
+                                    val pnStart = if (hasPn) pnIndices.first() else -1
+                                    val pnEndExclusive = if (hasPn) pnIndices.last() + 1 else -1
+                                    val hasUser = userIndices.isNotEmpty()
+                                    val userStart = if (hasUser) userIndices.first() else -1
+                                    val userEndExclusive = if (hasUser) userIndices.last() + 1 else -1
+                                    val droppingIntoPlayNext = hasPn && targetCombined in pnStart until pnEndExclusive
+                                    val droppingIntoUser = hasUser && targetCombined in userStart until userEndExclusive
+
+                                    if (fromItem.source != QueueManager.QueueSource.PLAY_NEXT && droppingIntoPlayNext) {
+                                        // Main -> Play Next
+                                        android.util.Log.d("QueueScreenDBG", "NP: moving ${fromItem.id} Main->PlayNext target=$targetCombined")
+                                        queueOps.removeItemById(fromItem.id)
+                                        queueOps.playNextWithContext(items = listOf(fromItem.mediaItem), context = fromItem.context)
+                                        val snap2 = queueOps.getQueueSnapshot()
+                                        val pn2 = snap2.withIndex().filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }.map { it.index }
+                                        if (pn2.isNotEmpty()) {
+                                            val pnStart2 = pn2.first()
+                                            val pnEnd2 = pn2.last() + 1
+                                            val appendedIdx = snap2.indexOfLast { it.source == QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
+                                            if (appendedIdx >= 0) {
+                                                val desired = targetCombined.coerceIn(pnStart2, pnEnd2 - 1)
+                                                if (appendedIdx != desired) queueOps.moveItem(appendedIdx, desired)
+                                            }
+                                        }
+                                    } else if (fromItem.source != QueueManager.QueueSource.USER_QUEUE && droppingIntoUser) {
+                                        // Main or PN -> User Queue
+                                        android.util.Log.d("QueueScreenDBG", "NP: moving ${fromItem.id} ->UserQueue target=$targetCombined")
+                                        queueOps.removeItemById(fromItem.id)
+                                        val ctx = qState.context ?: QueueContextHelper.createSearchContext("drag_to_userqueue")
+                                        queueOps.addToUserQueueWithContext(items = listOf(fromItem.mediaItem), context = ctx)
+                                        val snapU = queueOps.getQueueSnapshot()
+                                        val uIdxs = snapU.withIndex().filter { it.value.source == QueueManager.QueueSource.USER_QUEUE }.map { it.index }
+                                        if (uIdxs.isNotEmpty()) {
+                                            val uStart = uIdxs.first()
+                                            val uEnd = uIdxs.last() + 1
+                                            val appended = snapU.indexOfLast { it.source == QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
+                                            if (appended >= 0) {
+                                                val desired = targetCombined.coerceIn(uStart, uEnd - 1)
+                                                if (appended != desired) queueOps.moveItem(appended, desired)
+                                            }
+                                        }
+                                    } else if (fromItem.source == QueueManager.QueueSource.PLAY_NEXT && !(hasPn && targetCombined in pnStart until pnEndExclusive)) {
+                                        // Play Next -> Main
+                                        android.util.Log.d("QueueScreenDBG", "NP: moving ${fromItem.id} PlayNext->Main target=$targetCombined")
+                                        queueOps.removeItemById(fromItem.id)
+                                        var snap3 = queueOps.getQueueSnapshot()
+                                        var mainIdx = snap3.indexOfFirst { it.source != QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
+                                        if (mainIdx < 0) {
+                                            queueOps.addToEndWithContext(items = listOf(fromItem.mediaItem), context = fromItem.context)
+                                            snap3 = queueOps.getQueueSnapshot()
+                                            mainIdx = snap3.indexOfLast { it.source != QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
+                                        }
+                                        val pn3 = snap3.withIndex().filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }.map { it.index }
+                                        val pnEnd3 = if (pn3.isNotEmpty()) pn3.last() + 1 else 0
+                                        var desired = targetCombined
+                                        if (pn3.isNotEmpty() && desired in (pn3.first() until pnEnd3)) desired = pnEnd3
+                                        if (mainIdx >= 0 && mainIdx != desired) queueOps.moveItem(mainIdx, desired)
+                                    } else if (fromItem.source == QueueManager.QueueSource.USER_QUEUE && !(hasUser && targetCombined in userStart until userEndExclusive)) {
+                                        // User Queue -> Main (adjust if landing inside PN segment)
+                                        android.util.Log.d("QueueScreenDBG", "NP: moving ${fromItem.id} UserQueue->Main target=$targetCombined")
+                                        queueOps.removeItemById(fromItem.id)
+                                        var snapM = queueOps.getQueueSnapshot()
+                                        var mainIdx = snapM.indexOfFirst { it.source != QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
+                                        if (mainIdx < 0) {
+                                            queueOps.addToEndWithContext(items = listOf(fromItem.mediaItem), context = fromItem.context)
+                                            snapM = queueOps.getQueueSnapshot()
+                                            mainIdx = snapM.indexOfLast { it.source != QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
+                                        }
+                                        val pnM = snapM.withIndex().filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }.map { it.index }
+                                        val pnEndM = if (pnM.isNotEmpty()) pnM.last() + 1 else 0
+                                        var desired = targetCombined
+                                        if (pnM.isNotEmpty() && desired in (pnM.first() until pnEndM)) desired = pnEndM
+                                        if (mainIdx >= 0 && mainIdx != desired) queueOps.moveItem(mainIdx, desired)
+                                    } else {
+                                        // Intra segment move based on real combined indices
+                                        android.util.Log.d("QueueScreenDBG", "NP: moving within segment from=$fromCombined to=$targetCombined id=${fromItem.id}")
+                                        if (fromCombined != targetCombined) queueOps.moveItem(fromCombined, targetCombined)
+                                    }
+                                }
+                            } finally {
+                                // Reset drag list to model snapshot
+                                dragVisual = queueOps.getVisibleQueue()
+                                android.util.Log.d("QueueScreenDBG", "NP: after commit visibleSize=${dragVisual.size}")
+                                isDraggingLocal = false
+                                currentDraggedId = null
+                            }
+                        }
+                    }
+                )
+
+                LazyColumn(
+                    state = reorderState.listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .reorderable(reorderState),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    stickyHeader {
+                        if (t != null) {
+                            Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    com.musify.mu.ui.components.SimpleArtwork(
+                                        albumId = t.albumId,
+                                        trackUri = t.mediaId,
+                                        artUri = t.artUri,
+                                        modifier = Modifier.size(48.dp)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(t.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text("${t.artist} • ${t.album}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    IconButton(onClick = { if (isPlaying) controller?.pause() else controller?.play() }) {
+                                        Icon(imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, contentDescription = null)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Visible queue content from manager; recompute when queueState changes so
+                    // the list always shows only items after the current one
+                    itemsIndexed(dragVisual, key = { _, item -> "queue_${item.id}_${item.addedAt}" }) { idx, qi ->
+                        val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
+                        val dismissState = rememberDismissState(
+                            confirmStateChange = { value ->
+                                when (value) {
+                                    DismissValue.DismissedToEnd -> {
+                                        android.util.Log.d("QueueScreenDBG", "NP: swipe right (Play Next) id=${qi.id}")
+                                        val ctx = qState.context
+                                        // run in coroutine, and convert track to MediaItem
+                                        coroutineScope.launch {
+                                            queueOps.playNextWithContext(items = listOf(vt.toMediaItem()), context = ctx)
+                                            // refresh from model after commit
+                                            dragVisual = queueOps.getVisibleQueue()
+                                            android.util.Log.d("QueueScreenDBG", "NP: after swipe right visibleSize=${dragVisual.size}")
+                                        }
+                                        false
+                                    }
+                                    DismissValue.DismissedToStart -> {
+                                        android.util.Log.d("QueueScreenDBG", "NP: swipe left (Remove) id=${qi.id}")
+                                        coroutineScope.launch {
+                                            queueOps.removeItemById(qi.id)
+                                            dragVisual = queueOps.getVisibleQueue()
+                                            android.util.Log.d("QueueScreenDBG", "NP: after remove visibleSize=${dragVisual.size}")
+                                        }
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            }
+                        )
+                        ReorderableItem(reorderState, key = "queue_${qi.id}_${qi.addedAt}") { isDragging ->
+                            LaunchedEffect(isDragging) {
+                                if (isDragging) currentDraggedId = qi.id else if (currentDraggedId == qi.id) currentDraggedId = null
+                            }
+                            SwipeToDismiss(
+                                state = dismissState,
+                                directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
+                                background = {
+                                    val dir = dismissState.dismissDirection
+                                    val text = when (dir) {
+                                        DismissDirection.StartToEnd -> "Play Next"
+                                        DismissDirection.EndToStart -> "Remove"
+                                        else -> ""
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(56.dp)
+                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                                            .padding(horizontal = 16.dp),
+                                        contentAlignment = when (dir) {
+                                            DismissDirection.StartToEnd -> Alignment.CenterStart
+                                            DismissDirection.EndToStart -> Alignment.CenterEnd
+                                            else -> Alignment.Center
+                                        }
+                                    ) { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                },
+                                dismissContent = {
+                                    Box(
+                                        modifier = Modifier
+                                            .zIndex(if (isDragging) 1f else 0f)
+                                            .graphicsLayer { if (isDragging) alpha = 0f }
+                                    ) {
+                                        com.musify.mu.ui.components.CompactTrackRow(
+                                            title = vt.title,
+                                            subtitle = "${vt.artist} • ${vt.album}",
+                                            artData = vt.artUri,
+                                            contentDescription = vt.title,
+                                            isPlaying = (controller?.currentMediaItem?.mediaId == qi.mediaItem.mediaId),
+                                            onClick = {
+                                                val snap = queueOps.getQueueSnapshot()
+                                                val idxCombined = snap.indexOfFirst { it.mediaItem.mediaId == qi.mediaItem.mediaId }
+                                                if (idxCombined >= 0) {
+                                                    controller?.seekToDefaultPosition(idxCombined)
+                                                }
+                                            },
+                                            extraArtOverlay = {
+                                                if (qi.source == QueueManager.QueueSource.PLAY_NEXT) {
+                                                    Box(modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)) {
+                                                        Icon(
+                                                            imageVector = Icons.Rounded.PlayArrow,
+                                                            contentDescription = null,
+                                                            tint = MaterialTheme.colorScheme.tertiary,
+                                                            modifier = Modifier.size(14.dp)
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            trailingContent = {
+                                                IconButton(onClick = { }, modifier = Modifier.detectReorderAfterLongPress(reorderState)) {
+                                                    Icon(imageVector = Icons.Rounded.DragHandle, contentDescription = "Drag")
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

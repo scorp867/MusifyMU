@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
@@ -37,7 +38,8 @@ fun CompactTrackRow(
     modifier: Modifier = Modifier,
     trailingContent: (@Composable () -> Unit)? = null,
     showIndicator: Boolean = isPlaying,
-    useGlass: Boolean = true
+    useGlass: Boolean = true,
+    extraArtOverlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
     val pressed by remember { MutableInteractionSource() }.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.98f else 1f, spring(stiffness = Spring.StiffnessLow))
@@ -81,13 +83,16 @@ fun CompactTrackRow(
             contentDescription = contentDescription,
             modifier = Modifier.size(52.dp)
         ) {
-            if (showIndicator) {
-                Box(modifier = Modifier.matchParentSize()) {
+            Box(modifier = Modifier.matchParentSize()) {
+                if (showIndicator) {
                     PlayingIndicator(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(2.dp)
                     )
+                }
+                if (extraArtOverlay != null) {
+                    extraArtOverlay()
                 }
             }
         }

@@ -30,8 +30,16 @@ import org.burnoutcrew.reorderable.ItemPosition
  
 import android.content.ContentUris
 import android.provider.MediaStore
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
+import androidx.compose.material.DismissDirection
+import androidx.compose.material.DismissValue
+import androidx.compose.material.ExperimentalMaterialApi
+import com.musify.mu.playback.rememberQueueOperations
+import com.musify.mu.playback.QueueContextHelper
+import com.musify.mu.util.toMediaItem
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -39,6 +47,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var title by remember { mutableStateOf("Playlist") }
     val scope = rememberCoroutineScope()
+    val queueOps = rememberQueueOperations()
     var showPicker by remember { mutableStateOf(false) }
     var allTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
@@ -142,6 +151,30 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 var showMenu by remember { mutableStateOf(false) }
                 
                 ReorderableItem(reorderState, key = "playlist_${playlistId}_${track.mediaId}") { isDragging ->
+                    val dismissState = rememberDismissState(
+                        confirmStateChange = { value ->
+                            when (value) {
+                                DismissValue.DismissedToEnd -> {
+                                    // Right swipe: Play Next
+                                    val ctx = QueueContextHelper.createPlaylistContext(playlistId.toString(), title)
+                                    scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                                    false
+                                }
+                                DismissValue.DismissedToStart -> {
+                                    // Left swipe: Add to User Queue
+                                    val ctx = QueueContextHelper.createPlaylistContext(playlistId.toString(), title)
+                                    scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                                    false
+                                }
+                                else -> false
+                            }
+                        }
+                    )
+                    SwipeToDismiss(
+                        state = dismissState,
+                        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
+                        background = { com.musify.mu.ui.components.EnhancedSwipeBackground(dismissState.dismissDirection) },
+                        dismissContent = {
                     Card(
                         modifier = Modifier
                             .zIndex(if (isDragging) 1f else 0f)
@@ -243,6 +276,8 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                         }
                         }
                     }
+                        }
+                    )
                 }
             }
             }

@@ -53,6 +53,7 @@ import androidx.compose.material.DismissValue
 import androidx.compose.material.DismissDirection
 import android.content.ContentUris
 import android.provider.MediaStore
+import androidx.compose.material.ExperimentalMaterialApi
 
 enum class SortType {
     TITLE, ARTIST, ALBUM, DATE_ADDED
@@ -229,14 +230,13 @@ fun LibraryScreen(
                                             val context = QueueContextHelper.createSearchContext("library")
                                             
                                             if (addToEnd) {
-                                                // Use operation queue for non-blocking add to end
-                                                queueOperationsManager.queueAddItems(
+                                                // Add to User Queue (Add to next segment)
+                                                queueOperationsManager.addToUserQueueWithContext(
                                                     items = listOf(track.toMediaItem()),
-                                                    position = -1, // Add to end
                                                     context = context
                                                 )
                                             } else {
-                                                // Add to play next with context (immediate processing)
+                                                // Add to Priority Queue (Play Next)
                                                 queueOperationsManager.playNextWithContext(
                                                     items = listOf(track.toMediaItem()),
                                                     context = context
@@ -380,6 +380,7 @@ private fun LibraryHeader(
     }
 }
 
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 private fun TrackItem(
     track: Track,
@@ -409,6 +410,20 @@ private fun TrackItem(
         label = "containerColor"
     )
 
+    val dismissState = rememberDismissState(
+        confirmStateChange = { value ->
+            when (value) {
+                DismissValue.DismissedToEnd -> { onAddToQueue(false); false }
+                DismissValue.DismissedToStart -> { onAddToQueue(true); false }
+                else -> false
+            }
+        }
+    )
+    SwipeToDismiss(
+        state = dismissState,
+        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
+        background = { com.musify.mu.ui.components.EnhancedSwipeBackground(dismissState.dismissDirection) },
+        dismissContent = {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -568,6 +583,8 @@ private fun TrackItem(
             }
         }
     }
+        }
+    )
 }
 
 @Composable

@@ -23,8 +23,18 @@ import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
  
 import kotlinx.coroutines.launch
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
 
-@OptIn(ExperimentalMaterial3Api::class)
+import com.musify.mu.playback.rememberQueueOperations
+import com.musify.mu.util.toMediaItem
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
+import androidx.compose.material.DismissDirection
+import androidx.compose.material.DismissValue
+import androidx.compose.material.ExperimentalMaterialApi
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track>, Int) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -147,6 +157,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                 // Floating overlay removed per request
             }
         } else {
+            val queueOps = rememberQueueOperations()
+            val queueOpsScope = rememberCoroutineScope()
             LazyColumn(
                 modifier = Modifier
                     .padding(padding)
@@ -156,6 +168,30 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
             ) {
                 items(tracks.size) { idx ->
                     val track = tracks[idx]
+                    val dismissState = rememberDismissState(
+                        confirmStateChange = { value ->
+                            when (value) {
+                                DismissValue.DismissedToEnd -> {
+                                    // Right swipe: Play Next
+                                    val ctx = com.musify.mu.playback.QueueContextHelper.createDiscoverContext(type)
+                                    queueOpsScope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                                    false
+                                }
+                                DismissValue.DismissedToStart -> {
+                                    // Left swipe: Add to User Queue
+                                    val ctx = com.musify.mu.playback.QueueContextHelper.createDiscoverContext(type)
+                                    queueOpsScope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                                    false
+                                }
+                                else -> false
+                            }
+                        }
+                    )
+                    SwipeToDismiss(
+                        state = dismissState,
+                        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
+                        background = { com.musify.mu.ui.components.EnhancedSwipeBackground(dismissState.dismissDirection) },
+                        dismissContent = {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -171,6 +207,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                             onClick = { onPlay(tracks, idx) }
                         )
                     }
+                        }
+                    )
                 }
             }
         }

@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.musify.mu.data.db.entities.Track
 import org.burnoutcrew.reorderable.ReorderableLazyListState
+import org.burnoutcrew.reorderable.detectReorderAfterLongPress
 
 /**
  * Enhanced queue track item with optimized drag and drop animations
@@ -274,11 +275,19 @@ fun EnhancedQueueTrackItem(
             
             Spacer(modifier = Modifier.width(12.dp))
             
-            // Enhanced drag handle
-            EnhancedDragAndDrop.DragHandle(
-                isPressed = isDragging,
-                modifier = Modifier.padding(8.dp)
-            )
+            // Drag handle integrated with reorderable state (long-press to drag)
+            IconButton(
+                onClick = { },
+                modifier = Modifier
+                    .padding(8.dp)
+                    .detectReorderAfterLongPress(reorderState)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DragHandle,
+                    contentDescription = "Drag to reorder",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                )
+            }
         }
     }
 }

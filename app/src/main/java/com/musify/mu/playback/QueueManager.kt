@@ -29,12 +29,17 @@ import kotlin.random.Random
  * - Efficient queue operations with proper data structures
  */
 class QueueManager(private val player: ExoPlayer, private val queueState: QueueStateStore? = null) {
+    private val logTag = "QueueManagerDBG"
 
-    // Main queue using ArrayDeque for efficient operations
-    private val mainQueue = ArrayDeque<QueueItem>()
+    // Internal queues are maintained as MutableLists for reorderable operations
 
-    // Play-next queue for songs to be played immediately after current
-    private val playNextQueue = ArrayDeque<QueueItem>()
+    // Three-queue model
+    // - priorityList: Play Next (highest priority)
+    // - userList: User Queue (Add to next)
+    // - mainList: Main context queue (playlist/album/etc.)
+    private val mainList = mutableListOf<QueueItem>()
+    private val priorityList = mutableListOf<QueueItem>()
+    private val userList = mutableListOf<QueueItem>()
 
     // Fast lookup map for duplicate detection and quick access
     private val queueLookup = LinkedHashMap<String, QueueItem>()
@@ -92,7 +97,12 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     )
 
     enum class QueueSource {
-        USER_ADDED, PLAY_NEXT, ALBUM, PLAYLIST, LIKED_SONGS
+        USER_ADDED, // legacy main additions
+        PLAY_NEXT,  // priority queue
+        USER_QUEUE, // user queue (add to next)
+        ALBUM,
+        PLAYLIST,
+        LIKED_SONGS
     }
 
     data class PlayContext(
@@ -114,6 +124,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         val shuffleEnabled: Boolean = false,
         val repeatMode: Int = 0,
         val playNextCount: Int = 0,
+        val userQueueCount: Int = 0,
         val context: PlayContext? = null
     )
 
@@ -162,30 +173,33 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     private suspend fun executeOperation(operation: QueueOperation) = queueMutex.withLock {
         when (operation) {
             is QueueOperation.Add -> {
-                val position = if (operation.position == -1) mainQueue.size else operation.position
+                val position = if (operation.position == -1) mainList.size else operation.position
+                android.util.Log.d(logTag, "queueAdd op: items=${operation.items.size} at=$position before mainSize=${mainList.size}")
                 operation.items.forEachIndexed { index, item ->
-                    if (position + index <= mainQueue.size) {
-                        mainQueue.add(position + index, item)
-                        queueLookup[item.id] = item
-                        _queueChanges.postValue(QueueChangeEvent.ItemAdded(item, position + index))
-                    }
+                    val insertIndex = (position + index).coerceIn(0, mainList.size)
+                    mainList.add(insertIndex, item)
+                    queueLookup[item.id] = item
+                    _queueChanges.postValue(QueueChangeEvent.ItemAdded(item, insertIndex))
                 }
+                android.util.Log.d(logTag, "queueAdd op done: mainSize=${mainList.size} totalSize=${getQueueSize()}")
                 updateUIState()
             }
         }
     }
 
     suspend fun setQueue(
-        items: List<MediaItem>,
+        items: MutableList<MediaItem>,
         startIndex: Int = 0,
         play: Boolean = true,
         startPosMs: Long = 0L,
         context: PlayContext? = null
     ) = queueMutex.withLock {
         try {
+            android.util.Log.d(logTag, "setQueue start items=${items.size} startIndex=$startIndex context=$context")
             // Clear existing queue
-            mainQueue.clear()
-            playNextQueue.clear()
+            mainList.clear()
+            priorityList.clear()
+            userList.clear()
             queueLookup.clear()
             originalOrder.clear()
             shuffleHistory.clear()
@@ -218,9 +232,9 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                 )
             }
 
-            // Add to main queue and lookup
+            // Add to main list and lookup
             queueItems.forEach { item ->
-                mainQueue.addLast(item)
+                mainList.add(item)
                 queueLookup[item.id] = item
                 originalOrder.addLast(item.copy())
             }
@@ -230,6 +244,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             player.prepare()
 
             currentIndex = validStartIndex
+            android.util.Log.d(logTag, "setQueue prepared: main=${mainList.size} pri=${priorityList.size} user=${userList.size} currentIndex=$currentIndex")
 
             // Handle start position
             if (startPosMs > 0L) {
@@ -262,20 +277,25 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         }
     }
 
-    suspend fun addToEnd(items: List<MediaItem>, context: PlayContext? = null) = queueMutex.withLock {
+    /**
+     * Add items to the User Queue ("Add to next"). They will play after all priority items.
+     */
+    suspend fun addToUserQueue(items: MutableList<MediaItem>, context: PlayContext? = null) = queueMutex.withLock {
         try {
+            android.util.Log.d(logTag, "addToUserQueue start items=${items.size} context=$context before user=${userList.size}")
             val baseTime = System.currentTimeMillis()
             var offset = 0
             val queueItems = items.mapNotNull { mediaItem ->
                 // Prevent duplicates
                 if (queueLookup.containsKey(mediaItem.mediaId)) {
+                    android.util.Log.d(logTag, "addToUserQueue skip duplicate id=${mediaItem.mediaId}")
                     null
                 } else {
                     QueueItem(
                         mediaItem = mediaItem,
                         addedAt = baseTime + (offset++),
-                        position = mainQueue.size + playNextQueue.size,
-                        source = QueueSource.USER_ADDED,
+                        position = mainList.size + priorityList.size + userList.size,
+                        source = QueueSource.USER_QUEUE,
                         context = context ?: currentContext
                     )
                 }
@@ -283,25 +303,32 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
             if (queueItems.isEmpty()) return@withLock
 
-            // Add to main queue
+            // Add to user queue list (FIFO at end of user segment)
             queueItems.forEach { item ->
-                mainQueue.addLast(item)
+                userList.add(item)
                 queueLookup[item.id] = item
-                _queueChanges.postValue(QueueChangeEvent.ItemAdded(item, mainQueue.size - 1))
+                // Calculate visual insert position in combined timeline (after current + priority + existing user)
+                val insertIndex = (player.currentMediaItemIndex + 1 + priorityList.size + (userList.size - 1))
+                    .coerceAtMost(player.mediaItemCount)
+                // Insert in player timeline
+                player.addMediaItems(insertIndex, listOf(item.mediaItem))
+                _queueChanges.postValue(QueueChangeEvent.ItemAdded(item, insertIndex))
             }
 
-            // Add to player
-            player.addMediaItems(queueItems.map { it.mediaItem })
-
+            android.util.Log.d(logTag, "addToUserQueue done user=${userList.size} playerCount=${player.mediaItemCount}")
             updateUIState()
 
         } catch (e: Exception) {
-            android.util.Log.e("QueueManager", "Error adding to end", e)
+            android.util.Log.e("QueueManager", "Error adding to user queue", e)
         }
     }
 
-    suspend fun playNext(items: List<MediaItem>, context: PlayContext? = null) = queueMutex.withLock {
+    /**
+     * Add items to the Priority Queue (Play Next). They will play immediately after the current item.
+     */
+    suspend fun playNext(items: MutableList<MediaItem>, context: PlayContext? = null) = queueMutex.withLock {
         try {
+            android.util.Log.d(logTag, "playNext start items=${items.size} context=$context before pri=${priorityList.size}")
             val baseTime = System.currentTimeMillis()
             var offset = 0
             val queueItems = items.map { mediaItem ->
@@ -316,10 +343,10 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
             if (queueItems.isEmpty()) return@withLock
 
-            // Add to play-next queue FIFO
-            val existingPlayNext = playNextQueue.size
+            // Add to priority queue FIFO
+            val existingPlayNext = priorityList.size
             queueItems.forEach { item ->
-                playNextQueue.addLast(item)
+                priorityList.add(item)
                 queueLookup[item.id] = item
             }
 
@@ -337,6 +364,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             }
 
             updateUIState()
+            android.util.Log.d(logTag, "playNext done pri=${priorityList.size} playerCount=${player.mediaItemCount}")
 
         } catch (e: Exception) {
             android.util.Log.e("QueueManager", "Error adding play next", e)
@@ -345,9 +373,10 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     suspend fun move(from: Int, to: Int) = queueMutex.withLock {
         try {
+            android.util.Log.d(logTag, "move request from=$from to=$to total=${getQueueSize()}")
             if (from == to || from < 0 || to < 0) return@withLock
 
-            val totalSize = mainQueue.size + playNextQueue.size
+            val totalSize = mainList.size + priorityList.size + userList.size
             if (from >= totalSize || to >= totalSize) return@withLock
 
             // Get the combined queue for position calculations
@@ -372,6 +401,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                 // Notify UI
                 _queueChanges.postValue(QueueChangeEvent.ItemMoved(from, to, item))
                 updateUIState()
+                android.util.Log.d(logTag, "move done currentIndex=$currentIndex")
             }
 
         } catch (e: Exception) {
@@ -379,44 +409,51 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         }
     }
 
-    suspend fun removeAt(index: Int) = queueMutex.withLock {
-        try {
-            val combinedQueue = getCombinedQueue()
-            if (index < 0 || index >= combinedQueue.size) return@withLock
+    private fun removeAtInternal(index: Int): Boolean {
+        android.util.Log.d(logTag, "removeAtInternal index=$index total=${getQueueSize()}")
+        val combinedQueue = getCombinedQueue()
+        if (index < 0 || index >= combinedQueue.size) return false
 
-            val item = combinedQueue[index]
+        val item = combinedQueue[index]
 
-            // Remove from appropriate queue
-            when (item.source) {
-                QueueSource.PLAY_NEXT -> {
-                    playNextQueue.remove(item)
-                    queueState?.let { qs ->
-                        CoroutineScope(Dispatchers.IO).launch {
-                            val current = qs.getPlayNextCount()
-                            qs.setPlayNextCount((current - 1).coerceAtLeast(0))
-                        }
+        // Remove from appropriate queue
+        when (item.source) {
+            QueueSource.PLAY_NEXT -> {
+                priorityList.remove(item)
+                queueState?.let { qs ->
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val current = qs.getPlayNextCount()
+                        qs.setPlayNextCount((current - 1).coerceAtLeast(0))
                     }
                 }
-                else -> mainQueue.remove(item)
             }
+            QueueSource.USER_QUEUE -> userList.remove(item)
+            else -> mainList.remove(item)
+        }
 
-            // Remove from lookup
-            queueLookup.remove(item.id)
+        // Remove from lookup
+        queueLookup.remove(item.id)
 
-            // Remove from player
-            if (index < player.mediaItemCount) {
-                player.removeMediaItem(index)
-            }
+        // Remove from player
+        if (index < player.mediaItemCount) {
+            player.removeMediaItem(index)
+        }
 
-            // Update current index
-            if (index < currentIndex) {
-                currentIndex--
-            }
+        // Update current index
+        if (index < currentIndex) {
+            currentIndex--
+        }
 
-            // Notify UI
-            _queueChanges.postValue(QueueChangeEvent.ItemRemoved(item, index))
-            updateUIState()
+        // Notify UI
+        _queueChanges.postValue(QueueChangeEvent.ItemRemoved(item, index))
+        updateUIState()
+        android.util.Log.d(logTag, "removeAtInternal done removedSource=${item.source} currentIndex=$currentIndex")
+        return item.source == QueueSource.PLAY_NEXT
+    }
 
+    suspend fun removeAt(index: Int) = queueMutex.withLock {
+        try {
+            removeAtInternal(index)
         } catch (e: Exception) {
             android.util.Log.e("QueueManager", "Error removing item", e)
         }
@@ -424,24 +461,27 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     suspend fun clearQueue(keepCurrent: Boolean = false) = queueMutex.withLock {
         try {
+            android.util.Log.d(logTag, "clearQueue keepCurrent=$keepCurrent total=${getQueueSize()}")
             if (keepCurrent && currentIndex >= 0) {
                 val currentItem = getCombinedQueue().getOrNull(currentIndex)
 
                 // Clear everything
-                mainQueue.clear()
-                playNextQueue.clear()
+                mainList.clear()
+                priorityList.clear()
+                userList.clear()
                 queueLookup.clear()
 
                 // Keep only current item
                 currentItem?.let { item ->
-                    mainQueue.addLast(item)
+                    mainList.add(item)
                     queueLookup[item.id] = item
                 }
 
                 currentIndex = 0
             } else {
-                mainQueue.clear()
-                playNextQueue.clear()
+                mainList.clear()
+                priorityList.clear()
+                userList.clear()
                 queueLookup.clear()
                 currentIndex = 0
             }
@@ -509,7 +549,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         emptyList()
     }
 
-    fun getQueueSize(): Int = mainQueue.size + playNextQueue.size
+    fun getQueueSize(): Int = mainList.size + priorityList.size + userList.size
 
     fun getCurrentIndex(): Int = currentIndex
 
@@ -527,9 +567,39 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         return getCombinedQueue().getOrNull(index)?.source == QueueSource.PLAY_NEXT
     }
 
-    suspend fun removeFirstPlayNextByMediaId(mediaId: String) = queueMutex.withLock {
+    suspend fun removeFirstPlayNextByMediaId(mediaId: String): Boolean = queueMutex.withLock {
         val idx = getCombinedQueue().indexOfFirst { it.source == QueueSource.PLAY_NEXT && it.mediaItem.mediaId == mediaId }
-        if (idx >= 0) removeAt(idx)
+        return@withLock if (idx >= 0) removeAtInternal(idx) else false
+    }
+
+    /**
+     * Consume the head of the play-next queue only if it matches the finished mediaId.
+     * Returns true if a play-next head was consumed and removed from player timeline.
+     */
+    suspend fun consumePlayNextHeadIfMatches(finishedMediaId: String): Boolean = queueMutex.withLock {
+        val head = priorityList.firstOrNull() ?: return@withLock false
+        if (head.mediaItem.mediaId != finishedMediaId) return@withLock false
+
+        // Find the head in the combined order (it should appear right after current main item)
+        val idx = getCombinedQueue().indexOfFirst { it === head }
+        return@withLock if (idx >= 0) {
+            android.util.Log.d(logTag, "consumePlayNext matched head id=$finishedMediaId at idx=$idx")
+            removeAtInternal(idx)
+        } else run {
+            // Fallback: if not found in combined (rare), still pop head and update state
+            // Remove the head from list manually
+            priorityList.remove(head)
+            queueLookup.remove(head.id)
+            queueState?.let { qs ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    val current = qs.getPlayNextCount()
+                    qs.setPlayNextCount((current - 1).coerceAtLeast(0))
+                }
+            }
+            updateUIState()
+            android.util.Log.d(logTag, "consumePlayNext fallback pop head id=$finishedMediaId newPri=${priorityList.size}")
+            true
+        }
     }
 
     /**
@@ -549,8 +619,9 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                 dq.addLast(qi)
             }
 
-            mainQueue.clear()
-            playNextQueue.clear()
+            mainList.clear()
+            priorityList.clear()
+            userList.clear()
             queueLookup.clear()
             originalOrder.clear()
 
@@ -564,8 +635,9 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                         context = currentContext
                     )
                 when (qi.source) {
-                    QueueSource.PLAY_NEXT -> playNextQueue.addLast(qi)
-                    else -> mainQueue.addLast(qi)
+                    QueueSource.PLAY_NEXT -> priorityList.add(qi)
+                    QueueSource.USER_QUEUE -> userList.add(qi)
+                    else -> mainList.add(qi)
                 }
                 queueLookup[qi.id] = qi
                 originalOrder.addLast(qi.copy())
@@ -583,13 +655,15 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     }
 
     fun getVisibleQueue(): List<QueueItem> {
-        // Return the main user-visible queue
+        // Visible queue starts from item after current and forward
+        // List shows Priority (Play Next) items first, then User Queue, then remainder of main after current
+        val mainAll = mainList.toList()
+        val start = (currentIndex + 1).coerceAtMost(mainAll.size)
         val visible = mutableListOf<QueueItem>()
-        visible.addAll(mainQueue.take(currentIndex + 1))
-        visible.addAll(playNextQueue)
-        if (currentIndex + 1 < mainQueue.size) {
-            visible.addAll(mainQueue.drop(currentIndex + 1))
-        }
+        visible.addAll(priorityList.toList())
+        visible.addAll(userList.toList())
+        if (start < mainAll.size) visible.addAll(mainAll.drop(start))
+        android.util.Log.d(logTag, "getVisibleQueue pri=${priorityList.size} user=${userList.size} mainTail=${(mainAll.size - start).coerceAtLeast(0)} visible=${visible.size}")
         return visible
     }
 
@@ -598,42 +672,35 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     private fun getCombinedQueue(): List<QueueItem> {
         val combined = mutableListOf<QueueItem>()
 
-        // Add items up to current index from main queue
-        val currentInMain = currentIndex.coerceAtMost(mainQueue.size - 1)
-        if (currentInMain >= 0) {
-            combined.addAll(mainQueue.take(currentInMain + 1))
-        }
-
-        // Add play-next queue
-        combined.addAll(playNextQueue)
-
-        // Add remaining main queue items
-        if (currentInMain + 1 < mainQueue.size) {
-            combined.addAll(mainQueue.drop(currentInMain + 1))
-        }
-
+        val mainAll = mainList.toList()
+        val currentInMain = currentIndex.coerceAtMost(mainAll.size - 1)
+        if (currentInMain >= 0) combined.addAll(mainAll.take(currentInMain + 1))
+        combined.addAll(priorityList.toList())
+        combined.addAll(userList.toList())
+        if (currentInMain + 1 < mainAll.size) combined.addAll(mainAll.drop(currentInMain + 1))
         return combined
     }
 
     private fun updateQueueAfterMove(from: Int, to: Int) {
+        // Efficient move using lists: rebuild from combined order
         val combinedQueue = getCombinedQueue().toMutableList()
         if (from < combinedQueue.size && to < combinedQueue.size) {
             val item = combinedQueue.removeAt(from)
             combinedQueue.add(to, item)
-
-            // Rebuild queues based on new order
             rebuildQueuesFromCombined(combinedQueue)
         }
     }
 
     private fun rebuildQueuesFromCombined(combinedQueue: List<QueueItem>) {
-        mainQueue.clear()
-        playNextQueue.clear()
+        mainList.clear()
+        priorityList.clear()
+        userList.clear()
 
         combinedQueue.forEach { item ->
             when (item.source) {
-                QueueSource.PLAY_NEXT -> playNextQueue.addLast(item)
-                else -> mainQueue.addLast(item)
+                QueueSource.PLAY_NEXT -> priorityList.add(item)
+                QueueSource.USER_QUEUE -> userList.add(item)
+                else -> mainList.add(item)
             }
         }
     }
@@ -695,13 +762,15 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     private fun restoreOriginalOrder() {
         if (originalOrder.isEmpty()) return
 
-        mainQueue.clear()
-        playNextQueue.clear()
+        mainList.clear()
+        priorityList.clear()
+        userList.clear()
 
         originalOrder.forEach { item ->
             when (item.source) {
-                QueueSource.PLAY_NEXT -> playNextQueue.addLast(item)
-                else -> mainQueue.addLast(item)
+                QueueSource.PLAY_NEXT -> priorityList.add(item)
+                QueueSource.USER_QUEUE -> userList.add(item)
+                else -> mainList.add(item)
             }
         }
 
@@ -719,12 +788,14 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             hasPrevious = hasPrevious(),
             shuffleEnabled = shuffleEnabled,
             repeatMode = repeatMode,
-            playNextCount = playNextQueue.size,
+            playNextCount = priorityList.size,
+            userQueueCount = userList.size,
             context = currentContext
         )
 
         _queueState.postValue(state)
         _queueStateFlow.value = state
+        android.util.Log.d(logTag, "updateUIState total=${state.totalItems} curIdx=${state.currentIndex} pri=${state.playNextCount} user=${state.userQueueCount}")
     }
 
     // Called when track changes to update history
@@ -734,6 +805,21 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             shuffleHistory.removeLast()
         }
         getCurrentItem()
+        // Trim all items that have already been played from the front of the combined queue
+        // Keep them out of the visible queue but we still preserve originalOrder for restoration/shuffle context
+        CoroutineScope(Dispatchers.IO).launch {
+            try { trimPlayedBeforeCurrent() } catch (_: Exception) {}
+        }
+        android.util.Log.d(logTag, "onTrackChanged mediaId=$mediaId currentIndex=$currentIndex total=${getQueueSize()}")
+    }
+    
+    private suspend fun trimPlayedBeforeCurrent() = queueMutex.withLock {
+        val idx = currentIndex
+        if (idx <= 0) return@withLock
+        // Remove items at the head repeatedly; this updates player timeline and internal lists
+        repeat(idx) { removeAtInternal(0) }
+        currentIndex = 0
+        updateUIState()
     }
     
     // Operation queue methods for external use

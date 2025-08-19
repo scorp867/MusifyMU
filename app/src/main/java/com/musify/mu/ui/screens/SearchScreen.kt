@@ -7,8 +7,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.SwipeToDismiss
+import androidx.compose.material.rememberDismissState
+import androidx.compose.material.DismissDirection
+import androidx.compose.material.DismissValue
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -31,6 +36,9 @@ import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.navigation.Screen
 
 import kotlinx.coroutines.launch
+import com.musify.mu.playback.rememberQueueOperations
+import com.musify.mu.playback.QueueContextHelper
+import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 
@@ -268,12 +276,41 @@ private fun SearchResults(
     }
 }
 
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 private fun SearchResultItem(
     track: Track,
     onPlay: () -> Unit
 ) {
-    Card(
+    val queueOps = rememberQueueOperations()
+    val scope = rememberCoroutineScope()
+    val dismissState = rememberDismissState(
+        confirmStateChange = { value ->
+            when (value) {
+                DismissValue.DismissedToEnd -> {
+                    // Swipe right: Play Next (priority queue)
+                    val ctx = QueueContextHelper.createSearchContext("search")
+                    scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                    false
+                }
+                DismissValue.DismissedToStart -> {
+                    // Swipe left: Add to User Queue
+                    val ctx = QueueContextHelper.createSearchContext("search")
+                    scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                    false
+                }
+                else -> false
+            }
+        }
+    )
+    SwipeToDismiss(
+        state = dismissState,
+        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
+        background = {
+            com.musify.mu.ui.components.EnhancedSwipeBackground(dismissState.dismissDirection)
+        },
+        dismissContent = {
+            Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onPlay() },
@@ -338,6 +375,8 @@ private fun SearchResultItem(
             }
         }
     }
+        }
+    )
 }
 
 @Composable

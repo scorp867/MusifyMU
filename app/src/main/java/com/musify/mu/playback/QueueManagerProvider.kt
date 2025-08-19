@@ -111,18 +111,27 @@ fun rememberCurrentItem(): State<QueueManager.QueueItem?> {
  */
 class EnhancedQueueOperations(private val queueManager: QueueManager?) {
     
-    suspend fun addToEndWithContext(
+    /**
+     * Add to User Queue (Add to next segment)
+     */
+    suspend fun addToUserQueueWithContext(
         items: List<androidx.media3.common.MediaItem>,
         context: QueueManager.PlayContext? = null
     ) {
-        queueManager?.addToEnd(items, context)
+        queueManager?.addToUserQueue(items.toMutableList(), context)
     }
+    
+    // Backward-compatible alias used by some screens
+    suspend fun addToEndWithContext(
+        items: List<androidx.media3.common.MediaItem>,
+        context: QueueManager.PlayContext? = null
+    ) = addToUserQueueWithContext(items, context)
     
     suspend fun playNextWithContext(
         items: List<androidx.media3.common.MediaItem>,
         context: QueueManager.PlayContext? = null
     ) {
-        queueManager?.playNext(items, context)
+        queueManager?.playNext(items.toMutableList(), context)
     }
     
     suspend fun setQueueWithContext(
@@ -132,7 +141,7 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
         startPosMs: Long = 0L,
         context: QueueManager.PlayContext? = null
     ) {
-        queueManager?.setQueue(items, startIndex, play, startPosMs, context)
+        queueManager?.setQueue(items.toMutableList(), startIndex, play, startPosMs, context)
     }
     
     suspend fun moveItem(from: Int, to: Int) {
@@ -176,14 +185,8 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
         position: Int = -1,
         context: QueueManager.PlayContext? = null
     ) {
-        val queueItems = items.map { mediaItem ->
-            QueueManager.QueueItem(
-                mediaItem = mediaItem,
-                source = QueueManager.QueueSource.USER_ADDED,
-                context = context
-            )
-        }
-        queueManager?.queueAdd(queueItems, position)
+        // Route queued additions to the User Queue per new 3-queue model
+        queueManager?.addToUserQueue(items.toMutableList(), context)
     }
     
     /**
