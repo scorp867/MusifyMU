@@ -395,21 +395,40 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             if (from < combinedQueue.size && to < combinedQueue.size) {
                 val item = combinedQueue[from]
 
+                // Calculate segment boundaries in combined indices to preserve segment invariants
+                val mainAll = mainList.toList()
+                val currentInMain = currentIndex.coerceAtMost((mainAll.size - 1).coerceAtLeast(-1))
+                val priStart = (currentInMain + 1).coerceAtLeast(0)
+                val priEndExclusive = priStart + priorityList.size
+                val userStart = priEndExclusive
+                val userEndExclusive = userStart + userList.size
+                val mainTailStart = userEndExclusive
+                val mainTailEndInclusive = (combinedQueue.size - 1).coerceAtLeast(mainTailStart)
+
+                // Clamp destination within the item's segment to avoid cross-segment jumps
+                val clampedTo = when (item.source) {
+                    QueueSource.PLAY_NEXT -> to.coerceIn(priStart, (priEndExclusive - 1).coerceAtLeast(priStart))
+                    QueueSource.USER_QUEUE -> to.coerceIn(userStart, (userEndExclusive - 1).coerceAtLeast(userStart))
+                    else -> to.coerceIn(mainTailStart, mainTailEndInclusive)
+                }
+
+                if (clampedTo == from) return@withLock
+
                 // Update internal structures
-                updateQueueAfterMove(from, to)
+                updateQueueAfterMove(from, clampedTo)
 
                 // Move in player
-                player.moveMediaItem(from, to)
+                player.moveMediaItem(from, clampedTo)
 
                 // Update current index if needed
                 when {
-                    from == currentIndex -> currentIndex = to
-                    from < currentIndex && to >= currentIndex -> currentIndex--
-                    from > currentIndex && to <= currentIndex -> currentIndex++
+                    from == currentIndex -> currentIndex = clampedTo
+                    from < currentIndex && clampedTo >= currentIndex -> currentIndex--
+                    from > currentIndex && clampedTo <= currentIndex -> currentIndex++
                 }
 
                 // Notify UI
-                _queueChanges.postValue(QueueChangeEvent.ItemMoved(from, to, item))
+                _queueChanges.postValue(QueueChangeEvent.ItemMoved(from, clampedTo, item))
                 updateUIState()
                 android.util.Log.d(logTag, "move done currentIndex=$currentIndex")
             }
@@ -559,7 +578,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         emptyList()
     }
 
-    fun getQueueSize(): Int = mainList.size + priorityList.size + userList.size
+    fun getQueueSize(): Int = try { player.mediaItemCount } catch (_: Exception) { mainList.size + priorityList.size + userList.size }
 
     fun getCurrentIndex(): Int = currentIndex
 
@@ -665,15 +684,11 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     }
 
     fun getVisibleQueue(): List<QueueItem> {
-        // Visible queue starts from item after current and forward
-        // List shows Priority (Play Next) items first, then User Queue, then remainder of main after current
-        val mainAll = mainList.toList()
-        val start = (currentIndex + 1).coerceAtMost(mainAll.size)
-        val visible = mutableListOf<QueueItem>()
-        visible.addAll(priorityList.toList())
-        visible.addAll(userList.toList())
-        if (start < mainAll.size) visible.addAll(mainAll.drop(start))
-        android.util.Log.d(logTag, "getVisibleQueue pri=${priorityList.size} user=${userList.size} mainTail=${(mainAll.size - start).coerceAtLeast(0)} visible=${visible.size}")
+        // Build from authoritative player timeline
+        val combined = getCombinedQueue()
+        val start = (currentIndex + 1).coerceAtMost((combined.size))
+        val visible = if (start < combined.size) combined.drop(start) else emptyList()
+        android.util.Log.d(logTag, "getVisibleQueue currentIndex=$currentIndex total=${combined.size} visible=${visible.size}")
         return visible
     }
     
@@ -686,21 +701,66 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         
         val item = visibleQueue[visibleIndex]
         val combinedQueue = getCombinedQueue()
-        return combinedQueue.indexOfFirst { it.id == item.id }
+        // Prefer identity match to handle duplicates reliably
+        val identityIdx = combinedQueue.indexOfFirst { it === item }
+        if (identityIdx >= 0) return identityIdx
+        // Fallback to composite key match if identity is not preserved
+        return combinedQueue.indexOfFirst { it.id == item.id && it.addedAt == item.addedAt }
     }
 
     // Private helper methods
 
     private fun getCombinedQueue(): List<QueueItem> {
-        val combined = mutableListOf<QueueItem>()
+        // Construct the combined queue directly from the player's timeline to ensure accurate ordering
+        return try {
+            val count = player.mediaItemCount
+            if (count <= 0) {
+                // Fallback to local lists if player is empty
+                val fallback = mutableListOf<QueueItem>()
+                fallback.addAll(mainList)
+                fallback.addAll(priorityList)
+                fallback.addAll(userList)
+                fallback
+            } else {
+                val buckets = LinkedHashMap<String, ArrayDeque<QueueItem>>()
+                fun addToBuckets(list: List<QueueItem>) {
+                    list.forEach { qi ->
+                        val dq = buckets.getOrPut(qi.id) { ArrayDeque() }
+                        dq.addLast(qi)
+                    }
+                }
+                // Collect in a deterministic order: priority, user, then main
+                // to prefer mapping current queued items before any stale copies
+                addToBuckets(priorityList)
+                addToBuckets(userList)
+                addToBuckets(mainList)
 
-        val mainAll = mainList.toList()
-        val currentInMain = currentIndex.coerceAtMost(mainAll.size - 1)
-        if (currentInMain >= 0) combined.addAll(mainAll.take(currentInMain + 1))
-        combined.addAll(priorityList.toList())
-        combined.addAll(userList.toList())
-        if (currentInMain + 1 < mainAll.size) combined.addAll(mainAll.drop(currentInMain + 1))
-        return combined
+                val result = mutableListOf<QueueItem>()
+                for (i in 0 until count) {
+                    val mi = player.getMediaItemAt(i) ?: continue
+                    val match = buckets[mi.mediaId]?.removeFirstOrNull()
+                    if (match != null) {
+                        // Keep reference identity to support === mapping
+                        result.add(match)
+                    } else {
+                        // Fallback: synthesize a minimal QueueItem preserving metadata
+                        result.add(
+                            QueueItem(
+                                mediaItem = mi,
+                                position = i,
+                                source = QueueSource.USER_ADDED,
+                                context = currentContext
+                            )
+                        )
+                    }
+                }
+                result
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error building combined queue from player", e)
+            // Safe fallback
+            (mainList + priorityList + userList).toList()
+        }
     }
 
     private fun updateQueueAfterMove(from: Int, to: Int) {
@@ -802,6 +862,36 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             .coerceAtLeast(0)
     }
 
+    private fun buildCombinedFromInternalListsWithCurrent(): Pair<List<QueueItem>, Int> {
+        val mainAll = mainList.toList()
+        val current = getCurrentItem()
+        val currentInMain = current?.let { c -> mainAll.indexOfFirst { it.id == c.id && it.addedAt == c.addedAt } }
+            ?: -1
+
+        val combined = mutableListOf<QueueItem>()
+        if (currentInMain >= 0) {
+            // Up to and including current main item
+            combined.addAll(mainAll.take(currentInMain + 1))
+        } else if (current != null) {
+            // Current item not in main; ensure it is at the head of combined
+            combined.add(current)
+        }
+        // Insert priority and user segments next
+        combined.addAll(priorityList)
+        combined.addAll(userList)
+        // Append the remainder of main items if current belongs to main
+        if (currentInMain + 1 < mainAll.size && currentInMain >= 0) {
+            combined.addAll(mainAll.drop(currentInMain + 1))
+        } else if (currentInMain < 0) {
+            // Current not in main, append all main items
+            combined.addAll(mainAll)
+        }
+
+        val newCurrentIndex = combined.indexOfFirst { it.id == current?.id && it.addedAt == current?.addedAt }
+            .let { if (it >= 0) it else 0 }
+        return combined to newCurrentIndex
+    }
+
     private fun updateUIState() {
         val state = QueueState(
             totalItems = getQueueSize(),
@@ -822,6 +912,13 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     // Called when track changes to update history
     fun onTrackChanged(mediaId: String) {
+        // Sync our current index with the player's current index to keep trimming and visibility accurate
+        val playerIndex = try {
+            player.currentMediaItemIndex
+        } catch (_: Exception) { -1 }
+        if (playerIndex >= 0) {
+            currentIndex = playerIndex.coerceIn(0, (getQueueSize() - 1).coerceAtLeast(0))
+        }
         shuffleHistory.addFirst(mediaId)
         if (shuffleHistory.size > maxShuffleHistory) {
             shuffleHistory.removeLast()
