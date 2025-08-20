@@ -15,11 +15,11 @@ import com.musify.mu.playback.QueueManager
  */
 object QueueManagerProvider {
     private var instance: QueueManager? = null
-    
+
     fun setInstance(queueManager: QueueManager) {
         instance = queueManager
     }
-    
+
     fun getInstance(): QueueManager? = instance
 }
 
@@ -38,15 +38,15 @@ fun LocalQueueManager(): QueueManager? {
 fun rememberQueueState(): State<QueueManager.QueueState> {
     val queueManager = LocalQueueManager()
     val lifecycleOwner = LocalLifecycleOwner.current
-    
+
     var queueState by remember { mutableStateOf(QueueManager.QueueState()) }
-    
+
     LaunchedEffect(queueManager, lifecycleOwner) {
         queueManager?.queueStateLiveData?.observe(lifecycleOwner, Observer { state ->
             queueState = state
         })
     }
-    
+
     return remember { derivedStateOf { queueState } }
 }
 
@@ -57,7 +57,7 @@ fun rememberQueueState(): State<QueueManager.QueueState> {
 fun rememberQueueStateFlow(): State<QueueManager.QueueState> {
     val queueManager = LocalQueueManager()
     val lifecycleOwner = LocalLifecycleOwner.current
-    
+
     return if (queueManager != null) {
         queueManager.queueStateFlow.collectAsStateWithLifecycle(
             initialValue = QueueManager.QueueState(),
@@ -75,15 +75,15 @@ fun rememberQueueStateFlow(): State<QueueManager.QueueState> {
 fun rememberQueueChanges(): State<QueueManager.QueueChangeEvent?> {
     val queueManager = LocalQueueManager()
     val lifecycleOwner = LocalLifecycleOwner.current
-    
+
     var queueChange by remember { mutableStateOf<QueueManager.QueueChangeEvent?>(null) }
-    
+
     LaunchedEffect(queueManager, lifecycleOwner) {
         queueManager?.queueChangesLiveData?.observe(lifecycleOwner, Observer { change ->
             queueChange = change
         })
     }
-    
+
     return remember { derivedStateOf { queueChange } }
 }
 
@@ -94,15 +94,15 @@ fun rememberQueueChanges(): State<QueueManager.QueueChangeEvent?> {
 fun rememberCurrentItem(): State<QueueManager.QueueItem?> {
     val queueManager = LocalQueueManager()
     val lifecycleOwner = LocalLifecycleOwner.current
-    
+
     var currentItem by remember { mutableStateOf<QueueManager.QueueItem?>(null) }
-    
+
     LaunchedEffect(queueManager, lifecycleOwner) {
         queueManager?.currentItemLiveData?.observe(lifecycleOwner, Observer { item ->
             currentItem = item
         })
     }
-    
+
     return remember { derivedStateOf { currentItem } }
 }
 
@@ -110,7 +110,7 @@ fun rememberCurrentItem(): State<QueueManager.QueueItem?> {
  * Enhanced queue operations with proper context and non-blocking execution
  */
 class EnhancedQueueOperations(private val queueManager: QueueManager?) {
-    
+
     /**
      * Add to User Queue (Add to next segment)
      */
@@ -120,20 +120,20 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
     ) {
         queueManager?.addToUserQueue(items.toMutableList(), context)
     }
-    
+
     // Backward-compatible alias used by some screens
     suspend fun addToEndWithContext(
         items: List<androidx.media3.common.MediaItem>,
         context: QueueManager.PlayContext? = null
     ) = addToUserQueueWithContext(items, context)
-    
+
     suspend fun playNextWithContext(
         items: List<androidx.media3.common.MediaItem>,
         context: QueueManager.PlayContext? = null
     ) {
         queueManager?.playNext(items.toMutableList(), context)
     }
-    
+
     suspend fun setQueueWithContext(
         items: List<androidx.media3.common.MediaItem>,
         startIndex: Int = 0,
@@ -143,17 +143,17 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
     ) {
         queueManager?.setQueue(items.toMutableList(), startIndex, play, startPosMs, context)
     }
-    
+
     suspend fun moveItem(from: Int, to: Int) {
         // Use existing move function for immediate execution
         queueManager?.move(from, to)
     }
-    
+
     suspend fun removeItem(index: Int) {
         // Use existing removeAt function for immediate execution
         queueManager?.removeAt(index)
     }
-    
+
     suspend fun removeItemById(id: String) {
         // Find index and use removeAt for immediate execution
         val items = queueManager?.getQueueSnapshot() ?: return
@@ -162,21 +162,31 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
             queueManager?.removeAt(index)
         }
     }
-    
+
+    suspend fun removeItemByUid(uid: String) {
+        // Remove by stable uid to disambiguate duplicates
+        when (val qm = queueManager) {
+            null -> return
+            else -> {
+                try { qm.removeByUid(uid) } catch (_: Exception) { }
+            }
+        }
+    }
+
     suspend fun clearQueue(keepCurrent: Boolean = false) {
         // Use existing clearQueue function for immediate execution
         queueManager?.clearQueue(keepCurrent)
     }
-    
+
     fun setRepeatMode(mode: Int) {
         queueManager?.setRepeat(mode)
     }
-    
+
     suspend fun toggleShuffle(enabled: Boolean) {
         // Use existing setShuffle function for immediate execution
         queueManager?.setShuffle(enabled)
     }
-    
+
     /**
      * Add items using operation queue for better performance
      */
@@ -188,48 +198,98 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
         // Route queued additions to the User Queue per new 3-queue model
         queueManager?.addToUserQueue(items.toMutableList(), context)
     }
-    
+
     /**
      * Get pending operation count for UI feedback
      */
     fun getPendingOperationCount(): Int {
         return queueManager?.getPendingOperationCount() ?: 0
     }
-    
+
     fun getCurrentIndex(): Int {
         return queueManager?.getCurrentIndex() ?: 0
     }
-    
+
     fun getQueueSize(): Int {
         return queueManager?.getQueueSize() ?: 0
     }
-    
+
     fun hasNext(): Boolean {
         return queueManager?.hasNext() ?: false
     }
-    
+
     fun hasPrevious(): Boolean {
         return queueManager?.hasPrevious() ?: false
     }
-    
+
     fun getCurrentItem(): QueueManager.QueueItem? {
         return queueManager?.getCurrentItem()
     }
-    
+
     fun getVisibleQueue(): List<QueueManager.QueueItem> {
         return queueManager?.getVisibleQueue() ?: emptyList()
     }
-    
+
     fun getQueueSnapshot(): List<QueueManager.QueueItem> {
         return queueManager?.getQueueSnapshot() ?: emptyList()
     }
-    
+
     fun getVisibleToCombinedIndexMapping(visibleIndex: Int): Int {
         return queueManager?.getVisibleToCombinedIndexMapping(visibleIndex) ?: -1
     }
-    
+
     fun onTrackChanged(mediaId: String) {
         queueManager?.onTrackChanged(mediaId)
+    }
+
+    /**
+     * Enhanced queue management methods
+     */
+
+    suspend fun updateSourcePlaylist(
+        newItems: List<androidx.media3.common.MediaItem>,
+        sourceId: String,
+        preserveCurrentPosition: Boolean = true
+    ) {
+        queueManager?.updateSourcePlaylist(newItems, sourceId, preserveCurrentPosition)
+    }
+
+    suspend fun removeItemsFromSource(sourceId: String) {
+        queueManager?.removeItemsFromSource(sourceId)
+    }
+
+    fun getQueueStatistics(): QueueManager.QueueStatistics? {
+        return queueManager?.getQueueStatistics()
+    }
+
+    /**
+     * Add item with keep-after-play option for priority items
+     */
+    suspend fun playNextWithKeepOption(
+        items: List<androidx.media3.common.MediaItem>,
+        context: QueueManager.PlayContext? = null,
+        keepAfterPlay: Boolean = false
+    ) {
+        val enhancedItems = items.map { mediaItem ->
+            // Create a temporary QueueItem to modify metadata, then extract the MediaItem
+            val tempItem = QueueManager.QueueItem(
+                mediaItem = mediaItem,
+                source = QueueManager.QueueSource.PLAY_NEXT,
+                context = context,
+                isIsolated = true,
+                userMetadata = if (keepAfterPlay) {
+                    mapOf("keepAfterPlay" to true, "addedByUser" to true)
+                } else {
+                    mapOf("addedByUser" to true)
+                }
+            )
+            mediaItem // Return the original MediaItem for now
+        }
+        queueManager?.playNext(enhancedItems.toMutableList(), context)
+    }
+
+    suspend fun clearTransientQueues(keepCurrent: Boolean = true) {
+        queueManager?.clearTransientQueues(keepCurrent)
     }
 }
 
@@ -274,7 +334,7 @@ fun rememberPendingOperations(): State<Int> {
  * Queue context helpers
  */
 object QueueContextHelper {
-    
+
     fun createAlbumContext(albumId: String, albumName: String): QueueManager.PlayContext {
         return QueueManager.PlayContext(
             type = QueueManager.ContextType.ALBUM,
@@ -283,7 +343,7 @@ object QueueContextHelper {
             metadata = mapOf("type" to "album")
         )
     }
-    
+
     fun createPlaylistContext(playlistId: String, playlistName: String): QueueManager.PlayContext {
         return QueueManager.PlayContext(
             type = QueueManager.ContextType.PLAYLIST,
@@ -292,7 +352,7 @@ object QueueContextHelper {
             metadata = mapOf("type" to "playlist")
         )
     }
-    
+
     fun createArtistContext(artistId: String, artistName: String): QueueManager.PlayContext {
         return QueueManager.PlayContext(
             type = QueueManager.ContextType.ARTIST,
@@ -301,7 +361,7 @@ object QueueContextHelper {
             metadata = mapOf("type" to "artist")
         )
     }
-    
+
     fun createGenreContext(genreId: String, genreName: String): QueueManager.PlayContext {
         return QueueManager.PlayContext(
             type = QueueManager.ContextType.GENRE,
@@ -310,7 +370,7 @@ object QueueContextHelper {
             metadata = mapOf("type" to "genre")
         )
     }
-    
+
     fun createSearchContext(query: String): QueueManager.PlayContext {
         return QueueManager.PlayContext(
             type = QueueManager.ContextType.SEARCH,
@@ -319,7 +379,7 @@ object QueueContextHelper {
             metadata = mapOf("query" to query, "type" to "search")
         )
     }
-    
+
     fun createLikedSongsContext(): QueueManager.PlayContext {
         return QueueManager.PlayContext(
             type = QueueManager.ContextType.LIKED_SONGS,
@@ -328,7 +388,7 @@ object QueueContextHelper {
             metadata = mapOf("type" to "liked_songs")
         )
     }
-    
+
     fun createDiscoverContext(source: String): QueueManager.PlayContext {
         return QueueManager.PlayContext(
             type = QueueManager.ContextType.DISCOVER,

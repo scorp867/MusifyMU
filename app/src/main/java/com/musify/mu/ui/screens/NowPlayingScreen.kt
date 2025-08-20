@@ -74,7 +74,7 @@ fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
-    
+
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var shuffleOn by remember { mutableStateOf(false) }
@@ -83,11 +83,11 @@ fun NowPlayingScreen(navController: NavController) {
     var duration by remember { mutableStateOf(0L) }
     var isLiked by remember { mutableStateOf(false) }
     var userSeeking by remember { mutableStateOf(false) }
-    
+
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
     var vibrantColor by remember { mutableStateOf(Color(0xFF38B6FF)) }
-    
+
     // Animation states for enhanced visual experience
     val colorTransition = animateColorAsState(
         targetValue = dominantColor,
@@ -99,7 +99,7 @@ fun NowPlayingScreen(navController: NavController) {
         animationSpec = tween(1000, easing = FastOutSlowInEasing),
         label = "vibrantTransition"
     )
-    
+
     // Pulsing animation for when music is playing
     val pulseAnimation = rememberInfiniteTransition(label = "pulse")
     val pulseScale by pulseAnimation.animateFloat(
@@ -111,7 +111,7 @@ fun NowPlayingScreen(navController: NavController) {
         ),
         label = "pulseScale"
     )
-    
+
     val coroutineScope = rememberCoroutineScope()
 
     // Extract colors from pre-cached album artwork on track change
@@ -120,10 +120,10 @@ fun NowPlayingScreen(navController: NavController) {
             coroutineScope.launch(Dispatchers.IO) {
                 try {
                     android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
-                    
+
                     // Use pre-extracted artwork URI from Track entity
                     val artworkUri = track.artUri
-                    
+
                     val sourceBitmap = if (!artworkUri.isNullOrBlank()) {
                         try {
                             // Convert file URI to file path and load bitmap
@@ -143,31 +143,31 @@ fun NowPlayingScreen(navController: NavController) {
                         android.util.Log.d("NowPlayingScreen", "No pre-cached artwork available for ${track.title}")
                         null
                     }
-                    
+
                     // Extract palette colors on background thread
                     val extractedColors = sourceBitmap?.let { bitmap ->
                         val palette = androidx.palette.graphics.Palette.from(bitmap)
                             .maximumColorCount(16)
                             .generate()
-                        
+
                         val vibrant = palette.getVibrantColor(0xFF38B6FF.toInt())
                         val dominant = palette.getDominantColor(0xFF6236FF.toInt())
                         val darkVibrant = palette.getDarkVibrantColor(dominant)
-                        
+
                         android.util.Log.d("NowPlayingScreen", "Extracted colors - Dominant: ${Integer.toHexString(dominant)}, Vibrant: ${Integer.toHexString(vibrant)}")
                         Pair(Color(dominant), Color(vibrant))
                     } ?: run {
                         android.util.Log.d("NowPlayingScreen", "Using default colors for ${track.title}")
                         Pair(Color(0xFF6236FF), Color(0xFF38B6FF))
                     }
-                    
+
                     // Update colors on main thread
                     withContext(Dispatchers.Main) {
                         dominantColor = extractedColors.first
                         vibrantColor = extractedColors.second
                         android.util.Log.d("NowPlayingScreen", "Applied new colors for ${track.title}")
                     }
-                    
+
                 } catch (e: Exception) {
                     android.util.Log.w("NowPlayingScreen", "Failed to extract colors for ${track.title}", e)
                     withContext(Dispatchers.Main) {
@@ -206,7 +206,7 @@ fun NowPlayingScreen(navController: NavController) {
             currentTrack?.let { t ->
                 isLiked = repo.isLiked(t.mediaId)
             }
-            
+
             // Add listener for real-time updates
             val listener = object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
@@ -218,15 +218,15 @@ fun NowPlayingScreen(navController: NavController) {
                         coroutineScope.launch { isLiked = repo.isLiked(t.mediaId) }
                     }
                 }
-                
+
                 override fun onIsPlayingChanged(isPlayingNow: Boolean) {
                     isPlaying = isPlayingNow
                 }
-                
+
                 override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
                     shuffleOn = shuffleModeEnabled
                 }
-                
+
                 override fun onRepeatModeChanged(repeatModeValue: Int) {
                     repeatMode = when(repeatModeValue) {
                         Player.REPEAT_MODE_ONE -> 1
@@ -234,24 +234,24 @@ fun NowPlayingScreen(navController: NavController) {
                         else -> 0
                     }
                 }
-                
+
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
                         duration = mediaController.duration
                     }
                 }
             }
-            
+
             mediaController.addListener(listener)
-            
+
             // Continuous progress updates - pause updates while user is seeking
             launch {
                 while (true) {
                     try {
-                            val currentPos = mediaController.currentPosition
-                            val dur = mediaController.duration
-                            if (dur > 0) {
-                                duration = dur
+                        val currentPos = mediaController.currentPosition
+                        val dur = mediaController.duration
+                        if (dur > 0) {
+                            duration = dur
                             if (!userSeeking) {
                                 progress = (currentPos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
                             }
@@ -296,10 +296,10 @@ fun NowPlayingScreen(navController: NavController) {
             secondaryColor = vibrantTransition.value,
             modifier = Modifier.fillMaxSize()
         )
-        
+
         // Scrollable content for the entire screen
         val scrollState = rememberScrollState()
-        
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -337,7 +337,7 @@ fun NowPlayingScreen(navController: NavController) {
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                    
+
                     IconButton(
                         onClick = { /* More options */ },
                         modifier = Modifier
@@ -355,9 +355,9 @@ fun NowPlayingScreen(navController: NavController) {
                         )
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(20.dp))
-                
+
                 // Album artwork - large and prominent with animations
                 currentTrack?.let { track ->
                     Box(
@@ -394,7 +394,7 @@ fun NowPlayingScreen(navController: NavController) {
                             contentDescription = track.title,
                             modifier = Modifier.fillMaxSize()
                         )
-                        
+
                         // Subtle overlay for depth
                         Box(
                             modifier = Modifier
@@ -438,9 +438,9 @@ fun NowPlayingScreen(navController: NavController) {
                             .align(Alignment.Center)
                     )
                 }
-                
+
                 Spacer(modifier = Modifier.height(32.dp))
-                
+
                 // Song info (fixed height to avoid control panel shifting)
                 currentTrack?.let { track ->
                     Box(
@@ -449,36 +449,36 @@ fun NowPlayingScreen(navController: NavController) {
                             .height(120.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = track.title,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 28.sp
-                            ),
-                            color = Color.White,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Text(
-                            text = track.artist,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = Color.White.copy(alpha = 0.8f),
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = track.title,
+                                style = MaterialTheme.typography.headlineMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 28.sp
+                                ),
+                                color = Color.White,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = track.artist,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White.copy(alpha = 0.8f),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                 }
             }
-            
+
             // Add spacing so the control panel sits lower and doesn't shift with title height
             Spacer(modifier = Modifier.height(44.dp))
 
@@ -521,169 +521,169 @@ fun NowPlayingScreen(navController: NavController) {
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         // Thin seek bar inside panel
-                    Slider(
-                        value = progress,
-                        onValueChange = { newProgress ->
+                        Slider(
+                            value = progress,
+                            onValueChange = { newProgress ->
                                 userSeeking = true
-                            progress = newProgress
-                        },
-                        onValueChangeFinished = {
+                                progress = newProgress
+                            },
+                            onValueChangeFinished = {
                                 controller?.let { c ->
                                     if (c.duration > 0) c.seekTo((progress * c.duration).toLong())
                                 }
                                 userSeeking = false
-                        },
-                        colors = SliderDefaults.colors(
+                            },
+                            colors = SliderDefaults.colors(
                                 thumbColor = Color.White.copy(alpha = 0.9f),
-                            activeTrackColor = Color.White,
+                                activeTrackColor = Color.White,
                                 inactiveTrackColor = Color.White.copy(alpha = 0.25f)
-                        ),
+                            ),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(24.dp)
-                    )
-                    
+                        )
+
                         // Time row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = formatDuration((progress * duration).toLong()),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.8f)
-                        )
-                        Text(
-                            text = formatDuration(duration),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.8f)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = formatDuration((progress * duration).toLong()),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                            Text(
+                                text = formatDuration(duration),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
                         }
 
                         Spacer(Modifier.height(8.dp))
 
                         // Controls row
-                    Row(
-                        modifier = Modifier
+                        Row(
+                            modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Shuffle
-                        IconButton(
-                            onClick = {
-                                controller?.let { c ->
-                                    val now = !shuffleOn
-                                    c.shuffleModeEnabled = now
-                                    shuffleOn = now
-                                }
-                            },
-                            modifier = Modifier.size(48.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Shuffle,
-                                contentDescription = "Shuffle",
-                                tint = if (shuffleOn) vibrantTransition.value else Color.White.copy(alpha = 0.7f),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        
-                        // Previous
-                        IconButton(
-                            onClick = { controller?.seekToPrevious() },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SkipPrevious,
-                                contentDescription = "Previous",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                        
-                        // Play/Pause - Main button
-                        Box(
-                            modifier = Modifier
-                                .size(72.dp)
-                                .background(
-                                    brush = Brush.radialGradient(
-                                        colors = listOf(
-                                            Color.White,
-                                            Color.White.copy(alpha = 0.9f)
-                                        )
-                                    ),
-                                    shape = CircleShape
-                                )
-                                .border(
-                                    width = 2.dp,
-                                    brush = Brush.radialGradient(
-                                        colors = listOf(
-                                            colorTransition.value.copy(alpha = 0.3f),
-                                            vibrantTransition.value.copy(alpha = 0.2f)
-                                        )
-                                    ),
-                                    shape = CircleShape
-                                )
-                                .shadow(
-                                    elevation = 8.dp,
-                                    shape = CircleShape,
-                                    spotColor = colorTransition.value.copy(alpha = 0.4f)
-                                )
-                                .clickable {
-                                    controller?.let {
-                                        if (it.isPlaying) it.pause() else it.play()
-                                        // rely on listener to update isPlaying
+                            // Shuffle
+                            IconButton(
+                                onClick = {
+                                    controller?.let { c ->
+                                        val now = !shuffleOn
+                                        c.shuffleModeEnabled = now
+                                        shuffleOn = now
                                     }
                                 },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isPlaying) 
-                                    Icons.Rounded.Pause 
-                                else 
-                                    Icons.Rounded.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                tint = colorTransition.value,
-                                modifier = Modifier.size(36.dp)
-                            )
-                        }
-                        
-                        // Next
-                        IconButton(
-                            onClick = { controller?.seekToNext() },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.SkipNext,
-                                contentDescription = "Next",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                        
-                        // Repeat
-                        IconButton(
-                            onClick = {
-                                repeatMode = (repeatMode + 1) % 3
-                                controller?.repeatMode = when (repeatMode) {
-                                    1 -> Player.REPEAT_MODE_ONE
-                                    2 -> Player.REPEAT_MODE_ALL
-                                    else -> Player.REPEAT_MODE_OFF
-                                }
-                            },
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = when (repeatMode) {
-                                    1 -> Icons.Rounded.RepeatOne
-                                    else -> Icons.Rounded.Repeat
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Shuffle,
+                                    contentDescription = "Shuffle",
+                                    tint = if (shuffleOn) vibrantTransition.value else Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            // Previous
+                            IconButton(
+                                onClick = { controller?.seekToPrevious() },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SkipPrevious,
+                                    contentDescription = "Previous",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+
+                            // Play/Pause - Main button
+                            Box(
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .background(
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(
+                                                Color.White,
+                                                Color.White.copy(alpha = 0.9f)
+                                            )
+                                        ),
+                                        shape = CircleShape
+                                    )
+                                    .border(
+                                        width = 2.dp,
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(
+                                                colorTransition.value.copy(alpha = 0.3f),
+                                                vibrantTransition.value.copy(alpha = 0.2f)
+                                            )
+                                        ),
+                                        shape = CircleShape
+                                    )
+                                    .shadow(
+                                        elevation = 8.dp,
+                                        shape = CircleShape,
+                                        spotColor = colorTransition.value.copy(alpha = 0.4f)
+                                    )
+                                    .clickable {
+                                        controller?.let {
+                                            if (it.isPlaying) it.pause() else it.play()
+                                            // rely on listener to update isPlaying
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying)
+                                        Icons.Rounded.Pause
+                                    else
+                                        Icons.Rounded.PlayArrow,
+                                    contentDescription = if (isPlaying) "Pause" else "Play",
+                                    tint = colorTransition.value,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                            }
+
+                            // Next
+                            IconButton(
+                                onClick = { controller?.seekToNext() },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.SkipNext,
+                                    contentDescription = "Next",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            }
+
+                            // Repeat
+                            IconButton(
+                                onClick = {
+                                    repeatMode = (repeatMode + 1) % 3
+                                    controller?.repeatMode = when (repeatMode) {
+                                        1 -> Player.REPEAT_MODE_ONE
+                                        2 -> Player.REPEAT_MODE_ALL
+                                        else -> Player.REPEAT_MODE_OFF
+                                    }
                                 },
-                                contentDescription = "Repeat",
-                                tint = if (repeatMode != 0) vibrantTransition.value else Color.White.copy(alpha = 0.7f),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = when (repeatMode) {
+                                        1 -> Icons.Rounded.RepeatOne
+                                        else -> Icons.Rounded.Repeat
+                                    },
+                                    contentDescription = "Repeat",
+                                    tint = if (repeatMode != 0) vibrantTransition.value else Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
                         }
 
                         Spacer(Modifier.height(12.dp))
@@ -711,11 +711,11 @@ fun NowPlayingScreen(navController: NavController) {
                                 )
                             }
                             IconButton(onClick = {
-                                    val t = currentTrack ?: return@IconButton
-                                    coroutineScope.launch {
-                                        if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
-                                        isLiked = !isLiked
-                                    }
+                                val t = currentTrack ?: return@IconButton
+                                coroutineScope.launch {
+                                    if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
+                                    isLiked = !isLiked
+                                }
                             }) {
                                 Icon(
                                     imageVector = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
@@ -727,10 +727,10 @@ fun NowPlayingScreen(navController: NavController) {
                     }
                 }
             }
-            
+
             // Add lyrics section
             Spacer(modifier = Modifier.height(32.dp))
-            
+
             // Simple divider
             HorizontalDivider(
                 modifier = Modifier
@@ -739,9 +739,9 @@ fun NowPlayingScreen(navController: NavController) {
                 thickness = 2.dp,
                 color = Color.White.copy(alpha = 0.3f)
             )
-            
+
             Spacer(modifier = Modifier.height(24.dp))
-            
+
             // Lyrics section
             Box(
                 modifier = Modifier
@@ -761,7 +761,7 @@ fun NowPlayingScreen(navController: NavController) {
                             color = Color.White,
                             modifier = Modifier.padding(bottom = 16.dp)
                         )
-                        
+
                         // Progress ticker to drive lyrics auto-scroll
                         var progressMs by remember { mutableStateOf(0L) }
                         LaunchedEffect(controller, isPlaying, currentTrack?.mediaId) {
@@ -781,7 +781,7 @@ fun NowPlayingScreen(navController: NavController) {
                     }
                 }
             }
-            
+
             // Add space at bottom to ensure scrolling works properly
             Spacer(modifier = Modifier.height(100.dp))
         }
@@ -793,50 +793,74 @@ fun NowPlayingScreen(navController: NavController) {
                 containerColor = MaterialTheme.colorScheme.surface,
                 dragHandle = { BottomSheetDefaults.DragHandle() }
             ) {
-                // Sticky header with now playing and play/pause
+                // Sticky header with now playing and play/pause, plus a single context header above it
                 val currentQueueItem = controller?.currentMediaItem
                 val t = currentQueueItem?.let { repo.getTrackByMediaId(it.mediaId) ?: it.toTrack() }
-                
-                // Simplified queue state management
                 val qState by rememberQueueState()
+                val queueChanges by com.musify.mu.playback.rememberQueueChanges()
                 val queueItems = remember(qState.currentIndex, qState.playNextCount, qState.totalItems, controller?.currentMediaItem?.mediaId) {
                     queueOps.getVisibleQueue()
                 }
-                
-                // Reorderable state with simplified logic
+
+                // Enhanced reorderable state with improved drag logic
+                var visualQueueItems by remember { mutableStateOf(queueItems) }
+                var isDragging by remember { mutableStateOf(false) }
+
+                // Sync visual queue with real queue data
+                LaunchedEffect(queueItems) {
+                    if (!isDragging) {
+                        visualQueueItems = queueItems.toList()
+                    }
+                }
+
+                val headerOffset = remember(t, qState.currentIndex) { 1 + if (t != null) 1 else 0 }
+
+                // React to queue changes to update visuals in real-time
+                LaunchedEffect(queueChanges) {
+                    queueChanges?.let {
+                        if (!isDragging) {
+                            val updated = queueOps.getVisibleQueue()
+                            visualQueueItems = updated
+                        }
+                    }
+                }
+
                 val reorderState = rememberReorderableLazyListState(
                     onMove = { from, to ->
-                        android.util.Log.d("QueueScreenDBG", "NP: onMove from=${from.index} to=${to.index}")
+                        // Adjust indices to account for non-reorderable header rows above the list
+                        val fromVis = from.index - headerOffset
+                        val toVis = to.index - headerOffset
+                        if (fromVis in visualQueueItems.indices && toVis in 0..visualQueueItems.size) {
+                            val mutable = visualQueueItems.toMutableList()
+                            val moved = mutable.removeAt(fromVis)
+                            val insertTo = toVis.coerceIn(0, mutable.size)
+                            mutable.add(insertTo, moved)
+                            visualQueueItems = mutable
+                            isDragging = true
+                        }
                     },
                     onDragEnd = { from, to ->
-                        android.util.Log.d("QueueScreenDBG", "NP: onDragEnd from=$from to=$to")
-                        coroutineScope.launch {
-                            try {
-                                val visibleQueue = queueOps.getVisibleQueue()
-                                
-                                // Validate indices
-                                if (from < 0 || to < 0 || from >= visibleQueue.size || to >= visibleQueue.size || from == to) {
-                                    android.util.Log.w("QueueScreenDBG", "Invalid drag indices: from=$from to=$to size=${visibleQueue.size}")
-                                    return@launch
+                        val fromIdx = from - headerOffset
+                        val toIdx = to - headerOffset
+                        if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx <= visualQueueItems.size - 1) {
+                            coroutineScope.launch {
+                                try {
+                                    val fromCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(fromIdx)
+                                    val toCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(toIdx)
+                                    if (fromCombinedIdx >= 0 && toCombinedIdx >= 0) {
+                                        queueOps.moveItem(fromCombinedIdx, toCombinedIdx)
+                                    }
+                                    visualQueueItems = queueOps.getVisibleQueue()
+                                } catch (e: Exception) {
+                                    android.util.Log.e("QueueScreenDBG", "NP: Error during drag operation", e)
+                                    visualQueueItems = queueOps.getVisibleQueue()
+                                } finally {
+                                    isDragging = false
                                 }
-                                
-                                // Use the proper index mapping
-                                val fromIndexInSnapshot = queueOps.getVisibleToCombinedIndexMapping(from)
-                                val toIndexInSnapshot = queueOps.getVisibleToCombinedIndexMapping(to)
-                                
-                                if (fromIndexInSnapshot < 0 || toIndexInSnapshot < 0) {
-                                    android.util.Log.w("QueueScreenDBG", "Invalid index mapping: from=$fromIndexInSnapshot to=$toIndexInSnapshot")
-                                    return@launch
-                                }
-                                
-                                android.util.Log.d("QueueScreenDBG", "Moving item from $fromIndexInSnapshot to $toIndexInSnapshot")
-                                
-                                // Perform the move
-                                queueOps.moveItem(fromIndexInSnapshot, toIndexInSnapshot)
-                                
-                            } catch (e: Exception) {
-                                android.util.Log.e("QueueScreenDBG", "Error during drag operation", e)
                             }
+                        } else {
+                            isDragging = false
+                            visualQueueItems = queueItems.toList()
                         }
                     }
                 )
@@ -849,6 +873,40 @@ fun NowPlayingScreen(navController: NavController) {
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    // Single context header: "Playing from {source}"
+                    item(key = "queue_context_header_single") {
+                        val contextTitle = when (qState.context?.type) {
+                            QueueManager.ContextType.PLAYLIST -> qState.context?.name ?: "Playlist"
+                            QueueManager.ContextType.ALBUM -> qState.context?.name ?: "Album"
+                            QueueManager.ContextType.LIKED_SONGS -> "Favorites"
+                            QueueManager.ContextType.ARTIST -> qState.context?.name ?: "Artist"
+                            QueueManager.ContextType.GENRE -> qState.context?.name ?: "Genre"
+                            QueueManager.ContextType.SEARCH -> qState.context?.name ?: "Search"
+                            QueueManager.ContextType.DISCOVER -> qState.context?.name ?: "Discover"
+                            else -> "Queue"
+                        }
+                        Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Playing from $contextTitle",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                                TextButton(onClick = {
+                                    coroutineScope.launch { queueOps.clearTransientQueues(keepCurrent = true) }
+                                }) { Text("Clear queue") }
+                            }
+                        }
+                    }
+
+                    // Sticky header with now playing and play/pause
                     stickyHeader {
                         if (t != null) {
                             Surface(color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)) {
@@ -876,8 +934,10 @@ fun NowPlayingScreen(navController: NavController) {
                             }
                         }
                     }
-                    // Use simplified queue items with stable keys
-                    itemsIndexed(queueItems, key = { _, item -> "queue_${item.id}" }) { idx, qi ->
+
+                    // Removed section headers; one unified header + sticky now playing row remain
+                    // Use visual queue items with stable keys
+                    itemsIndexed(visualQueueItems, key = { _, item -> "queue_${item.uid}" }) { idx, qi ->
                         val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
                         val dismissState = rememberDismissState(
                             confirmStateChange = { value ->
@@ -894,7 +954,7 @@ fun NowPlayingScreen(navController: NavController) {
                                     DismissValue.DismissedToStart -> {
                                         android.util.Log.d("QueueScreenDBG", "NP: swipe left (Remove) id=${qi.id}")
                                         coroutineScope.launch {
-                                            queueOps.removeItemById(qi.id)
+                                            queueOps.removeItemByUid(qi.uid)
                                             android.util.Log.d("QueueScreenDBG", "NP: after remove")
                                         }
                                         true
@@ -903,36 +963,69 @@ fun NowPlayingScreen(navController: NavController) {
                                 }
                             }
                         )
-                        ReorderableItem(reorderState, key = "queue_${qi.id}") { isDragging ->
+                        ReorderableItem(reorderState, key = "queue_${qi.uid}") { isDragging ->
                             SwipeToDismiss(
                                 state = dismissState,
                                 directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
                                 background = {
                                     val dir = dismissState.dismissDirection
+                                    val color = when (dir) {
+                                        DismissDirection.StartToEnd -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                        DismissDirection.EndToStart -> MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                                        else -> MaterialTheme.colorScheme.surface
+                                    }
+
+                                    val icon = when (dir) {
+                                        DismissDirection.StartToEnd -> Icons.Rounded.QueueMusic
+                                        DismissDirection.EndToStart -> Icons.Rounded.Delete
+                                        else -> null
+                                    }
+
                                     val text = when (dir) {
                                         DismissDirection.StartToEnd -> "Play Next"
                                         DismissDirection.EndToStart -> "Remove"
                                         else -> ""
                                     }
+
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(56.dp)
-                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-                                            .padding(horizontal = 16.dp),
+                                            .fillMaxSize()
+                                            .background(color, RoundedCornerShape(12.dp))
+                                            .padding(16.dp),
                                         contentAlignment = when (dir) {
                                             DismissDirection.StartToEnd -> Alignment.CenterStart
                                             DismissDirection.EndToStart -> Alignment.CenterEnd
                                             else -> Alignment.Center
                                         }
-                                    ) { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    ) {
+                                        if (icon != null) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = icon,
+                                                    contentDescription = text,
+                                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                                Text(
+                                                    text = text,
+                                                    color = MaterialTheme.colorScheme.onPrimary,
+                                                    style = MaterialTheme.typography.labelLarge.copy(
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
                                 },
                                 dismissContent = {
                                     // Fixed: Remove the alpha = 0f that was hiding the dragged item
                                     Box(
                                         modifier = Modifier
                                             .zIndex(if (isDragging) 1f else 0f)
-                                            .graphicsLayer { 
+                                            .graphicsLayer {
                                                 // Apply visual feedback for dragging without hiding the item
                                                 scaleX = if (isDragging) 1.02f else 1f
                                                 scaleY = if (isDragging) 1.02f else 1f
@@ -946,21 +1039,105 @@ fun NowPlayingScreen(navController: NavController) {
                                             contentDescription = vt.title,
                                             isPlaying = (controller?.currentMediaItem?.mediaId == qi.mediaItem.mediaId),
                                             onClick = {
-                                                val snap = queueOps.getQueueSnapshot()
-                                                val idxCombined = snap.indexOfFirst { it.mediaItem.mediaId == qi.mediaItem.mediaId }
-                                                if (idxCombined >= 0) {
-                                                    controller?.seekToDefaultPosition(idxCombined)
+                                                val combinedIndex = queueOps.getVisibleToCombinedIndexMapping(idx)
+                                                if (combinedIndex >= 0) {
+                                                    controller?.seekToDefaultPosition(combinedIndex)
                                                 }
                                             },
                                             extraArtOverlay = {
-                                                if (qi.source == QueueManager.QueueSource.PLAY_NEXT) {
-                                                    Box(modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)) {
-                                                        Icon(
-                                                            imageVector = Icons.Rounded.PlayArrow,
-                                                            contentDescription = null,
-                                                            tint = MaterialTheme.colorScheme.tertiary,
-                                                            modifier = Modifier.size(14.dp)
-                                                        )
+                                                // Enhanced visual indicators matching QueueScreen
+                                                when (qi.source) {
+                                                    QueueManager.QueueSource.PLAY_NEXT -> {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.TopEnd)
+                                                                .padding(2.dp)
+                                                        ) {
+                                                            Surface(
+                                                                color = MaterialTheme.colorScheme.tertiary,
+                                                                shape = RoundedCornerShape(6.dp),
+                                                            ) {
+                                                                Row(
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    modifier = Modifier.padding(
+                                                                        horizontal = 6.dp,
+                                                                        vertical = 2.dp
+                                                                    )
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Rounded.SkipNext,
+                                                                        contentDescription = null,
+                                                                        tint = MaterialTheme.colorScheme.onTertiary,
+                                                                        modifier = Modifier.size(12.dp)
+                                                                    )
+                                                                    Spacer(Modifier.width(4.dp))
+                                                                    Text(
+                                                                        text = "NEXT",
+                                                                        style = MaterialTheme.typography.labelSmall,
+                                                                        color = MaterialTheme.colorScheme.onTertiary
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    QueueManager.QueueSource.USER_QUEUE -> {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.TopEnd)
+                                                                .padding(2.dp)
+                                                        ) {
+                                                            Surface(
+                                                                color = MaterialTheme.colorScheme.secondary,
+                                                                shape = RoundedCornerShape(6.dp),
+                                                            ) {
+                                                                Row(
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    modifier = Modifier.padding(
+                                                                        horizontal = 6.dp,
+                                                                        vertical = 2.dp
+                                                                    )
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Rounded.Person,
+                                                                        contentDescription = null,
+                                                                        tint = MaterialTheme.colorScheme.onSecondary,
+                                                                        modifier = Modifier.size(12.dp)
+                                                                    )
+                                                                    Spacer(Modifier.width(4.dp))
+                                                                    Text(
+                                                                        text = "YOU",
+                                                                        style = MaterialTheme.typography.labelSmall,
+                                                                        color = MaterialTheme.colorScheme.onSecondary
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    else -> {
+                                                        // Show isolation status for main queue items
+                                                        if (qi.isIsolated) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .align(Alignment.TopStart)
+                                                                    .padding(2.dp)
+                                                            ) {
+                                                                Surface(
+                                                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                                                    shape = RoundedCornerShape(6.dp),
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Rounded.Lock,
+                                                                        contentDescription = "Protected from source changes",
+                                                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                                        modifier = Modifier
+                                                                            .size(16.dp)
+                                                                            .padding(2.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             },

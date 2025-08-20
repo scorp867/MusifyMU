@@ -18,6 +18,7 @@ import androidx.lifecycle.MutableLiveData
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.collections.ArrayDeque
 import kotlin.random.Random
+import java.util.UUID
 
 /**
  * Advanced Queue Manager with hybrid data structures for optimal performance
@@ -88,12 +89,16 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     val queueChangesLiveData: LiveData<QueueChangeEvent> = _queueChanges
 
     data class QueueItem(
+        val uid: String = UUID.randomUUID().toString(),
         val mediaItem: MediaItem,
         val id: String = mediaItem.mediaId,
         val addedAt: Long = System.currentTimeMillis(),
-        val source: QueueSource = QueueSource.USER_ADDED,
+        var source: QueueSource = QueueSource.USER_ADDED,
         var position: Int = -1,
-        val context: PlayContext? = null
+        val context: PlayContext? = null,
+        val isIsolated: Boolean = false, // True if item should not be affected by source changes
+        val originalSourceId: String? = null, // Track original source for reference
+        val userMetadata: Map<String, Any> = emptyMap() // Additional user-defined metadata
     )
 
     enum class QueueSource {
@@ -134,6 +139,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         data class ItemMoved(val from: Int, val to: Int, val item: QueueItem) : QueueChangeEvent()
         data class QueueCleared(val keepCurrent: Boolean) : QueueChangeEvent()
         data class QueueReordered(val newOrder: List<QueueItem>) : QueueChangeEvent()
+        data class QueueCleanup(val removedCount: Int, val keptCount: Int) : QueueChangeEvent()
         object QueueShuffled : QueueChangeEvent()
     }
 
@@ -144,13 +150,13 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     init {
         // Initialize with current state
         updateUIState()
-        
+
         // Start background operation processing
         CoroutineScope(Dispatchers.IO).launch {
             processOperationQueue()
         }
     }
-    
+
     /**
      * Background operation processor that handles queued operations
      * This ensures all operations are processed sequentially and safely
@@ -166,7 +172,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             }
         }
     }
-    
+
     /**
      * Execute individual queue operations
      */
@@ -296,7 +302,10 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                         addedAt = baseTime + (offset++),
                         position = mainList.size + priorityList.size + userList.size,
                         source = QueueSource.USER_QUEUE,
-                        context = context ?: currentContext
+                        context = context ?: currentContext,
+                        isIsolated = true, // User queue items are isolated from source changes
+                        originalSourceId = context?.id,
+                        userMetadata = mapOf("addedByUser" to true, "timestamp" to baseTime)
                     )
                 }
             }
@@ -337,7 +346,10 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                     mediaItem = mediaItem,
                     addedAt = baseTime + (offset++),
                     source = QueueSource.PLAY_NEXT,
-                    context = context ?: currentContext
+                    context = context ?: currentContext,
+                    isIsolated = true, // Priority queue items are isolated from source changes
+                    originalSourceId = context?.id,
+                    userMetadata = mapOf("addedByUser" to true, "priority" to true, "timestamp" to baseTime)
                 )
             }
 
@@ -385,10 +397,36 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             if (from < combinedQueue.size && to < combinedQueue.size) {
                 val item = combinedQueue[from]
 
-                // Update internal structures
+                // Calculate current segment boundaries in combined indices
+                val mainAll = mainList.toList()
+                val currentInMain = currentIndex.coerceAtMost((mainAll.size - 1).coerceAtLeast(-1))
+                val priStart = (currentInMain + 1).coerceAtLeast(0)
+                val priEndExclusive = priStart + priorityList.size
+                val userStart = priEndExclusive
+                val userEndExclusive = userStart + userList.size
+                val mainTailStart = userEndExclusive
+
+                // Determine target segment by destination index
+                val newSource = when {
+                    to in priStart until priEndExclusive -> QueueSource.PLAY_NEXT
+                    to in userStart until userEndExclusive -> QueueSource.USER_QUEUE
+                    else -> when (currentContext?.type) {
+                        ContextType.ALBUM -> QueueSource.ALBUM
+                        ContextType.PLAYLIST -> QueueSource.PLAYLIST
+                        ContextType.LIKED_SONGS -> QueueSource.LIKED_SONGS
+                        else -> QueueSource.USER_ADDED
+                    }
+                }
+
+                // Update item source to reflect cross-section move
+                if (item.source != newSource) {
+                    item.source = newSource
+                }
+
+                // Update internal structures based on the new combined order
                 updateQueueAfterMove(from, to)
 
-                // Move in player
+                // Move in player timeline
                 player.moveMediaItem(from, to)
 
                 // Update current index if needed
@@ -416,19 +454,28 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
         val item = combinedQueue[index]
 
-        // Remove from appropriate queue
-        when (item.source) {
-            QueueSource.PLAY_NEXT -> {
-                priorityList.remove(item)
-                queueState?.let { qs ->
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val current = qs.getPlayNextCount()
-                        qs.setPlayNextCount((current - 1).coerceAtLeast(0))
-                    }
+        // Resolve the actual instance from internal lists by uid first, then id
+        fun findAndRemoveFromList(list: MutableList<QueueItem>): Boolean {
+            val idx = list.indexOfFirst { it === item || it.uid == item.uid || it.id == item.id }
+            return if (idx >= 0) {
+                list.removeAt(idx)
+                true
+            } else false
+        }
+
+        var removedFrom: QueueSource? = null
+        if (findAndRemoveFromList(priorityList)) {
+            removedFrom = QueueSource.PLAY_NEXT
+            queueState?.let { qs ->
+                CoroutineScope(Dispatchers.IO).launch {
+                    val current = qs.getPlayNextCount()
+                    qs.setPlayNextCount((current - 1).coerceAtLeast(0))
                 }
             }
-            QueueSource.USER_QUEUE -> userList.remove(item)
-            else -> mainList.remove(item)
+        } else if (findAndRemoveFromList(userList)) {
+            removedFrom = QueueSource.USER_QUEUE
+        } else if (findAndRemoveFromList(mainList)) {
+            removedFrom = item.source
         }
 
         // Remove from lookup
@@ -448,7 +495,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         _queueChanges.postValue(QueueChangeEvent.ItemRemoved(item, index))
         updateUIState()
         android.util.Log.d(logTag, "removeAtInternal done removedSource=${item.source} currentIndex=$currentIndex")
-        return item.source == QueueSource.PLAY_NEXT
+        return removedFrom == QueueSource.PLAY_NEXT
     }
 
     suspend fun removeAt(index: Int) = queueMutex.withLock {
@@ -456,6 +503,51 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             removeAtInternal(index)
         } catch (e: Exception) {
             android.util.Log.e("QueueManager", "Error removing item", e)
+        }
+    }
+
+    suspend fun removeByUid(uid: String) = queueMutex.withLock {
+        try {
+            val idx = getCombinedQueue().indexOfFirst { it.uid == uid }
+            if (idx >= 0) removeAtInternal(idx)
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error removing item by uid", e)
+        }
+    }
+
+    /**
+     * Clear both Play Next and User Queue segments. Optionally keep the current item even if transient.
+     */
+    suspend fun clearTransientQueues(keepCurrent: Boolean = true) = queueMutex.withLock {
+        try {
+            val combined = getCombinedQueue()
+            val current = getCurrentItem()
+            val toKeepUid = if (keepCurrent) current?.uid else null
+
+            val newCombined = combined.filter { item ->
+                val isTransient = (item.source == QueueSource.PLAY_NEXT || item.source == QueueSource.USER_QUEUE)
+                if (!isTransient) return@filter true
+                // Keep current if requested
+                return@filter (toKeepUid != null && item.uid == toKeepUid)
+            }
+
+            // Rebuild internal lists and player timeline
+            rebuildQueuesFromCombined(newCombined)
+            currentIndex = newCombined.indexOfFirst { it.uid == toKeepUid }.let { if (it >= 0) it else currentIndex.coerceIn(0, (newCombined.size - 1).coerceAtLeast(0)) }
+
+            val mediaItems = newCombined.map { it.mediaItem }
+            player.setMediaItems(mediaItems, currentIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0)), 0L)
+
+            // Reset play-next count in the store
+            queueState?.let { qs ->
+                CoroutineScope(Dispatchers.IO).launch { qs.setPlayNextCount(0) }
+            }
+
+            updateUIState()
+            _queueChanges.postValue(QueueChangeEvent.QueueReordered(newCombined))
+
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error clearing transient queues", e)
         }
     }
 
@@ -549,7 +641,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         emptyList()
     }
 
-    fun getQueueSize(): Int = mainList.size + priorityList.size + userList.size
+    fun getQueueSize(): Int = try { player.mediaItemCount } catch (_: Exception) { mainList.size + priorityList.size + userList.size }
 
     fun getCurrentIndex(): Int = currentIndex
 
@@ -569,6 +661,11 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     suspend fun removeFirstPlayNextByMediaId(mediaId: String): Boolean = queueMutex.withLock {
         val idx = getCombinedQueue().indexOfFirst { it.source == QueueSource.PLAY_NEXT && it.mediaItem.mediaId == mediaId }
+        return@withLock if (idx >= 0) removeAtInternal(idx) else false
+    }
+
+    suspend fun removeFirstUserQueueByMediaId(mediaId: String): Boolean = queueMutex.withLock {
+        val idx = getCombinedQueue().indexOfFirst { it.source == QueueSource.USER_QUEUE && it.mediaItem.mediaId == mediaId }
         return@withLock if (idx >= 0) removeAtInternal(idx) else false
     }
 
@@ -655,42 +752,83 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     }
 
     fun getVisibleQueue(): List<QueueItem> {
-        // Visible queue starts from item after current and forward
-        // List shows Priority (Play Next) items first, then User Queue, then remainder of main after current
-        val mainAll = mainList.toList()
-        val start = (currentIndex + 1).coerceAtMost(mainAll.size)
-        val visible = mutableListOf<QueueItem>()
-        visible.addAll(priorityList.toList())
-        visible.addAll(userList.toList())
-        if (start < mainAll.size) visible.addAll(mainAll.drop(start))
-        android.util.Log.d(logTag, "getVisibleQueue pri=${priorityList.size} user=${userList.size} mainTail=${(mainAll.size - start).coerceAtLeast(0)} visible=${visible.size}")
+        // Build from authoritative player timeline
+        val combined = getCombinedQueue()
+        val start = (currentIndex + 1).coerceAtMost((combined.size))
+        val visible = if (start < combined.size) combined.drop(start) else emptyList()
+        android.util.Log.d(logTag, "getVisibleQueue currentIndex=$currentIndex total=${combined.size} visible=${visible.size}")
         return visible
     }
-    
+
     /**
      * Get the index mapping from visible queue position to combined queue position
      */
     fun getVisibleToCombinedIndexMapping(visibleIndex: Int): Int {
         val visibleQueue = getVisibleQueue()
         if (visibleIndex < 0 || visibleIndex >= visibleQueue.size) return -1
-        
+
         val item = visibleQueue[visibleIndex]
         val combinedQueue = getCombinedQueue()
-        return combinedQueue.indexOfFirst { it.id == item.id }
+        // Prefer identity match to handle duplicates reliably
+        val identityIdx = combinedQueue.indexOfFirst { it === item }
+        if (identityIdx >= 0) return identityIdx
+        // Fallback to stable UID match if identity is not preserved
+        return combinedQueue.indexOfFirst { it.uid == item.uid }
     }
 
     // Private helper methods
 
     private fun getCombinedQueue(): List<QueueItem> {
-        val combined = mutableListOf<QueueItem>()
+        // Construct the combined queue directly from the player's timeline to ensure accurate ordering
+        return try {
+            val count = player.mediaItemCount
+            if (count <= 0) {
+                // Fallback to local lists if player is empty
+                val fallback = mutableListOf<QueueItem>()
+                fallback.addAll(mainList)
+                fallback.addAll(priorityList)
+                fallback.addAll(userList)
+                fallback
+            } else {
+                val buckets = LinkedHashMap<String, ArrayDeque<QueueItem>>()
+                fun addToBuckets(list: List<QueueItem>) {
+                    list.forEach { qi ->
+                        val dq = buckets.getOrPut(qi.id) { ArrayDeque() }
+                        dq.addLast(qi)
+                    }
+                }
+                // Collect in a deterministic order: priority, user, then main
+                // to prefer mapping current queued items before any stale copies
+                addToBuckets(priorityList)
+                addToBuckets(userList)
+                addToBuckets(mainList)
 
-        val mainAll = mainList.toList()
-        val currentInMain = currentIndex.coerceAtMost(mainAll.size - 1)
-        if (currentInMain >= 0) combined.addAll(mainAll.take(currentInMain + 1))
-        combined.addAll(priorityList.toList())
-        combined.addAll(userList.toList())
-        if (currentInMain + 1 < mainAll.size) combined.addAll(mainAll.drop(currentInMain + 1))
-        return combined
+                val result = mutableListOf<QueueItem>()
+                for (i in 0 until count) {
+                    val mi = player.getMediaItemAt(i) ?: continue
+                    val match = buckets[mi.mediaId]?.removeFirstOrNull()
+                    if (match != null) {
+                        // Keep reference identity to support === mapping
+                        result.add(match)
+                    } else {
+                        // Fallback: synthesize a minimal QueueItem preserving metadata
+                        result.add(
+                            QueueItem(
+                                mediaItem = mi,
+                                position = i,
+                                source = QueueSource.USER_ADDED,
+                                context = currentContext
+                            )
+                        )
+                    }
+                }
+                result
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error building combined queue from player", e)
+            // Safe fallback
+            (mainList + priorityList + userList).toList()
+        }
     }
 
     private fun updateQueueAfterMove(from: Int, to: Int) {
@@ -792,6 +930,36 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             .coerceAtLeast(0)
     }
 
+    private fun buildCombinedFromInternalListsWithCurrent(): Pair<List<QueueItem>, Int> {
+        val mainAll = mainList.toList()
+        val current = getCurrentItem()
+        val currentInMain = current?.let { c -> mainAll.indexOfFirst { it.id == c.id && it.addedAt == c.addedAt } }
+            ?: -1
+
+        val combined = mutableListOf<QueueItem>()
+        if (currentInMain >= 0) {
+            // Up to and including current main item
+            combined.addAll(mainAll.take(currentInMain + 1))
+        } else if (current != null) {
+            // Current item not in main; ensure it is at the head of combined
+            combined.add(current)
+        }
+        // Insert priority and user segments next
+        combined.addAll(priorityList)
+        combined.addAll(userList)
+        // Append the remainder of main items if current belongs to main
+        if (currentInMain + 1 < mainAll.size && currentInMain >= 0) {
+            combined.addAll(mainAll.drop(currentInMain + 1))
+        } else if (currentInMain < 0) {
+            // Current not in main, append all main items
+            combined.addAll(mainAll)
+        }
+
+        val newCurrentIndex = combined.indexOfFirst { it.id == current?.id && it.addedAt == current?.addedAt }
+            .let { if (it >= 0) it else 0 }
+        return combined to newCurrentIndex
+    }
+
     private fun updateUIState() {
         val state = QueueState(
             totalItems = getQueueSize(),
@@ -812,6 +980,13 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     // Called when track changes to update history
     fun onTrackChanged(mediaId: String) {
+        // Sync our current index with the player's current index to keep trimming and visibility accurate
+        val playerIndex = try {
+            player.currentMediaItemIndex
+        } catch (_: Exception) { -1 }
+        if (playerIndex >= 0) {
+            currentIndex = playerIndex.coerceIn(0, (getQueueSize() - 1).coerceAtLeast(0))
+        }
         shuffleHistory.addFirst(mediaId)
         if (shuffleHistory.size > maxShuffleHistory) {
             shuffleHistory.removeLast()
@@ -824,18 +999,63 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         }
         android.util.Log.d(logTag, "onTrackChanged mediaId=$mediaId currentIndex=$currentIndex total=${getQueueSize()}")
     }
-    
+
+    /**
+     * Enhanced intelligent trimming - removes played songs while preserving user choices
+     */
     private suspend fun trimPlayedBeforeCurrent() = queueMutex.withLock {
         val idx = currentIndex
         if (idx <= 0) return@withLock
-        // Remove items at the head repeatedly; this updates player timeline and internal lists
-        repeat(idx) { removeAtInternal(0) }
-        currentIndex = 0
-        updateUIState()
+
+        try {
+            android.util.Log.d(logTag, "trimPlayedBeforeCurrent: trimming $idx played items")
+
+            val combinedQueue = getCombinedQueue()
+            val itemsToRemove = combinedQueue.take(idx)
+
+            // Intelligent removal: Keep recently added priority items even if played
+            val recentThreshold = System.currentTimeMillis() - (5 * 60 * 1000) // 5 minutes
+            val itemsToKeep = itemsToRemove.filter { item ->
+                item.source == QueueSource.PLAY_NEXT &&
+                        item.addedAt > recentThreshold &&
+                        item.userMetadata["keepAfterPlay"] == true
+            }
+
+            // Remove played items (except those we want to keep)
+            var removedCount = 0
+            itemsToRemove.forEach { item ->
+                if (!itemsToKeep.contains(item)) {
+                    val success = removeAtInternal(0) // Always remove from index 0 as list shifts
+                    if (success || true) { // Continue even if removal fails for some items
+                        removedCount++
+                    }
+                }
+            }
+
+            // Update current index
+            currentIndex = (idx - removedCount).coerceAtLeast(0)
+
+            // Notify about cleanup
+            if (removedCount > 0) {
+                _queueChanges.postValue(QueueChangeEvent.QueueCleanup(removedCount, itemsToKeep.size))
+            }
+
+            updateUIState()
+            android.util.Log.d(logTag, "trimPlayedBeforeCurrent completed: removed=$removedCount kept=${itemsToKeep.size} newCurrentIndex=$currentIndex")
+
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error during intelligent trimming", e)
+            // Fallback to simple removal if intelligent trimming fails
+            repeat(idx) {
+                try { removeAtInternal(0) } catch (_: Exception) { }
+            }
+            currentIndex = 0
+            updateUIState()
+        }
     }
-    
+
     // Operation queue methods for external use
-    
+
     /**
      * Queue an add operation for background processing (for bulk operations)
      */
@@ -845,9 +1065,159 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             _pendingOperations.update { it + 1 }
         }
     }
-    
+
     /**
      * Get pending operation count for UI feedback
      */
     fun getPendingOperationCount(): Int = pendingOperations.value
+
+    /**
+     * Enhanced queue isolation methods for Spotify-like behavior
+     */
+
+    /**
+     * Update source playlist without affecting isolated queue items (Priority/User queues)
+     */
+    suspend fun updateSourcePlaylist(
+        newItems: List<MediaItem>,
+        sourceId: String,
+        preserveCurrentPosition: Boolean = true
+    ) = queueMutex.withLock {
+        try {
+            android.util.Log.d(logTag, "updateSourcePlaylist sourceId=$sourceId newItems=${newItems.size}")
+
+            // Only update main queue items that match the source and are not isolated
+            val currentItem = if (preserveCurrentPosition) getCurrentItem() else null
+            val isolatedItems = mutableListOf<QueueItem>()
+
+            // Collect all isolated items (priority + user queues)
+            isolatedItems.addAll(priorityList.filter { it.isIsolated })
+            isolatedItems.addAll(userList.filter { it.isIsolated })
+
+            // Filter main list to keep only isolated items or items from different sources
+            val preservedMainItems = mainList.filter { item ->
+                item.isIsolated || (item.context?.id != sourceId)
+            }
+
+            // Create new main items from the updated source
+            val baseTime = System.currentTimeMillis()
+            val newMainItems = newItems.mapIndexed { index, mediaItem ->
+                QueueItem(
+                    mediaItem = mediaItem,
+                    addedAt = baseTime + index,
+                    position = index,
+                    source = when (currentContext?.type) {
+                        ContextType.ALBUM -> QueueSource.ALBUM
+                        ContextType.PLAYLIST -> QueueSource.PLAYLIST
+                        ContextType.LIKED_SONGS -> QueueSource.LIKED_SONGS
+                        else -> QueueSource.USER_ADDED
+                    },
+                    context = currentContext,
+                    isIsolated = false, // Main queue items are not isolated
+                    originalSourceId = sourceId
+                )
+            }
+
+            // Rebuild main list
+            mainList.clear()
+            mainList.addAll(preservedMainItems)
+            mainList.addAll(newMainItems)
+
+            // Update lookup table
+            queueLookup.clear()
+            mainList.forEach { queueLookup[it.id] = it }
+            priorityList.forEach { queueLookup[it.id] = it }
+            userList.forEach { queueLookup[it.id] = it }
+
+            // Restore current position if requested
+            if (preserveCurrentPosition && currentItem != null) {
+                val newCurrentIndex = getCombinedQueue().indexOfFirst { it.id == currentItem.id }
+                if (newCurrentIndex >= 0) {
+                    currentIndex = newCurrentIndex
+                }
+            }
+
+            // Update player timeline
+            val combinedQueue = getCombinedQueue()
+            val mediaItems = combinedQueue.map { it.mediaItem }
+            player.setMediaItems(mediaItems, currentIndex, 0L)
+
+            updateUIState()
+            _queueChanges.postValue(QueueChangeEvent.QueueReordered(combinedQueue))
+
+            android.util.Log.d(logTag, "updateSourcePlaylist completed: main=${mainList.size} total=${getQueueSize()}")
+
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error updating source playlist", e)
+        }
+    }
+
+    /**
+     * Remove all items from a specific source while preserving isolated items
+     */
+    suspend fun removeItemsFromSource(sourceId: String) = queueMutex.withLock {
+        try {
+            android.util.Log.d(logTag, "removeItemsFromSource sourceId=$sourceId")
+
+            val removedItems = mutableListOf<QueueItem>()
+
+            // Remove from main list (only non-isolated items from this source)
+            val mainIterator = mainList.iterator()
+            while (mainIterator.hasNext()) {
+                val item = mainIterator.next()
+                if (!item.isIsolated && item.originalSourceId == sourceId) {
+                    mainIterator.remove()
+                    queueLookup.remove(item.id)
+                    removedItems.add(item)
+                }
+            }
+
+            // Update player if items were removed
+            if (removedItems.isNotEmpty()) {
+                val combinedQueue = getCombinedQueue()
+                val mediaItems = combinedQueue.map { it.mediaItem }
+                player.setMediaItems(mediaItems, currentIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0)), 0L)
+
+                updateUIState()
+                removedItems.forEach { item ->
+                    _queueChanges.postValue(QueueChangeEvent.ItemRemoved(item, -1))
+                }
+            }
+
+            android.util.Log.d(logTag, "removeItemsFromSource completed: removed=${removedItems.size}")
+
+        } catch (e: Exception) {
+            android.util.Log.e("QueueManager", "Error removing items from source", e)
+        }
+    }
+
+    /**
+     * Get queue statistics for debugging and UI display
+     */
+    fun getQueueStatistics(): QueueStatistics {
+        val combined = getCombinedQueue()
+        return QueueStatistics(
+            totalItems = combined.size,
+            priorityItems = priorityList.size,
+            userQueueItems = userList.size,
+            mainItems = mainList.size,
+            isolatedItems = combined.count { it.isIsolated },
+            sourcesCount = combined.mapNotNull { it.originalSourceId }.distinct().size,
+            currentIndex = currentIndex,
+            hasNext = hasNext(),
+            hasPrevious = hasPrevious()
+        )
+    }
+
+    data class QueueStatistics(
+        val totalItems: Int,
+        val priorityItems: Int,
+        val userQueueItems: Int,
+        val mainItems: Int,
+        val isolatedItems: Int,
+        val sourcesCount: Int,
+        val currentIndex: Int,
+        val hasNext: Boolean,
+        val hasPrevious: Boolean
+    )
 }

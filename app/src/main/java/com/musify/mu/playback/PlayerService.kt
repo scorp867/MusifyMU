@@ -71,21 +71,27 @@ class PlayerService : MediaLibraryService() {
                     if (isPlaying) audioFocusManager.request() else audioFocusManager.abandon()
                 }
             }
-            
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 mediaItem?.let { item ->
-                    // Auto-remove finished PLAY_NEXT item only on auto-advance
-                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
-                        val finishedMediaId = currentMediaIdCache
-                        if (finishedMediaId != null) {
-                            serviceScope.launch(Dispatchers.Main) {
-                                try {
-                                    val removed = queue.consumePlayNextHeadIfMatches(finishedMediaId)
-                                    if (removed) {
-                                        queueStateStore.decrementOnAdvance()
+                    // Remove consumed transient items (Play Next or User Queue) on any advance (auto or manual)
+                    val finishedMediaId = currentMediaIdCache
+                    if (finishedMediaId != null) {
+                        serviceScope.launch(Dispatchers.Main) {
+                            try {
+                                // First try play-next head consume (preserves multi-play-next semantics)
+                                val removedPlayNext = queue.consumePlayNextHeadIfMatches(finishedMediaId)
+                                if (removedPlayNext) {
+                                    queueStateStore.decrementOnAdvance()
+                                } else {
+                                    // If not play-next, remove the first matching USER_QUEUE item for this id
+                                    // This ensures User Queue items are consumed after play
+                                    val removedUser = queue.removeFirstUserQueueByMediaId(finishedMediaId)
+                                    if (removedUser) {
+                                        // No count to adjust for user queue
                                     }
-                                } catch (_: Exception) { }
-                            }
+                                }
+                            } catch (_: Exception) { }
                         }
                     }
                     // Update current cached id to new current
@@ -101,12 +107,12 @@ class PlayerService : MediaLibraryService() {
                         // Record track as played
                         repo.recordPlayed(item.mediaId)
                         queueStateStore.decrementOnAdvance()
-                        
+
                         // Load lyrics only if it's a different track
                         if (lastLoadedLyricsId != item.mediaId) {
                             lastLoadedLyricsId = item.mediaId
                             android.util.Log.d("PlayerService", "onMediaItemTransition: Loading lyrics for ${item.mediaId}")
-                            try { 
+                            try {
                                 lyricsStateStore.loadLyrics(item.mediaId)
                             } catch (e: Exception) {
                                 android.util.Log.e("PlayerService", "Failed to load lyrics on transition", e)
@@ -140,15 +146,15 @@ class PlayerService : MediaLibraryService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        
+
         repo = LibraryRepository.get(this)
         stateStore = PlaybackStateStore(this)
         queueStateStore = QueueStateStore(this)
         lyricsStateStore = LyricsStateStore.getInstance(this)
         // Lazy: player and queue are created on first playback request
-        
+
         // Player listeners are attached in ensurePlayerInitialized() when needed
-        
+
         // Initialize audio focus manager
         audioFocusManager = AudioFocusManager(this) { focusChange ->
             when (focusChange) {
@@ -211,7 +217,7 @@ class PlayerService : MediaLibraryService() {
                 // Ensure player is initialized when media items are added
                 ensurePlayerInitialized()
                 android.util.Log.d("PlayerService", "onAddMediaItems called with ${mediaItems.size} items")
-                
+
                 val future = com.google.common.util.concurrent.SettableFuture.create<MutableList<MediaItem>>()
                 serviceScope.launch(Dispatchers.IO) {
                     try {
@@ -224,9 +230,9 @@ class PlayerService : MediaLibraryService() {
                             } else {
                                 // Fallback: keep original if it's a direct URI or has request metadata
                                 val hasDirectUri = (item.localConfiguration?.uri != null)
-                                    || (item.requestMetadata.mediaUri != null)
-                                    || id.startsWith("content://")
-                                    || id.startsWith("file://")
+                                        || (item.requestMetadata.mediaUri != null)
+                                        || id.startsWith("content://")
+                                        || id.startsWith("file://")
                                 if (hasDirectUri) {
                                     resolved.add(item)
                                 }
@@ -250,7 +256,7 @@ class PlayerService : MediaLibraryService() {
         val placeholderPlayer = ExoPlayer.Builder(this).build()
         _queue = QueueManager(placeholderPlayer, queueStateStore)
         QueueManagerProvider.setInstance(queue)
-        
+
         mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(this, placeholderPlayer, callback)
             .setId("MusifyMU_Session")
             .setShowPlayButtonIfPlaybackIsSuppressed(false)
@@ -274,7 +280,7 @@ class PlayerService : MediaLibraryService() {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
         android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
-        
+
         // Stop foreground service and clear notifications
         stopForeground(STOP_FOREGROUND_REMOVE)
         // Stop the service completely
@@ -290,7 +296,7 @@ class PlayerService : MediaLibraryService() {
         _player = null
         _queue = null
         serviceScope.cancel()
-        
+
         // Clear state on destroy
         serviceScope.launch(Dispatchers.IO) {
             try {
@@ -299,7 +305,7 @@ class PlayerService : MediaLibraryService() {
                 android.util.Log.w("PlayerService", "Failed to clear state on destroy", e)
             }
         }
-        
+
         super.onDestroy()
     }
 
@@ -308,7 +314,7 @@ class PlayerService : MediaLibraryService() {
         serviceScope.launch {
             try {
                 val tracks = repo.getAllTracks().filter { ids.contains(it.mediaId) }
-                
+
                 // Validate that media files exist
                 val validTracks = tracks.filter { track ->
                     try {
@@ -321,7 +327,7 @@ class PlayerService : MediaLibraryService() {
                         false
                     }
                 }
-                
+
                 val items = validTracks.map { it.toMediaItem() }
                 if (items.isNotEmpty()) {
                     val validStartIndex = startIndex.coerceIn(0, items.size - 1)
@@ -334,7 +340,7 @@ class PlayerService : MediaLibraryService() {
             }
         }
     }
-    
+
     private fun createPlayerActivityIntent(): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -347,7 +353,7 @@ class PlayerService : MediaLibraryService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
-    
+
     private fun stopForegroundService() {
         // Stop foreground service and remove notifications
         try {
@@ -360,7 +366,7 @@ class PlayerService : MediaLibraryService() {
             android.util.Log.e("PlayerService", "Error stopping foreground service", e)
         }
     }
-    
+
 
     companion object {
         // Service configuration constants

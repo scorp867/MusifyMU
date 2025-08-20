@@ -20,12 +20,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+// Using simple quadratic acceleration instead of pow
 
 /**
  * Enhanced drag and drop component with smooth animations and dynamic feedback
  */
 object EnhancedDragAndDrop {
-    
+
     /**
      * High-performance modifier for draggable items with optimized animations
      * Uses hardware acceleration and efficient rendering for smooth 60fps performance
@@ -38,7 +39,7 @@ object EnhancedDragAndDrop {
         useHardwareAcceleration: Boolean = true
     ): Modifier {
         val haptic = LocalHapticFeedback.current
-        
+
         // Optimized elevation animation - uses smaller range for better performance
         val elevation by animateDpAsState(
             targetValue = if (isDragging) 12.dp else 4.dp,
@@ -48,7 +49,7 @@ object EnhancedDragAndDrop {
             ),
             label = "elevation"
         )
-        
+
         // Scale animation with instant feedback
         val scale by animateFloatAsState(
             targetValue = if (isDragging) 1.05f else 1f,
@@ -58,7 +59,7 @@ object EnhancedDragAndDrop {
             ),
             label = "scale"
         )
-        
+
         // Subtle rotation based on drag velocity for dynamic feel
         val rotation by animateFloatAsState(
             targetValue = if (isDragging) (dragOffset * 0.005f).coerceIn(-1.5f, 1.5f) else 0f,
@@ -68,12 +69,12 @@ object EnhancedDragAndDrop {
             ),
             label = "rotation"
         )
-        
+
         // Optimized color animation with reduced alpha calculations
         val backgroundColor by animateColorAsState(
-            targetValue = if (isDragging) 
+            targetValue = if (isDragging)
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
-            else 
+            else
                 MaterialTheme.colorScheme.surface,
             animationSpec = if (isDragging) {
                 // Instant feedback when starting drag
@@ -84,7 +85,7 @@ object EnhancedDragAndDrop {
             },
             label = "backgroundColor"
         )
-        
+
         return this
             .graphicsLayer {
                 // Hardware accelerated transformations
@@ -92,12 +93,12 @@ object EnhancedDragAndDrop {
                 scaleY = scale
                 rotationZ = rotation
                 translationY = dragOffset
-                
+
                 // Enable hardware acceleration for smoother rendering
                 if (useHardwareAcceleration) {
                     compositingStrategy = CompositingStrategy.Offscreen
                 }
-                
+
                 // Optimize rendering layers
                 renderEffect = if (isDragging) {
                     null // Disable effects during drag for performance
@@ -114,7 +115,7 @@ object EnhancedDragAndDrop {
                 shape = RoundedCornerShape(12.dp)
             )
     }
-    
+
     /**
      * Drop zone indicator with pulsing animation
      */
@@ -124,7 +125,7 @@ object EnhancedDragAndDrop {
         modifier: Modifier = Modifier
     ) {
         val infiniteTransition = rememberInfiniteTransition(label = "dropZone")
-        
+
         val alpha by infiniteTransition.animateFloat(
             initialValue = 0.3f,
             targetValue = if (isActive) 0.8f else 0.3f,
@@ -134,7 +135,7 @@ object EnhancedDragAndDrop {
             ),
             label = "alpha"
         )
-        
+
         val scale by infiniteTransition.animateFloat(
             initialValue = 1f,
             targetValue = if (isActive) 1.02f else 1f,
@@ -144,7 +145,7 @@ object EnhancedDragAndDrop {
             ),
             label = "scale"
         )
-        
+
         Box(
             modifier = modifier
                 .graphicsLayer {
@@ -163,7 +164,7 @@ object EnhancedDragAndDrop {
                 .padding(2.dp)
         )
     }
-    
+
     /**
      * Enhanced drag handle with visual feedback
      */
@@ -173,16 +174,16 @@ object EnhancedDragAndDrop {
         modifier: Modifier = Modifier
     ) {
         val haptic = LocalHapticFeedback.current
-        
+
         val color by animateColorAsState(
-            targetValue = if (isPressed) 
+            targetValue = if (isPressed)
                 MaterialTheme.colorScheme.primary
-            else 
+            else
                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             animationSpec = tween(200),
             label = "handleColor"
         )
-        
+
         val scale by animateFloatAsState(
             targetValue = if (isPressed) 1.2f else 1f,
             animationSpec = spring(
@@ -191,7 +192,7 @@ object EnhancedDragAndDrop {
             ),
             label = "handleScale"
         )
-        
+
         Column(
             modifier = modifier
                 .graphicsLayer {
@@ -221,58 +222,66 @@ object EnhancedDragAndDrop {
             }
         }
     }
-    
+
     /**
      * Enhanced auto-scroll with smooth interpolated scrolling for natural feel
      */
     @Composable
     fun rememberAutoScrollState(
         listState: LazyListState,
-        threshold: Float = 80f, // Reduced threshold for more responsive scrolling
-        maxScrollSpeed: Float = 500f // Maximum scroll speed in pixels per second
+        threshold: Float = 60f, // Further reduced for Spotify-like responsiveness
+        maxScrollSpeed: Float = 600f, // Increased max speed for faster scrolling
+        accelerationCurve: Float = 1.5f // Exponential acceleration near edges
     ): AutoScrollState {
         val density = LocalDensity.current
-        
+
         return remember {
-            AutoScrollState(listState, threshold, maxScrollSpeed, density)
+            AutoScrollState(listState, threshold, maxScrollSpeed, density, accelerationCurve)
         }
     }
-    
+
     class AutoScrollState(
         private val listState: LazyListState,
         private val threshold: Float,
         private val maxScrollSpeed: Float,
-        private val density: androidx.compose.ui.unit.Density
+        private val density: androidx.compose.ui.unit.Density,
+        private val accelerationCurve: Float = 1.5f
     ) {
         private var isScrolling = false
-        
+        private var scrollJob: kotlinx.coroutines.Job? = null
+
         suspend fun handleAutoScroll(dragY: Float, containerHeight: Float) {
             if (isScrolling) return // Prevent concurrent scroll operations
-            
+
             val scrollThreshold = with(density) { threshold.toDp().toPx() }
-            
+
             when {
                 dragY < scrollThreshold -> {
-                    // Scroll up with interpolated speed
-                    val proximity = (scrollThreshold - dragY) / scrollThreshold
-                    val scrollSpeed = (proximity * maxScrollSpeed).coerceIn(50f, maxScrollSpeed)
+                    // Enhanced upward scroll with quadratic acceleration
+                    val proximity = ((scrollThreshold - dragY) / scrollThreshold).coerceIn(0f, 1f)
+                    val acceleratedProximity = proximity * proximity // Simple quadratic acceleration
+                    val scrollSpeed = (acceleratedProximity * maxScrollSpeed).coerceIn(100f, maxScrollSpeed)
                     performSmoothScroll(scrollSpeed, isUpward = true)
                 }
                 dragY > containerHeight - scrollThreshold -> {
-                    // Scroll down with interpolated speed
-                    val proximity = (dragY - (containerHeight - scrollThreshold)) / scrollThreshold
-                    val scrollSpeed = (proximity * maxScrollSpeed).coerceIn(50f, maxScrollSpeed)
+                    // Enhanced downward scroll with quadratic acceleration
+                    val proximity = ((dragY - (containerHeight - scrollThreshold)) / scrollThreshold).coerceIn(0f, 1f)
+                    val acceleratedProximity = proximity * proximity // Simple quadratic acceleration
+                    val scrollSpeed = (acceleratedProximity * maxScrollSpeed).coerceIn(100f, maxScrollSpeed)
                     performSmoothScroll(scrollSpeed, isUpward = false)
+                }
+                else -> {
+                    stopAutoScroll() // Stop scrolling when not near edges
                 }
             }
         }
-        
+
         private suspend fun performSmoothScroll(speed: Float, isUpward: Boolean) {
             isScrolling = true
             try {
                 val scrollDistance = with(density) { (speed / 16f).toDp().toPx() } // 60fps frame rate
                 val currentOffset = listState.firstVisibleItemScrollOffset
-                
+
                 if (isUpward) {
                     val targetOffset = (currentOffset - scrollDistance).coerceAtLeast(0f)
                     if (targetOffset < currentOffset) {
@@ -287,18 +296,24 @@ object EnhancedDragAndDrop {
                         scrollOffset = 0
                     )
                 }
-                
+
                 delay(16) // 60fps smooth scrolling
             } finally {
                 isScrolling = false
             }
         }
-        
+
         fun stopAutoScroll() {
+            scrollJob?.cancel()
+            scrollJob = null
             isScrolling = false
         }
+
+        fun dispose() {
+            stopAutoScroll()
+        }
     }
-    
+
     /**
      * Insertion indicator with smooth slide animation
      */
@@ -365,35 +380,35 @@ class EnhancedDragDropState(
 ) {
     var isDragging by mutableStateOf(false)
         private set
-    
+
     var draggedItemIndex by mutableStateOf(-1)
         private set
-    
+
     var dropTargetIndex by mutableStateOf(-1)
         private set
-    
+
     var dragOffset by mutableStateOf(0f)
         private set
-    
+
     fun startDrag(index: Int) {
         isDragging = true
         draggedItemIndex = index
     }
-    
+
     fun updateDrag(offset: Float, targetIndex: Int) {
         dragOffset = offset
         dropTargetIndex = targetIndex
     }
-    
+
     fun endDrag(): Pair<Int, Int>? {
         val result = if (draggedItemIndex != -1 && dropTargetIndex != -1 && draggedItemIndex != dropTargetIndex) {
             draggedItemIndex to dropTargetIndex
         } else null
-        
+
         reset()
         return result
     }
-    
+
     private fun reset() {
         isDragging = false
         draggedItemIndex = -1
