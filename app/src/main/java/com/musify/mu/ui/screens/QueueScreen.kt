@@ -308,9 +308,11 @@ fun QueueScreen(navController: NavController) {
             )
             // Ensure indices are valid
             if (from.index in visualQueueItems.indices && to.index in 0..visualQueueItems.size) {
-                visualQueueItems = visualQueueItems.toMutableList().apply {
-                    add(to.index, removeAt(from.index))
-                }
+                val mutable = visualQueueItems.toMutableList()
+                val moved = mutable.removeAt(from.index)
+                val insertTo = to.index.coerceIn(0, mutable.size)
+                mutable.add(insertTo, moved)
+                visualQueueItems = mutable
                 isDragging = true
             }
         },
@@ -319,7 +321,7 @@ fun QueueScreen(navController: NavController) {
             val toIdx = to
             android.util.Log.d("QueueScreenDBG", "onDragEnd from=$fromIdx to=$toIdx")
             
-            if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx < visualQueueItems.size) {
+            if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx <= visualQueueItems.size - 1) {
                 scope.launch {
                     try {
                         // Get the visible to combined index mapping
@@ -333,7 +335,7 @@ fun QueueScreen(navController: NavController) {
                             android.util.Log.w("QueueScreenDBG", "Invalid combined indices: from=$fromCombinedIdx to=$toCombinedIdx")
                         }
                         
-                        // Refresh the visual queue
+                        // Refresh the visual queue from authoritative source
                         visualQueueItems = queueOperations.getVisibleQueue()
                         
                     } catch (e: Exception) {
@@ -491,7 +493,7 @@ fun QueueScreen(navController: NavController) {
                         }
                         itemsIndexed(
                             visualQueueItems, // Use visual queue for display
-                            key = { idx, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}_$idx" }
+                            key = { _, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}" }
                         ) { idx, queueItem ->
                             val itemKey = "queue_${queueItem.id}_${queueItem.addedAt}"
                             // Try to get the full track data from repository first to ensure we have pre-extracted artwork
@@ -581,7 +583,7 @@ fun QueueScreen(navController: NavController) {
                                     dragOverlayTrack = null
                                 }
                             }
-                            ReorderableItem(reorderState, key = "queue_${queueItem.id}_${queueItem.addedAt}_${queueItem.source.name}_$idx") { isDraggingItem ->
+                            ReorderableItem(reorderState, key = "queue_${queueItem.id}_${queueItem.addedAt}_${queueItem.source.name}") { isDraggingItem ->
                                 Box(
                                     modifier = Modifier.onGloballyPositioned { coords ->
                                         itemBounds[itemKey] = coords.boundsInRoot()

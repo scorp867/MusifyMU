@@ -819,9 +819,11 @@ fun NowPlayingScreen(navController: NavController) {
                         android.util.Log.d("QueueScreenDBG", "NP: onMove from=${from.index} to=${to.index}")
                         // Ensure indices are valid
                         if (from.index in visualQueueItems.indices && to.index in 0..visualQueueItems.size) {
-                            visualQueueItems = visualQueueItems.toMutableList().apply {
-                                add(to.index, removeAt(from.index))
-                            }
+                            val mutable = visualQueueItems.toMutableList()
+                            val moved = mutable.removeAt(from.index)
+                            val insertTo = to.index.coerceIn(0, mutable.size)
+                            mutable.add(insertTo, moved)
+                            visualQueueItems = mutable
                             isDragging = true
                         }
                     },
@@ -830,7 +832,7 @@ fun NowPlayingScreen(navController: NavController) {
                         val toIdx = to
                         android.util.Log.d("QueueScreenDBG", "NP: onDragEnd from=$fromIdx to=$toIdx")
                         
-                        if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx < visualQueueItems.size) {
+                        if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx <= visualQueueItems.size - 1) {
                             coroutineScope.launch {
                                 try {
                                     // Get the visible to combined index mapping
@@ -844,7 +846,7 @@ fun NowPlayingScreen(navController: NavController) {
                                         android.util.Log.w("QueueScreenDBG", "NP: Invalid combined indices: from=$fromCombinedIdx to=$toCombinedIdx")
                                     }
                                     
-                                    // Refresh the visual queue
+                                    // Refresh the visual queue from authoritative source
                                     visualQueueItems = queueOps.getVisibleQueue()
                                     
                                 } catch (e: Exception) {
@@ -955,7 +957,7 @@ fun NowPlayingScreen(navController: NavController) {
                         }
                     }
                     // Use visual queue items with stable keys
-                    itemsIndexed(visualQueueItems, key = { idx, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}_$idx" }) { idx, qi ->
+                    itemsIndexed(visualQueueItems, key = { _, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}" }) { idx, qi ->
                         val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
                         val dismissState = rememberDismissState(
                             confirmStateChange = { value ->
@@ -981,7 +983,7 @@ fun NowPlayingScreen(navController: NavController) {
                                 }
                             }
                         )
-                        ReorderableItem(reorderState, key = "queue_${qi.id}_${qi.addedAt}_${qi.source.name}_$idx") { isDragging ->
+                        ReorderableItem(reorderState, key = "queue_${qi.id}_${qi.addedAt}_${qi.source.name}") { isDragging ->
                             SwipeToDismiss(
                                 state = dismissState,
                                 directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
