@@ -290,15 +290,33 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     items(tracksFiltered.size, key = { i -> "songs_${tracksFiltered[i].mediaId}" }) { idx ->
                         val t = tracksFiltered[idx]
                         val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
-                        com.musify.mu.ui.components.CompactTrackRow(
-                            title = t.title,
-                            subtitle = t.artist,
-                            artData = t.artUri,
-                            contentDescription = t.title,
-                            isPlaying = isPlaying,
-                            showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                            onClick = { onPlay(tracksFiltered, idx) }
-                        )
+                        val queueOps = rememberQueueOperations()
+                        val queueOpsScope = rememberCoroutineScope()
+                        
+                        com.musify.mu.ui.components.EnhancedSwipeableItem(
+                            onSwipeRight = {
+                                // Right swipe: Play Next
+                                val ctx = com.musify.mu.playback.QueueContextHelper.createLibraryContext()
+                                queueOpsScope.launch { queueOps.playNextWithContext(items = listOf(t.toMediaItem()), context = ctx) }
+                            },
+                            onSwipeLeft = {
+                                // Left swipe: Add to Queue
+                                val ctx = com.musify.mu.playback.QueueContextHelper.createLibraryContext()
+                                queueOpsScope.launch { queueOps.addToUserQueueWithContext(items = listOf(t.toMediaItem()), context = ctx) }
+                            },
+                            isInQueue = false,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            com.musify.mu.ui.components.CompactTrackRow(
+                                title = t.title,
+                                subtitle = t.artist,
+                                artData = t.artUri,
+                                contentDescription = t.title,
+                                isPlaying = isPlaying,
+                                showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
+                                onClick = { onPlay(tracksFiltered, idx) }
+                            )
+                        }
                     }
                 }
                 2 -> {

@@ -943,51 +943,31 @@ fun NowPlayingScreen(navController: NavController) {
                     // Use visual queue items with stable keys
                     itemsIndexed(visualQueueItems, key = { _, item -> "queue_${item.uid}" }) { idx, qi ->
                         val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
-                        val dismissState = rememberDismissState(
-                            confirmStateChange = { value ->
-                                when (value) {
-                                    DismissValue.DismissedToEnd -> {
+                        
+                        ReorderableItem(reorderState, key = "queue_${qi.uid}") { isDragging ->
+                            // Enhanced swipe gestures for queue items - disable when dragging
+                            if (!isDragging) {
+                                com.musify.mu.ui.components.EnhancedSwipeableItem(
+                                    onSwipeRight = {
+                                        // Right swipe: Play Next
                                         android.util.Log.d("QueueScreenDBG", "NP: swipe right (Play Next) id=${qi.id}")
                                         val ctx = qState.context
                                         coroutineScope.launch {
                                             queueOps.playNextWithContext(items = listOf(vt.toMediaItem()), context = ctx)
                                             android.util.Log.d("QueueScreenDBG", "NP: after swipe right")
                                         }
-                                        false
-                                    }
-                                    DismissValue.DismissedToStart -> {
+                                    },
+                                    onSwipeLeft = {
+                                        // Left swipe: Remove from Queue
                                         android.util.Log.d("QueueScreenDBG", "NP: swipe left (Remove) id=${qi.id}")
                                         coroutineScope.launch {
                                             queueOps.removeItemByUid(qi.uid)
                                             android.util.Log.d("QueueScreenDBG", "NP: after remove")
                                         }
-                                        true
-                                    }
-                                    else -> false
-                                }
-                            }
-                        )
-
-                        // Reset dismiss state when the queue changes to prevent color sticking
-                        LaunchedEffect(queueChanges, visualQueueItems.size) {
-                            try {
-                                dismissState.reset()
-                            } catch (e: Exception) {
-                                // Ignore reset errors
-                            }
-                        }
-                        ReorderableItem(reorderState, key = "queue_${qi.uid}") { isDragging ->
-                            SwipeToDismiss(
-                                state = dismissState,
-                                directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
-                                background = {
-                                    com.musify.mu.ui.components.EnhancedSwipeBackground(
-                                        dismissDirection = dismissState.dismissDirection,
-                                        isInQueue = true
-                                    )
-                                },
-                                dismissContent = {
-                                    // Fixed: Remove the alpha = 0f that was hiding the dragged item
+                                    },
+                                    isInQueue = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
                                     Box(
                                         modifier = Modifier
                                             .zIndex(if (isDragging) 1f else 0f)
@@ -1115,7 +1095,86 @@ fun NowPlayingScreen(navController: NavController) {
                                         )
                                     }
                                 }
-                            )
+                            } else {
+                                // When dragging, show without swipe gestures
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .zIndex(if (isDragging) 1f else 0f)
+                                        .graphicsLayer {
+                                            // Apply visual feedback for dragging without hiding the item
+                                            scaleX = if (isDragging) 1.02f else 1f
+                                            scaleY = if (isDragging) 1.02f else 1f
+                                            shadowElevation = if (isDragging) 8.dp.toPx() else 0f
+                                        }
+                                ) {
+                                    com.musify.mu.ui.components.CompactTrackRow(
+                                        title = vt.title,
+                                        subtitle = "${vt.artist} • ${vt.album}",
+                                        artData = vt.artUri,
+                                        contentDescription = vt.title,
+                                        isPlaying = false,
+                                        onClick = {
+                                            val combinedIndex = queueOps.getVisibleToCombinedIndexMapping(idx)
+                                            if (combinedIndex >= 0) {
+                                                controller?.seekToDefaultPosition(combinedIndex)
+                                            }
+                                        },
+                                        extraArtOverlay = {
+                                            // Enhanced visual indicators matching QueueScreen
+                                            when (qi.source) {
+                                                QueueManager.QueueSource.PLAY_NEXT -> {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopEnd)
+                                                            .padding(2.dp)
+                                                            .background(
+                                                                MaterialTheme.colorScheme.primary,
+                                                                RoundedCornerShape(4.dp)
+                                                            )
+                                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "NEXT",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onPrimary,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
+
+                                                else -> {
+                                                    // Show isolation status for main queue items
+                                                    if (qi.isIsolated) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.TopEnd)
+                                                                .padding(2.dp)
+                                                                .background(
+                                                                    MaterialTheme.colorScheme.tertiary,
+                                                                    RoundedCornerShape(4.dp)
+                                                                )
+                                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "ISO",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onTertiary,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        trailingContent = {
+                                            IconButton(onClick = { }, modifier = Modifier.detectReorderAfterLongPress(reorderState)) {
+                                                Icon(imageVector = Icons.Rounded.DragHandle, contentDescription = "Drag")
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }

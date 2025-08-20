@@ -60,20 +60,17 @@ fun EnhancedSwipeableItem(
     val touchSlop = with(density) { viewConfiguration.touchSlop.toDp().toPx() }
     val velocityThresholdPx = with(density) { velocityThreshold.toPx() }
 
-    // Enhanced spring animation with Spotify-like elastic behavior
+    // Spotify-like direct animation - immediate response while dragging, smooth return
     val animatedOffsetX by animateFloatAsState(
         targetValue = if (isDragging) offsetX else 0f,
         animationSpec = if (isDragging) {
-            // While dragging: tight spring for responsive feel
-            spring(
-                dampingRatio = 0.8f, // Slightly bouncy
-                stiffness = 400f // Medium stiffness for smooth dragging
-            )
+            // While dragging: no animation, direct follow for immediate response
+            snap()
         } else {
-            // When released: bouncy spring like Spotify
+            // When released: quick smooth return like Spotify
             spring(
-                dampingRatio = 0.6f, // More bouncy for elastic feel
-                stiffness = 300f // Lower stiffness for smoother return
+                dampingRatio = 0.75f, // Less bouncy for cleaner feel
+                stiffness = 500f // Higher stiffness for quicker return
             )
         },
         finishedListener = {
@@ -86,14 +83,14 @@ fun EnhancedSwipeableItem(
         label = "swipeOffset"
     )
 
-    // Enhanced background alpha that shows earlier and more prominently
+    // Spotify-like background alpha - immediate and more visible
     val backgroundAlpha by animateFloatAsState(
         targetValue = if (gestureDirection != null && abs(animatedOffsetX) > touchSlop) {
-            // Make background more visible sooner
-            val progress = (abs(animatedOffsetX) / (screenWidth * 0.4f)).coerceIn(0f, 1f)
-            progress.coerceAtLeast(0.2f) // Minimum 20% opacity when swiping
+            // Immediate visibility like Spotify
+            val progress = (abs(animatedOffsetX) / (screenWidth * 0.3f)).coerceIn(0f, 1f)
+            progress.coerceAtLeast(0.4f) // Higher minimum opacity for better visibility
         } else 0f,
-        animationSpec = tween(100), // Faster fade
+        animationSpec = snap(), // Immediate response, no fade delay
         label = "backgroundAlpha"
     )
 
@@ -109,25 +106,25 @@ fun EnhancedSwipeableItem(
             }
 
             if (isDragging) {
-                // Allow swipe up to half the screen width for better visibility
-                val maxOffset = screenWidth * 0.5f // 50% of screen width
+                // Spotify-like swipe range - more generous but with subtle resistance
+                val maxOffset = screenWidth * 0.4f // 40% of screen width
 
-                // Apply resistance as swipe extends (rubber band effect)
-                val resistance = if (abs(newOffsetX) > screenWidth * 0.3f) {
-                    // After 30% of screen, apply increasing resistance
-                    val excess = abs(newOffsetX) - (screenWidth * 0.3f)
-                    val resistanceFactor = 1f - (excess / (screenWidth * 0.4f)).coerceIn(0f, 0.7f)
-                    resistanceFactor
+                // Minimal resistance for natural feel like Spotify
+                val resistance = if (abs(newOffsetX) > screenWidth * 0.25f) {
+                    // Light resistance after 25% of screen
+                    val excess = abs(newOffsetX) - (screenWidth * 0.25f)
+                    val resistanceFactor = 1f - (excess / (screenWidth * 0.3f)).coerceIn(0f, 0.4f)
+                    resistanceFactor.coerceAtLeast(0.6f) // Keep it responsive
                 } else {
                     1f
                 }
 
                 offsetX = (newOffsetX * resistance).coerceIn(-maxOffset, maxOffset)
 
-                // Haptic feedback at threshold (earlier feedback)
-                val threshold = screenWidth * 0.15f // 15% of screen width
+                // Earlier haptic feedback like Spotify
+                val threshold = screenWidth * 0.1f // 10% of screen width for immediate feedback
                 if (!hasTriggeredHaptic && abs(offsetX) > threshold) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) // Lighter haptic
                     hasTriggeredHaptic = true
                 }
             }
@@ -173,21 +170,21 @@ fun EnhancedSwipeableItem(
                         val threshold = screenWidth * swipeThreshold // 25% of screen width
                         val velocityAbs = abs(velocity)
 
-                        // More lenient trigger conditions
+                        // Spotify-like trigger conditions - more responsive
                         val shouldTrigger = abs(offsetX) > threshold ||
-                                (abs(offsetX) > threshold * 0.7f && velocityAbs > velocityThresholdPx)
+                                (abs(offsetX) > threshold * 0.6f && velocityAbs > velocityThresholdPx * 0.7f)
 
                         if (shouldTrigger) {
                             when {
                                 offsetX > 0 -> {
                                     // Swipe right - Play Next
                                     onSwipeRight()
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress) // Stronger success feedback
                                 }
                                 offsetX < 0 -> {
                                     // Swipe left - Add to Queue
                                     onSwipeLeft()
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress) // Stronger success feedback
                                 }
                             }
                         }
@@ -231,28 +228,28 @@ private fun SwipeBackground(
         }
     }
 
-    // Enhanced background with dynamic gradient based on swipe progress
+    // Spotify-like solid background with subtle gradient
     Box(
         modifier = modifier
             .background(
                 brush = when (direction) {
                     SwipeDirection.RIGHT -> Brush.horizontalGradient(
                         colors = listOf(
-                            color.copy(alpha = alpha * 0.6f),
-                            color.copy(alpha = alpha * 0.3f),
-                            Color.Transparent
+                            color.copy(alpha = alpha * 0.9f), // More solid like Spotify
+                            color.copy(alpha = alpha * 0.7f),
+                            color.copy(alpha = alpha * 0.3f)
                         ),
                         startX = 0f,
-                        endX = 300f * progress
+                        endX = 400f // Fixed width for consistent look
                     )
                     SwipeDirection.LEFT -> Brush.horizontalGradient(
                         colors = listOf(
-                            Color.Transparent,
                             color.copy(alpha = alpha * 0.3f),
-                            color.copy(alpha = alpha * 0.6f)
+                            color.copy(alpha = alpha * 0.7f),
+                            color.copy(alpha = alpha * 0.9f) // More solid like Spotify
                         ),
-                        startX = Float.POSITIVE_INFINITY,
-                        endX = Float.POSITIVE_INFINITY - (300f * progress)
+                        startX = Float.POSITIVE_INFINITY - 400f, // Fixed width
+                        endX = Float.POSITIVE_INFINITY
                     )
                 },
                 shape = RoundedCornerShape(12.dp)
@@ -263,18 +260,18 @@ private fun SwipeBackground(
         }
     ) {
         AnimatedVisibility(
-            visible = alpha > 0.1f, // Show earlier for better feedback
-            enter = fadeIn(animationSpec = tween(100)) + scaleIn(animationSpec = tween(100)),
-            exit = fadeOut(animationSpec = tween(100)) + scaleOut(animationSpec = tween(100))
+            visible = alpha > 0.2f, // Show when more visible for cleaner look
+            enter = fadeIn(animationSpec = snap()) + scaleIn(animationSpec = snap()), // Immediate appearance like Spotify
+            exit = fadeOut(animationSpec = tween(150)) + scaleOut(animationSpec = tween(150))
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
-                    .padding(horizontal = 32.dp)
+                    .padding(horizontal = 24.dp) // Closer to edge like Spotify
                     .graphicsLayer {
-                        // Scale icon based on progress for dynamic feedback
-                        val scale = 0.8f + (progress * 0.4f)
+                        // Subtle scale animation like Spotify
+                        val scale = 1f + (progress * 0.1f) // More subtle scaling
                         scaleX = scale
                         scaleY = scale
                     }

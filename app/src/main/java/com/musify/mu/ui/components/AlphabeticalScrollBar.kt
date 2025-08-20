@@ -48,9 +48,9 @@ fun AlphabeticalScrollBar(
     expandFullHeight: Boolean = true,
     barWidth: androidx.compose.ui.unit.Dp = 32.dp,
     innerWidth: androidx.compose.ui.unit.Dp = 28.dp,
-    letterBoxSize: androidx.compose.ui.unit.Dp = 18.dp,
-    fontSize: androidx.compose.ui.unit.TextUnit = 11.sp,
-    verticalPadding: androidx.compose.ui.unit.Dp = 6.dp,
+    letterBoxSize: androidx.compose.ui.unit.Dp = 22.dp, // Larger to accommodate padding and prevent cutoff
+    fontSize: androidx.compose.ui.unit.TextUnit = 9.sp, // Smaller font to fit better within the box
+    verticalPadding: androidx.compose.ui.unit.Dp = 8.dp, // More padding for better spacing
     cornerRadius: androidx.compose.ui.unit.Dp = 14.dp
 ) {
     val hapticFeedback = LocalHapticFeedback.current
@@ -226,8 +226,8 @@ private fun EnhancedLetterItem(
     letter: String,
     isSelected: Boolean,
     isActive: Boolean,
-    letterBoxSize: androidx.compose.ui.unit.Dp = 18.dp,
-    fontSize: androidx.compose.ui.unit.TextUnit = 11.sp
+    letterBoxSize: androidx.compose.ui.unit.Dp = 22.dp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 9.sp
 ) {
     // Hardware accelerated animations with ultra-fast response
     val backgroundColor by animateColorAsState(
@@ -272,7 +272,8 @@ private fun EnhancedLetterItem(
                     CompositingStrategy.Auto
                 }
             }
-            .background(backgroundColor, CircleShape),
+            .background(backgroundColor, CircleShape)
+            .padding(3.dp), // Add padding to prevent letter cutoff
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -280,7 +281,9 @@ private fun EnhancedLetterItem(
             fontSize = fontSize,
             fontWeight = if (isSelected && isActive) FontWeight.Bold else FontWeight.Medium,
             color = textColor,
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            maxLines = 1, // Ensure single line to prevent wrapping
+            lineHeight = fontSize * 1.1f // Proper line height for vertical centering
         )
     }
 }
