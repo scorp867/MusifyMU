@@ -21,6 +21,9 @@ import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.Artwork
+import com.musify.mu.playback.rememberQueueOperations
+import com.musify.mu.util.toMediaItem
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -106,12 +109,12 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                     com.musify.mu.ui.components.EnhancedSwipeableItem(
                         onSwipeRight = {
                             // Right swipe: Play Next
-                            val ctx = com.musify.mu.playback.QueueContextHelper.createArtistContext(artistName)
+                            val ctx = com.musify.mu.playback.QueueContextHelper.createArtistContext(artist, artist)
                             queueOpsScope.launch { queueOps.playNextWithContext(items = listOf(t.toMediaItem()), context = ctx) }
                         },
                         onSwipeLeft = {
                             // Left swipe: Add to Queue
-                            val ctx = com.musify.mu.playback.QueueContextHelper.createArtistContext(artistName)
+                            val ctx = com.musify.mu.playback.QueueContextHelper.createArtistContext(artist, artist)
                             queueOpsScope.launch { queueOps.addToUserQueueWithContext(items = listOf(t.toMediaItem()), context = ctx) }
                         },
                         isInQueue = false,
