@@ -230,12 +230,12 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                         com.musify.mu.ui.components.EnhancedSwipeableItem(
                             onSwipeRight = {
                                 // Right swipe: Play Next
-                                val ctx = com.musify.mu.playback.QueueContextHelper.createPlaylistContext(playlistId)
+                                val ctx = com.musify.mu.playback.QueueContextHelper.createPlaylistContext(playlistId.toString(), title)
                                 queueOpsScope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
                             },
                             onSwipeLeft = {
                                 // Left swipe: Add to Queue
-                                val ctx = com.musify.mu.playback.QueueContextHelper.createPlaylistContext(playlistId)
+                                val ctx = com.musify.mu.playback.QueueContextHelper.createPlaylistContext(playlistId.toString(), title)
                                 queueOpsScope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
                             },
                             isInQueue = false,
