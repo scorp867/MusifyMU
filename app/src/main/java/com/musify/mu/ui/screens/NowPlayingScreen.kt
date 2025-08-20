@@ -900,7 +900,11 @@ fun NowPlayingScreen(navController: NavController) {
                                     modifier = Modifier.padding(start = 8.dp)
                                 )
                                 TextButton(onClick = {
-                                    coroutineScope.launch { queueOps.clearTransientQueues(keepCurrent = true) }
+                                    coroutineScope.launch {
+                                        // Clear only the visible queue (upcoming items) but keep current playing
+                                        queueOps.clearTransientQueues(keepCurrent = true)
+                                        // Don't reset playback - just clear the upcoming queue
+                                    }
                                 }) { Text("Clear queue") }
                             }
                         }
@@ -963,6 +967,15 @@ fun NowPlayingScreen(navController: NavController) {
                                 }
                             }
                         )
+
+                        // Reset dismiss state when the queue changes to prevent color sticking
+                        LaunchedEffect(queueChanges, visualQueueItems.size) {
+                            try {
+                                dismissState.reset()
+                            } catch (e: Exception) {
+                                // Ignore reset errors
+                            }
+                        }
                         ReorderableItem(reorderState, key = "queue_${qi.uid}") { isDragging ->
                             SwipeToDismiss(
                                 state = dismissState,
@@ -1037,7 +1050,7 @@ fun NowPlayingScreen(navController: NavController) {
                                             subtitle = "${vt.artist} • ${vt.album}",
                                             artData = vt.artUri,
                                             contentDescription = vt.title,
-                                            isPlaying = (controller?.currentMediaItem?.mediaId == qi.mediaItem.mediaId),
+                                            isPlaying = false, // Remove the now playing indicator from queue items since we have a sticky header
                                             onClick = {
                                                 val combinedIndex = queueOps.getVisibleToCombinedIndexMapping(idx)
                                                 if (combinedIndex >= 0) {

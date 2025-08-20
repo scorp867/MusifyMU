@@ -536,7 +536,8 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             currentIndex = newCombined.indexOfFirst { it.uid == toKeepUid }.let { if (it >= 0) it else currentIndex.coerceIn(0, (newCombined.size - 1).coerceAtLeast(0)) }
 
             val mediaItems = newCombined.map { it.mediaItem }
-            player.setMediaItems(mediaItems, currentIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0)), 0L)
+            val currentPosition = if (keepCurrent) player.currentPosition else 0L
+            player.setMediaItems(mediaItems, currentIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0)), currentPosition)
 
             // Reset play-next count in the store
             queueState?.let { qs ->
@@ -665,37 +666,40 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     }
 
     suspend fun removeFirstUserQueueByMediaId(mediaId: String): Boolean = queueMutex.withLock {
-        val idx = getCombinedQueue().indexOfFirst { it.source == QueueSource.USER_QUEUE && it.mediaItem.mediaId == mediaId }
-        return@withLock if (idx >= 0) removeAtInternal(idx) else false
+        // Find the first UserQueue item with matching mediaId in the combined queue
+        val combinedQueue = getCombinedQueue()
+        val userQueueIndex = combinedQueue.indexOfFirst {
+            it.source == QueueSource.USER_QUEUE && it.mediaItem.mediaId == mediaId
+        }
+
+        return@withLock if (userQueueIndex >= 0) {
+            android.util.Log.d(logTag, "removeUserQueue found matching item id=$mediaId at idx=$userQueueIndex")
+            removeAtInternal(userQueueIndex)
+            true
+        } else {
+            android.util.Log.d(logTag, "removeUserQueue no matching UserQueue item found for id=$mediaId")
+            false
+        }
     }
 
     /**
-     * Consume the head of the play-next queue only if it matches the finished mediaId.
-     * Returns true if a play-next head was consumed and removed from player timeline.
+     * Remove the first PlayNext item that matches the finished mediaId, regardless of position.
+     * This ensures PlayNext items are consumed after being played, even if there are duplicates.
      */
     suspend fun consumePlayNextHeadIfMatches(finishedMediaId: String): Boolean = queueMutex.withLock {
-        val head = priorityList.firstOrNull() ?: return@withLock false
-        if (head.mediaItem.mediaId != finishedMediaId) return@withLock false
+        // Find the first PlayNext item with matching mediaId in the combined queue
+        val combinedQueue = getCombinedQueue()
+        val playNextIndex = combinedQueue.indexOfFirst {
+            it.source == QueueSource.PLAY_NEXT && it.mediaItem.mediaId == finishedMediaId
+        }
 
-        // Find the head in the combined order (it should appear right after current main item)
-        val idx = getCombinedQueue().indexOfFirst { it === head }
-        return@withLock if (idx >= 0) {
-            android.util.Log.d(logTag, "consumePlayNext matched head id=$finishedMediaId at idx=$idx")
-            removeAtInternal(idx)
-        } else run {
-            // Fallback: if not found in combined (rare), still pop head and update state
-            // Remove the head from list manually
-            priorityList.remove(head)
-            queueLookup.remove(head.id)
-            queueState?.let { qs ->
-                CoroutineScope(Dispatchers.IO).launch {
-                    val current = qs.getPlayNextCount()
-                    qs.setPlayNextCount((current - 1).coerceAtLeast(0))
-                }
-            }
-            updateUIState()
-            android.util.Log.d(logTag, "consumePlayNext fallback pop head id=$finishedMediaId newPri=${priorityList.size}")
+        return@withLock if (playNextIndex >= 0) {
+            android.util.Log.d(logTag, "consumePlayNext found matching item id=$finishedMediaId at idx=$playNextIndex")
+            removeAtInternal(playNextIndex)
             true
+        } else {
+            android.util.Log.d(logTag, "consumePlayNext no matching PlayNext item found for id=$finishedMediaId")
+            false
         }
     }
 
@@ -1002,54 +1006,49 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     /**
      * Enhanced intelligent trimming - removes played songs while preserving user choices
+     * Only removes items that were actually played, not just items before current index
      */
     private suspend fun trimPlayedBeforeCurrent() = queueMutex.withLock {
         val idx = currentIndex
         if (idx <= 0) return@withLock
 
         try {
-            android.util.Log.d(logTag, "trimPlayedBeforeCurrent: trimming $idx played items")
+            android.util.Log.d(logTag, "trimPlayedBeforeCurrent: checking $idx played items for removal")
 
             val combinedQueue = getCombinedQueue()
-            val itemsToRemove = combinedQueue.take(idx)
+            val itemsToCheck = combinedQueue.take(idx)
 
-            // Intelligent removal: Keep recently added priority items even if played
-            val recentThreshold = System.currentTimeMillis() - (5 * 60 * 1000) // 5 minutes
-            val itemsToKeep = itemsToRemove.filter { item ->
-                item.source == QueueSource.PLAY_NEXT &&
-                        item.addedAt > recentThreshold &&
-                        item.userMetadata["keepAfterPlay"] == true
+            // Only remove transient items (PlayNext/UserQueue) that have been played
+            // Keep main queue items as they represent the user's chosen playlist/album
+            var removedCount = 0
+            val itemsToRemove = itemsToCheck.filter { item ->
+                item.source == QueueSource.PLAY_NEXT || item.source == QueueSource.USER_QUEUE
             }
 
-            // Remove played items (except those we want to keep)
-            var removedCount = 0
+            // Remove played transient items from the front
             itemsToRemove.forEach { item ->
-                if (!itemsToKeep.contains(item)) {
-                    val success = removeAtInternal(0) // Always remove from index 0 as list shifts
-                    if (success || true) { // Continue even if removal fails for some items
+                val itemIndex = getCombinedQueue().indexOfFirst { it.uid == item.uid }
+                if (itemIndex >= 0 && itemIndex < currentIndex) {
+                    val success = removeAtInternal(itemIndex)
+                    if (success) {
                         removedCount++
                     }
                 }
             }
 
-            // Update current index
+            // Update current index after removals
             currentIndex = (idx - removedCount).coerceAtLeast(0)
 
             // Notify about cleanup
             if (removedCount > 0) {
-                _queueChanges.postValue(QueueChangeEvent.QueueCleanup(removedCount, itemsToKeep.size))
+                _queueChanges.postValue(QueueChangeEvent.QueueCleanup(removedCount, itemsToCheck.size - removedCount))
             }
 
             updateUIState()
-            android.util.Log.d(logTag, "trimPlayedBeforeCurrent completed: removed=$removedCount kept=${itemsToKeep.size} newCurrentIndex=$currentIndex")
+            android.util.Log.d(logTag, "trimPlayedBeforeCurrent completed: removed=$removedCount newCurrentIndex=$currentIndex")
 
         } catch (e: Exception) {
             android.util.Log.e("QueueManager", "Error during intelligent trimming", e)
-            // Fallback to simple removal if intelligent trimming fails
-            repeat(idx) {
-                try { removeAtInternal(0) } catch (_: Exception) { }
-            }
-            currentIndex = 0
             updateUIState()
         }
     }
