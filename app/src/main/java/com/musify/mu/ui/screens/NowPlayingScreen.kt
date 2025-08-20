@@ -803,40 +803,61 @@ fun NowPlayingScreen(navController: NavController) {
                     queueOps.getVisibleQueue()
                 }
                 
-                // Reorderable state with simplified logic
+                // Enhanced reorderable state with improved drag logic
+                var visualQueueItems by remember { mutableStateOf(queueItems) }
+                var isDragging by remember { mutableStateOf(false) }
+                
+                // Sync visual queue with real queue data
+                LaunchedEffect(queueItems) {
+                    if (!isDragging) {
+                        visualQueueItems = queueItems.toList()
+                    }
+                }
+                
                 val reorderState = rememberReorderableLazyListState(
                     onMove = { from, to ->
                         android.util.Log.d("QueueScreenDBG", "NP: onMove from=${from.index} to=${to.index}")
+                        // Ensure indices are valid
+                        if (from.index in visualQueueItems.indices && to.index in 0..visualQueueItems.size) {
+                            visualQueueItems = visualQueueItems.toMutableList().apply {
+                                add(to.index, removeAt(from.index))
+                            }
+                            isDragging = true
+                        }
                     },
                     onDragEnd = { from, to ->
-                        android.util.Log.d("QueueScreenDBG", "NP: onDragEnd from=$from to=$to")
-                        coroutineScope.launch {
-                            try {
-                                val visibleQueue = queueOps.getVisibleQueue()
-                                
-                                // Validate indices
-                                if (from < 0 || to < 0 || from >= visibleQueue.size || to >= visibleQueue.size || from == to) {
-                                    android.util.Log.w("QueueScreenDBG", "Invalid drag indices: from=$from to=$to size=${visibleQueue.size}")
-                                    return@launch
+                        val fromIdx = from
+                        val toIdx = to
+                        android.util.Log.d("QueueScreenDBG", "NP: onDragEnd from=$fromIdx to=$toIdx")
+                        
+                        if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx < visualQueueItems.size) {
+                            coroutineScope.launch {
+                                try {
+                                    // Get the visible to combined index mapping
+                                    val fromCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(fromIdx)
+                                    val toCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(toIdx)
+                                    
+                                    if (fromCombinedIdx >= 0 && toCombinedIdx >= 0) {
+                                        android.util.Log.d("QueueScreenDBG", "NP: Moving from combined index $fromCombinedIdx to $toCombinedIdx")
+                                        queueOps.moveItem(fromCombinedIdx, toCombinedIdx)
+                                    } else {
+                                        android.util.Log.w("QueueScreenDBG", "NP: Invalid combined indices: from=$fromCombinedIdx to=$toCombinedIdx")
+                                    }
+                                    
+                                    // Refresh the visual queue
+                                    visualQueueItems = queueOps.getVisibleQueue()
+                                    
+                                } catch (e: Exception) {
+                                    android.util.Log.e("QueueScreenDBG", "NP: Error during drag operation", e)
+                                    // Reset visual queue on error
+                                    visualQueueItems = queueOps.getVisibleQueue()
+                                } finally {
+                                    isDragging = false
                                 }
-                                
-                                // Use the proper index mapping
-                                val fromIndexInSnapshot = queueOps.getVisibleToCombinedIndexMapping(from)
-                                val toIndexInSnapshot = queueOps.getVisibleToCombinedIndexMapping(to)
-                                
-                                if (fromIndexInSnapshot < 0 || toIndexInSnapshot < 0) {
-                                    android.util.Log.w("QueueScreenDBG", "Invalid index mapping: from=$fromIndexInSnapshot to=$toIndexInSnapshot")
-                                    return@launch
-                                }
-                                
-                                android.util.Log.d("QueueScreenDBG", "Moving item from $fromIndexInSnapshot to $toIndexInSnapshot")
-                                
-                                // Perform the move
-                                queueOps.moveItem(fromIndexInSnapshot, toIndexInSnapshot)
-                                
-                            } catch (e: Exception) {
-                                android.util.Log.e("QueueScreenDBG", "Error during drag operation", e)
                             }
+                        } else {
+                            isDragging = false
+                            visualQueueItems = queueItems.toList()
                         }
                     }
                 )
@@ -933,8 +954,8 @@ fun NowPlayingScreen(navController: NavController) {
                             }
                         }
                     }
-                    // Use simplified queue items with stable keys
-                    itemsIndexed(queueItems, key = { idx, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}_$idx" }) { idx, qi ->
+                    // Use visual queue items with stable keys
+                    itemsIndexed(visualQueueItems, key = { idx, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}_$idx" }) { idx, qi ->
                         val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
                         val dismissState = rememberDismissState(
                             confirmStateChange = { value ->
