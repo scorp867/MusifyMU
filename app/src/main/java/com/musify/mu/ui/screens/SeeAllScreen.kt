@@ -21,7 +21,7 @@ import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
- 
+
 import kotlinx.coroutines.launch
 import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
@@ -95,63 +95,63 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                items(tracks.size, key = { idx -> "seeall_${type}_${tracks[idx].mediaId}" }) { idx ->
-                    val track = tracks[idx]
-                    ReorderableItem(reorderState, key = "seeall_${type}_${track.mediaId}") { isDragging ->
-                        Card(
-                            modifier = Modifier
-                                .zIndex(if (isDragging) 1f else 0f)
-                                .fillMaxWidth(),
-                            elevation = CardDefaults.cardElevation(
-                                defaultElevation = if (isDragging) 10.dp else 2.dp
-                            ),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isDragging) 
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                else 
-                                    MaterialTheme.colorScheme.surface
-                            )
-                        ) {
-                            // Update overlay context while dragging
-                            LaunchedEffect(isDragging) {
-                                val key = "seeall_${type}_${track.mediaId}"
-                                if (isDragging) {
-                                    dragOverlayKey = key
-                                    dragOverlayTrack = track
-                                    dragOverlayIndex = idx
-                                } else if (dragOverlayKey == key) {
-                                    dragOverlayKey = null
-                                    dragOverlayTrack = null
-                                }
-                            }
-                            val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
-                            com.musify.mu.ui.components.CompactTrackRow(
-                                title = track.title,
-                                subtitle = track.artist,
-                                artData = track.artUri,
-                                contentDescription = track.title,
-                                isPlaying = isPlaying,
-                                showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
-                                onClick = { onPlay(tracks, idx) },
-                                modifier = Modifier.onGloballyPositioned { coords ->
-                                    itemBounds["seeall_${type}_${track.mediaId}"] = coords.boundsInRoot()
-                                },
-                                trailingContent = {
-                                    IconButton(
-                                        onClick = { },
-                                        modifier = Modifier.detectReorderAfterLongPress(reorderState)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.DragHandle,
-                                            contentDescription = "Drag to reorder",
-                                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                        )
+                    items(tracks.size, key = { idx -> "seeall_${type}_${tracks[idx].mediaId}" }) { idx ->
+                        val track = tracks[idx]
+                        ReorderableItem(reorderState, key = "seeall_${type}_${track.mediaId}") { isDragging ->
+                            Card(
+                                modifier = Modifier
+                                    .zIndex(if (isDragging) 1f else 0f)
+                                    .fillMaxWidth(),
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = if (isDragging) 10.dp else 2.dp
+                                ),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDragging)
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                    else
+                                        MaterialTheme.colorScheme.surface
+                                )
+                            ) {
+                                // Update overlay context while dragging
+                                LaunchedEffect(isDragging) {
+                                    val key = "seeall_${type}_${track.mediaId}"
+                                    if (isDragging) {
+                                        dragOverlayKey = key
+                                        dragOverlayTrack = track
+                                        dragOverlayIndex = idx
+                                    } else if (dragOverlayKey == key) {
+                                        dragOverlayKey = null
+                                        dragOverlayTrack = null
                                     }
                                 }
-                            )
+                                val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                                com.musify.mu.ui.components.CompactTrackRow(
+                                    title = track.title,
+                                    subtitle = track.artist,
+                                    artData = track.artUri,
+                                    contentDescription = track.title,
+                                    isPlaying = isPlaying,
+                                    showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
+                                    onClick = { onPlay(tracks, idx) },
+                                    modifier = Modifier.onGloballyPositioned { coords ->
+                                        itemBounds["seeall_${type}_${track.mediaId}"] = coords.boundsInRoot()
+                                    },
+                                    trailingContent = {
+                                        IconButton(
+                                            onClick = { },
+                                            modifier = Modifier.detectReorderAfterLongPress(reorderState)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DragHandle,
+                                                contentDescription = "Drag to reorder",
+                                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
-                }
                 }
 
                 // Floating overlay removed per request
@@ -168,47 +168,36 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
             ) {
                 items(tracks.size) { idx ->
                     val track = tracks[idx]
-                    val dismissState = rememberDismissState(
-                        confirmStateChange = { value ->
-                            when (value) {
-                                DismissValue.DismissedToEnd -> {
-                                    // Right swipe: Play Next
-                                    val ctx = com.musify.mu.playback.QueueContextHelper.createDiscoverContext(type)
-                                    queueOpsScope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-                                    false
-                                }
-                                DismissValue.DismissedToStart -> {
-                                    // Left swipe: Add to User Queue
-                                    val ctx = com.musify.mu.playback.QueueContextHelper.createDiscoverContext(type)
-                                    queueOpsScope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-                                    false
-                                }
-                                else -> false
-                            }
-                        }
-                    )
-                    SwipeToDismiss(
-                        state = dismissState,
-                        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
-                        background = { com.musify.mu.ui.components.EnhancedSwipeBackground(dismissState.dismissDirection) },
-                        dismissContent = {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    com.musify.mu.ui.components.EnhancedSwipeableItem(
+                        onSwipeRight = {
+                            // Right swipe: Play Next
+                            val ctx = com.musify.mu.playback.QueueContextHelper.createDiscoverContext(type)
+                            queueOpsScope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                        },
+                        onSwipeLeft = {
+                            // Left swipe: Add to User Queue
+                            val ctx = com.musify.mu.playback.QueueContextHelper.createDiscoverContext(type)
+                            queueOpsScope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                        },
+                        isInQueue = false,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
-                        com.musify.mu.ui.components.CompactTrackRow(
-                            title = track.title,
-                            subtitle = track.artist,
-                            artData = track.artUri,
-                            contentDescription = track.title,
-                            isPlaying = isPlaying,
-                            showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
-                            onClick = { onPlay(tracks, idx) }
-                        )
-                    }
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                            com.musify.mu.ui.components.CompactTrackRow(
+                                title = track.title,
+                                subtitle = track.artist,
+                                artData = track.artUri,
+                                contentDescription = track.title,
+                                isPlaying = isPlaying,
+                                showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
+                                onClick = { onPlay(tracks, idx) }
+                            )
                         }
-                    )
+                    }
                 }
             }
         }

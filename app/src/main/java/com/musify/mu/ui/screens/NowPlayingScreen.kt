@@ -981,57 +981,10 @@ fun NowPlayingScreen(navController: NavController) {
                                 state = dismissState,
                                 directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
                                 background = {
-                                    val dir = dismissState.dismissDirection
-                                    val color = when (dir) {
-                                        DismissDirection.StartToEnd -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
-                                        DismissDirection.EndToStart -> MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                                        else -> MaterialTheme.colorScheme.surface
-                                    }
-
-                                    val icon = when (dir) {
-                                        DismissDirection.StartToEnd -> Icons.Rounded.QueueMusic
-                                        DismissDirection.EndToStart -> Icons.Rounded.Delete
-                                        else -> null
-                                    }
-
-                                    val text = when (dir) {
-                                        DismissDirection.StartToEnd -> "Play Next"
-                                        DismissDirection.EndToStart -> "Remove"
-                                        else -> ""
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(color, RoundedCornerShape(12.dp))
-                                            .padding(16.dp),
-                                        contentAlignment = when (dir) {
-                                            DismissDirection.StartToEnd -> Alignment.CenterStart
-                                            DismissDirection.EndToStart -> Alignment.CenterEnd
-                                            else -> Alignment.Center
-                                        }
-                                    ) {
-                                        if (icon != null) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = icon,
-                                                    contentDescription = text,
-                                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                                Text(
-                                                    text = text,
-                                                    color = MaterialTheme.colorScheme.onPrimary,
-                                                    style = MaterialTheme.typography.labelLarge.copy(
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                )
-                                            }
-                                        }
-                                    }
+                                    com.musify.mu.ui.components.EnhancedSwipeBackground(
+                                        dismissDirection = dismissState.dismissDirection,
+                                        isInQueue = true
+                                    )
                                 },
                                 dismissContent = {
                                     // Fixed: Remove the alpha = 0f that was hiding the dragged item

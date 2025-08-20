@@ -286,14 +286,14 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     /**
      * Add items to the User Queue ("Add to next"). They will play after all priority items.
      */
-    suspend fun addToUserQueue(items: MutableList<MediaItem>, context: PlayContext? = null) = queueMutex.withLock {
+    suspend fun addToUserQueue(items: MutableList<MediaItem>, context: PlayContext? = null, allowDuplicates: Boolean = true) = queueMutex.withLock {
         try {
-            android.util.Log.d(logTag, "addToUserQueue start items=${items.size} context=$context before user=${userList.size}")
+            android.util.Log.d(logTag, "addToUserQueue start items=${items.size} context=$context before user=${userList.size} allowDuplicates=$allowDuplicates")
             val baseTime = System.currentTimeMillis()
             var offset = 0
             val queueItems = items.mapNotNull { mediaItem ->
-                // Prevent duplicates
-                if (queueLookup.containsKey(mediaItem.mediaId)) {
+                // Only prevent duplicates if explicitly requested (for bulk operations)
+                if (!allowDuplicates && queueLookup.containsKey(mediaItem.mediaId)) {
                     android.util.Log.d(logTag, "addToUserQueue skip duplicate id=${mediaItem.mediaId}")
                     null
                 } else {
@@ -517,27 +517,59 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     /**
      * Clear both Play Next and User Queue segments. Optionally keep the current item even if transient.
+     * Uses selective removal to avoid playback hiccups.
      */
     suspend fun clearTransientQueues(keepCurrent: Boolean = true) = queueMutex.withLock {
         try {
             val combined = getCombinedQueue()
             val current = getCurrentItem()
-            val toKeepUid = if (keepCurrent) current?.uid else null
+            val currentPlayerIndex = player.currentMediaItemIndex
+            val wasPlaying = player.isPlaying
 
-            val newCombined = combined.filter { item ->
+            android.util.Log.d(logTag, "clearTransientQueues start: total=${combined.size} currentIdx=$currentPlayerIndex keepCurrent=$keepCurrent")
+
+            // Find items to remove (transient items, but optionally keep current)
+            val itemsToRemove = mutableListOf<Int>()
+            combined.forEachIndexed { index, item ->
                 val isTransient = (item.source == QueueSource.PLAY_NEXT || item.source == QueueSource.USER_QUEUE)
-                if (!isTransient) return@filter true
-                // Keep current if requested
-                return@filter (toKeepUid != null && item.uid == toKeepUid)
+                if (isTransient) {
+                    // If keeping current and this is the current item, don't remove it
+                    val isCurrentItem = (keepCurrent && current != null && item.uid == current.uid)
+                    if (!isCurrentItem) {
+                        itemsToRemove.add(index)
+                    }
+                }
             }
 
-            // Rebuild internal lists and player timeline
-            rebuildQueuesFromCombined(newCombined)
-            currentIndex = newCombined.indexOfFirst { it.uid == toKeepUid }.let { if (it >= 0) it else currentIndex.coerceIn(0, (newCombined.size - 1).coerceAtLeast(0)) }
+            // Remove items from back to front to maintain indices
+            var removedCount = 0
+            itemsToRemove.sortedDescending().forEach { index ->
+                try {
+                    // Remove from player without rebuilding entire queue
+                    if (index < player.mediaItemCount) {
+                        player.removeMediaItem(index)
+                        removedCount++
+                    }
 
-            val mediaItems = newCombined.map { it.mediaItem }
-            val currentPosition = if (keepCurrent) player.currentPosition else 0L
-            player.setMediaItems(mediaItems, currentIndex.coerceIn(0, (mediaItems.size - 1).coerceAtLeast(0)), currentPosition)
+                    // Update our internal state
+                    val item = combined.getOrNull(index)
+                    item?.let {
+                        when (it.source) {
+                            QueueSource.PLAY_NEXT -> priorityList.removeAll { qi -> qi.uid == it.uid }
+                            QueueSource.USER_QUEUE -> userList.removeAll { qi -> qi.uid == it.uid }
+                            else -> {} // Don't remove main items
+                        }
+                        queueLookup.remove(it.id)
+                    }
+
+                    // Adjust current index if needed
+                    if (index <= currentIndex) {
+                        currentIndex = (currentIndex - 1).coerceAtLeast(0)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w(logTag, "Failed to remove item at index $index", e)
+                }
+            }
 
             // Reset play-next count in the store
             queueState?.let { qs ->
@@ -545,7 +577,9 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
             }
 
             updateUIState()
-            _queueChanges.postValue(QueueChangeEvent.QueueReordered(newCombined))
+            _queueChanges.postValue(QueueChangeEvent.QueueCleared(keepCurrent))
+
+            android.util.Log.d(logTag, "clearTransientQueues completed: removed=$removedCount newTotal=${player.mediaItemCount} wasPlaying=$wasPlaying")
 
         } catch (e: Exception) {
             android.util.Log.e("QueueManager", "Error clearing transient queues", e)

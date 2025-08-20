@@ -88,15 +88,15 @@ fun LibraryScreen(
     // Debounced search with visual-only immediate feedback
     val tracks = if (searchQuery.isBlank()) allTracks else allTracks.filter { t ->
         t.title.contains(searchQuery, ignoreCase = true) ||
-        t.artist.contains(searchQuery, ignoreCase = true) ||
-        t.album.contains(searchQuery, ignoreCase = true)
+                t.artist.contains(searchQuery, ignoreCase = true) ||
+                t.album.contains(searchQuery, ignoreCase = true)
     }
 
     // Visual tracks for immediate search feedback
     val visualTracks = if (visualSearchQuery.isBlank()) allTracks else allTracks.filter { t ->
         t.title.contains(visualSearchQuery, ignoreCase = true) ||
-        t.artist.contains(visualSearchQuery, ignoreCase = true) ||
-        t.album.contains(visualSearchQuery, ignoreCase = true)
+                t.artist.contains(visualSearchQuery, ignoreCase = true) ||
+                t.album.contains(visualSearchQuery, ignoreCase = true)
     }
 
     // Debounced search to prevent excessive filtering
@@ -128,7 +128,7 @@ fun LibraryScreen(
                     android.util.Log.e("LibraryScreen", "Failed to initialize data manager", e)
                 }
             }
-            
+
             // Observe the cached tracks flow for real-time updates (this is the single source of truth)
             repo.dataManager.cachedTracks.collect { cachedTracks ->
                 android.util.Log.d("LibraryScreen", "Cache updated: ${cachedTracks.size} tracks")
@@ -141,14 +141,14 @@ fun LibraryScreen(
             allTracks = emptyList()
         }
     }
-    
+
     // Debug logging for tracks state
     LaunchedEffect(allTracks) {
         android.util.Log.d("LibraryScreen", "allTracks changed: ${allTracks.size} tracks")
         android.util.Log.d("LibraryScreen", "tracks computed: ${tracks.size} tracks")
         android.util.Log.d("LibraryScreen", "visualTracks computed: ${visualTracks.size} tracks")
         android.util.Log.d("LibraryScreen", "isLoading: $isLoading")
-        
+
         // Log sample track details for debugging
         if (allTracks.isNotEmpty()) {
             val sampleTrack = allTracks.first()
@@ -175,15 +175,15 @@ fun LibraryScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Header with working search
-                    LibraryHeader(
-                query = visualSearchQuery,
-                onQueryChange = { visualSearchQuery = it },
-                onClear = { 
-                    visualSearchQuery = ""
-                    searchQuery = ""
-                },
-                isSearching = isSearching
-            )
+        LibraryHeader(
+            query = visualSearchQuery,
+            onQueryChange = { visualSearchQuery = it },
+            onClear = {
+                visualSearchQuery = ""
+                searchQuery = ""
+            },
+            isSearching = isSearching
+        )
 
         when {
             !hasPermissions -> {
@@ -198,7 +198,7 @@ fun LibraryScreen(
             else -> {
                 // Track list with alphabetical scroll bar
                 Box(modifier = Modifier.fillMaxSize()) {
-                    
+
 
                     LazyColumn(
                         state = listState,
@@ -222,13 +222,13 @@ fun LibraryScreen(
                                     // Visual-only queue operation - immediate UI feedback
                                     val operation = if (addToEnd) QueueOperation.ADDING_TO_END else QueueOperation.ADDING_TO_NEXT
                                     queueOperationsState = queueOperationsState + (track.mediaId to operation)
-                                    
+
                                     // Perform actual queue operation in background
                                     coroutineScope.launch {
                                         try {
                                             // Create library context for the operation
                                             val context = QueueContextHelper.createSearchContext("library")
-                                            
+
                                             if (addToEnd) {
                                                 // Add to User Queue (Add to next segment)
                                                 queueOperationsManager.addToUserQueueWithContext(
@@ -242,12 +242,12 @@ fun LibraryScreen(
                                                     context = context
                                                 )
                                             }
-                                            
+
                                             // Success feedback
                                             queueOperationsState = queueOperationsState + (track.mediaId to QueueOperation.COMPLETED_SUCCESS)
                                             delay(2000) // Show success for 2 seconds
                                             queueOperationsState = queueOperationsState - track.mediaId
-                                            
+
                                         } catch (e: Exception) {
                                             // Error feedback
                                             queueOperationsState = queueOperationsState + (track.mediaId to QueueOperation.COMPLETED_ERROR)
@@ -398,11 +398,11 @@ private fun TrackItem(
     // Visual feedback colors based on queue operation
     val containerColor by animateColorAsState(
         targetValue = when (queueOperation) {
-            QueueOperation.ADDING_TO_END, QueueOperation.ADDING_TO_NEXT -> 
+            QueueOperation.ADDING_TO_END, QueueOperation.ADDING_TO_NEXT ->
                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            QueueOperation.COMPLETED_SUCCESS -> 
+            QueueOperation.COMPLETED_SUCCESS ->
                 MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-            QueueOperation.COMPLETED_ERROR -> 
+            QueueOperation.COMPLETED_ERROR ->
                 MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
             else -> MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
         },
@@ -410,181 +410,172 @@ private fun TrackItem(
         label = "containerColor"
     )
 
-    val dismissState = rememberDismissState(
-        confirmStateChange = { value ->
-            when (value) {
-                DismissValue.DismissedToEnd -> { onAddToQueue(false); false }
-                DismissValue.DismissedToStart -> { onAddToQueue(true); false }
-                else -> false
-            }
-        }
-    )
-    SwipeToDismiss(
-        state = dismissState,
-        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
-        background = { com.musify.mu.ui.components.EnhancedSwipeBackground(dismissState.dismissDirection) },
-        dismissContent = {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = containerColor
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        shape = RoundedCornerShape(12.dp)
+    com.musify.mu.ui.components.EnhancedSwipeableItem(
+        onSwipeRight = { onAddToQueue(false) }, // Play Next
+        onSwipeLeft = { onAddToQueue(true) },   // Add to Queue
+        isInQueue = false,
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
+        Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                }
+                .clickable { onClick() },
+            colors = CardDefaults.cardColors(
+                containerColor = containerColor
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = RoundedCornerShape(12.dp)
         ) {
-            // Album artwork
-            Box(
+            Row(
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                com.musify.mu.ui.components.SmartArtwork(
-                    artworkUri = track.artUri, // Use pre-extracted artwork from database
-                    contentDescription = track.title,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Track info
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
-                Text(
-                    text = track.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontWeight = FontWeight.Medium
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                Text(
-                    text = "${track.artist} • ${track.album}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Queue operation visual indicator
-            AnimatedVisibility(
-                visible = queueOperation != null,
-                enter = slideInHorizontally(animationSpec = tween(200)) + fadeIn(),
-                exit = slideOutHorizontally(animationSpec = tween(200)) + fadeOut()
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(end = 8.dp)
+                // Album artwork
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    when (queueOperation) {
-                        QueueOperation.ADDING_TO_END, QueueOperation.ADDING_TO_NEXT -> {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (queueOperation == QueueOperation.ADDING_TO_END) "Adding..." else "Adding next...",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                    com.musify.mu.ui.components.SmartArtwork(
+                        artworkUri = track.artUri, // Use pre-extracted artwork from database
+                        contentDescription = track.title,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Track info
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = track.title,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontWeight = FontWeight.Medium
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text(
+                        text = "${track.artist} • ${track.album}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // Queue operation visual indicator
+                AnimatedVisibility(
+                    visible = queueOperation != null,
+                    enter = slideInHorizontally(animationSpec = tween(200)) + fadeIn(),
+                    exit = slideOutHorizontally(animationSpec = tween(200)) + fadeOut()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        when (queueOperation) {
+                            QueueOperation.ADDING_TO_END, QueueOperation.ADDING_TO_NEXT -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (queueOperation == QueueOperation.ADDING_TO_END) "Adding..." else "Adding next...",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            QueueOperation.COMPLETED_SUCCESS -> {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Added successfully",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Added",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            QueueOperation.COMPLETED_ERROR -> {
+                                Icon(
+                                    imageVector = Icons.Rounded.Error,
+                                    contentDescription = "Failed to add",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Failed",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            else -> {}
                         }
-                        QueueOperation.COMPLETED_SUCCESS -> {
-                            Icon(
-                                imageVector = Icons.Rounded.CheckCircle,
-                                contentDescription = "Added successfully",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Added",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        QueueOperation.COMPLETED_ERROR -> {
-                            Icon(
-                                imageVector = Icons.Rounded.Error,
-                                contentDescription = "Failed to add",
-                                tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Failed",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                        else -> {}
                     }
                 }
-            }
 
-            // Queue actions
-            var showMenu by remember { mutableStateOf(false) }
+                // Queue actions
+                var showMenu by remember { mutableStateOf(false) }
 
-            Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(
-                        imageVector = Icons.Rounded.MoreVert,
-                        contentDescription = "More options",
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "More options",
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
 
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Play next") },
-                        leadingIcon = {
-                            Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
-                        },
-                        onClick = {
-                            onAddToQueue(false)
-                            showMenu = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Add to queue") },
-                        leadingIcon = {
-                            Icon(Icons.Rounded.QueueMusic, contentDescription = null)
-                        },
-                        onClick = {
-                            onAddToQueue(true)
-                            showMenu = false
-                        }
-                    )
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Play next") },
+                            leadingIcon = {
+                                Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
+                            },
+                            onClick = {
+                                onAddToQueue(false)
+                                showMenu = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to queue") },
+                            leadingIcon = {
+                                Icon(Icons.Rounded.QueueMusic, contentDescription = null)
+                            },
+                            onClick = {
+                                onAddToQueue(true)
+                                showMenu = false
+                            }
+                        )
+                    }
                 }
             }
         }
     }
-        }
-    )
 }
 
 @Composable

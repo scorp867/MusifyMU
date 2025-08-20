@@ -43,7 +43,7 @@ fun EnhancedQueueTrackItem(
     config: DragDropConfig = DragDropConfig()
 ) {
     val haptic = LocalHapticFeedback.current
-    
+
     // Optimized animation states with performance considerations
     val scale by animateFloatAsState(
         targetValue = if (isDragging) 1.05f else 1f,
@@ -53,7 +53,7 @@ fun EnhancedQueueTrackItem(
         ),
         label = "scale"
     )
-    
+
     val elevation by animateDpAsState(
         targetValue = if (isDragging) {
             if (config.enableLightweightShadow) 8.dp else 16.dp
@@ -64,7 +64,7 @@ fun EnhancedQueueTrackItem(
         ),
         label = "elevation"
     )
-    
+
     val rotation by animateFloatAsState(
         targetValue = if (isDragging) 1.5f else 0f, // Reduced rotation for performance
         animationSpec = spring(
@@ -73,7 +73,7 @@ fun EnhancedQueueTrackItem(
         ),
         label = "rotation"
     )
-    
+
     // Color animations
     val backgroundColor by animateColorAsState(
         targetValue = when {
@@ -85,7 +85,7 @@ fun EnhancedQueueTrackItem(
         animationSpec = tween(300),
         label = "backgroundColor"
     )
-    
+
     val borderColor by animateColorAsState(
         targetValue = when {
             isDragging -> MaterialTheme.colorScheme.primary
@@ -96,7 +96,7 @@ fun EnhancedQueueTrackItem(
         animationSpec = tween(300),
         label = "borderColor"
     )
-    
+
     // Pulsing animation for currently playing
     val pulseScale by animateFloatAsState(
         targetValue = if (isCurrentlyPlaying) 1.02f else 1f,
@@ -106,7 +106,7 @@ fun EnhancedQueueTrackItem(
         ),
         label = "pulseScale"
     )
-    
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -114,7 +114,7 @@ fun EnhancedQueueTrackItem(
                 scaleX = scale * pulseScale
                 scaleY = scale * pulseScale
                 rotationZ = rotation
-                
+
                 // Hardware acceleration for smooth rendering
                 if (config.enableHardwareAcceleration) {
                     compositingStrategy = if (isDragging) {
@@ -123,15 +123,15 @@ fun EnhancedQueueTrackItem(
                         CompositingStrategy.Auto
                     }
                 }
-                
+
                 // Optimize alpha during drag for better performance
                 alpha = if (isDragging) 0.95f else 1f
             }
-            .clickable { 
+            .clickable {
                 if (config.enableHapticFeedback) {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
-                onClick() 
+                onClick()
             },
         colors = CardDefaults.cardColors(
             containerColor = backgroundColor
@@ -140,7 +140,7 @@ fun EnhancedQueueTrackItem(
         shape = RoundedCornerShape(16.dp),
         border = if (borderColor != Color.Transparent) {
             androidx.compose.foundation.BorderStroke(
-                width = if (isDragging) 2.dp else 1.dp, 
+                width = if (isDragging) 2.dp else 1.dp,
                 color = borderColor
             )
         } else null
@@ -156,7 +156,7 @@ fun EnhancedQueueTrackItem(
                 targetState = position,
                 transitionSpec = {
                     slideInVertically { height -> height } + fadeIn() togetherWith
-                    slideOutVertically { height -> -height } + fadeOut()
+                            slideOutVertically { height -> -height } + fadeOut()
                 },
                 label = "position"
             ) { pos ->
@@ -201,9 +201,9 @@ fun EnhancedQueueTrackItem(
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.width(16.dp))
-            
+
             // Album artwork with enhanced loading
             Box(
                 modifier = Modifier
@@ -219,7 +219,7 @@ fun EnhancedQueueTrackItem(
                     contentDescription = track.title,
                     modifier = Modifier.fillMaxSize()
                 )
-                
+
                 // Play next indicator
                 if (isMarkedPlayNext) {
                     Box(
@@ -241,9 +241,9 @@ fun EnhancedQueueTrackItem(
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.width(16.dp))
-            
+
             // Track information with enhanced typography
             Column(
                 modifier = Modifier.weight(1f)
@@ -261,9 +261,9 @@ fun EnhancedQueueTrackItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                
+
                 Spacer(modifier = Modifier.height(2.dp))
-                
+
                 Text(
                     text = "${track.artist} • ${track.album}",
                     style = MaterialTheme.typography.bodyMedium,
@@ -272,9 +272,9 @@ fun EnhancedQueueTrackItem(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            
+
             Spacer(modifier = Modifier.width(12.dp))
-            
+
             // Drag handle integrated with reorderable state (long-press to drag)
             IconButton(
                 onClick = { },
@@ -294,22 +294,30 @@ fun EnhancedQueueTrackItem(
 
 /**
  * Enhanced swipe background with dynamic colors and animations
+ * Context-aware icons and actions based on usage
  */
 @Composable
 fun EnhancedSwipeBackground(
     dismissDirection: androidx.compose.material.DismissDirection?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isInQueue: Boolean = false // Different behavior for queue vs library items
 ) {
     val color by animateColorAsState(
         targetValue = when (dismissDirection) {
-            androidx.compose.material.DismissDirection.StartToEnd -> MaterialTheme.colorScheme.error
-            androidx.compose.material.DismissDirection.EndToStart -> MaterialTheme.colorScheme.tertiary
+            androidx.compose.material.DismissDirection.StartToEnd -> {
+                if (isInQueue) MaterialTheme.colorScheme.primary // Play Next in queue
+                else MaterialTheme.colorScheme.primary // Play Next in library
+            }
+            androidx.compose.material.DismissDirection.EndToStart -> {
+                if (isInQueue) MaterialTheme.colorScheme.error // Remove from queue
+                else MaterialTheme.colorScheme.secondary // Add to User Queue in library
+            }
             null -> Color.Transparent
         },
         animationSpec = tween(300),
         label = "swipeColor"
     )
-    
+
     val scale by animateFloatAsState(
         targetValue = if (dismissDirection != null) 1.1f else 1f,
         animationSpec = spring(
@@ -318,7 +326,7 @@ fun EnhancedSwipeBackground(
         ),
         label = "swipeScale"
     )
-    
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -347,24 +355,42 @@ fun EnhancedSwipeBackground(
             enter = fadeIn() + scaleIn(),
             exit = fadeOut() + scaleOut()
         ) {
-            val icon = when (dismissDirection) {
-                androidx.compose.material.DismissDirection.StartToEnd -> Icons.Default.Delete
-                androidx.compose.material.DismissDirection.EndToStart -> Icons.Default.PlaylistAdd
-                null -> Icons.Default.Info
+            val (icon, text) = when (dismissDirection) {
+                androidx.compose.material.DismissDirection.StartToEnd -> {
+                    if (isInQueue) {
+                        Icons.Default.SkipNext to "Play Next"
+                    } else {
+                        Icons.Default.SkipNext to "Play Next" // Swipe right = Play Next
+                    }
+                }
+                androidx.compose.material.DismissDirection.EndToStart -> {
+                    if (isInQueue) {
+                        Icons.Default.Delete to "Remove"
+                    } else {
+                        Icons.Default.QueueMusic to "Add to Queue" // Swipe left = Add to Queue
+                    }
+                }
+                null -> Icons.Default.Info to ""
             }
-            
-            Icon(
-                imageVector = icon,
-                contentDescription = when (dismissDirection) {
-                    androidx.compose.material.DismissDirection.StartToEnd -> "Remove from queue"
-                    androidx.compose.material.DismissDirection.EndToStart -> "Add to playlist"
-                    null -> null
-                },
-                tint = color,
-                modifier = Modifier
-                    .padding(horizontal = 24.dp)
-                    .size(32.dp)
-            )
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = text,
+                    tint = color,
+                    modifier = Modifier.size(28.dp)
+                )
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = color
+                )
+            }
         }
     }
 }

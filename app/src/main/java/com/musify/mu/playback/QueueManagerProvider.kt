@@ -116,9 +116,10 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
      */
     suspend fun addToUserQueueWithContext(
         items: List<androidx.media3.common.MediaItem>,
-        context: QueueManager.PlayContext? = null
+        context: QueueManager.PlayContext? = null,
+        allowDuplicates: Boolean = true
     ) {
-        queueManager?.addToUserQueue(items.toMutableList(), context)
+        queueManager?.addToUserQueue(items.toMutableList(), context, allowDuplicates)
     }
 
     // Backward-compatible alias used by some screens
