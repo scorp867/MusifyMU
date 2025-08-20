@@ -224,13 +224,30 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                             }
                         ) {
                         val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
-                        com.musify.mu.ui.components.CompactTrackRow(
-                            title = track.title,
-                            subtitle = track.artist,
-                            artData = track.artUri,
-                            contentDescription = track.title,
-                            isPlaying = isPlaying,
-                            onClick = { onPlay(visualTracks, idx) },
+                        val queueOps = rememberQueueOperations()
+                        val queueOpsScope = rememberCoroutineScope()
+                        
+                        com.musify.mu.ui.components.EnhancedSwipeableItem(
+                            onSwipeRight = {
+                                // Right swipe: Play Next
+                                val ctx = com.musify.mu.playback.QueueContextHelper.createPlaylistContext(playlistId)
+                                queueOpsScope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                            },
+                            onSwipeLeft = {
+                                // Left swipe: Add to Queue
+                                val ctx = com.musify.mu.playback.QueueContextHelper.createPlaylistContext(playlistId)
+                                queueOpsScope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                            },
+                            isInQueue = false,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            com.musify.mu.ui.components.CompactTrackRow(
+                                title = track.title,
+                                subtitle = track.artist,
+                                artData = track.artUri,
+                                contentDescription = track.title,
+                                isPlaying = isPlaying,
+                                onClick = { onPlay(visualTracks, idx) },
                             trailingContent = {
                                 Box {
                                     IconButton(onClick = { showMenu = true }) {
@@ -264,18 +281,20 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                 }
                             }
                         )
-                        IconButton(
-                            onClick = { },
-                            modifier = Modifier.detectReorderAfterLongPress(reorderState)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.DragHandle,
-                                contentDescription = "Drag to reorder",
-                                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                            )
-                        }
+                                IconButton(
+                                    onClick = { },
+                                    modifier = Modifier.detectReorderAfterLongPress(reorderState)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DragHandle,
+                                        contentDescription = "Drag to reorder",
+                                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                    )
+                                }
+                            }
                         }
                     }
+                }
                         }
                     )
                 }
