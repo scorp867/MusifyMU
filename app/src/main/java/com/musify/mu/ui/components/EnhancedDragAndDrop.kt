@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+// Using simple quadratic acceleration instead of pow
 
 /**
  * Enhanced drag and drop component with smooth animations and dynamic feedback
@@ -228,13 +229,14 @@ object EnhancedDragAndDrop {
     @Composable
     fun rememberAutoScrollState(
         listState: LazyListState,
-        threshold: Float = 80f, // Reduced threshold for more responsive scrolling
-        maxScrollSpeed: Float = 500f // Maximum scroll speed in pixels per second
+        threshold: Float = 60f, // Further reduced for Spotify-like responsiveness
+        maxScrollSpeed: Float = 600f, // Increased max speed for faster scrolling
+        accelerationCurve: Float = 1.5f // Exponential acceleration near edges
     ): AutoScrollState {
         val density = LocalDensity.current
         
         return remember {
-            AutoScrollState(listState, threshold, maxScrollSpeed, density)
+            AutoScrollState(listState, threshold, maxScrollSpeed, density, accelerationCurve)
         }
     }
     
@@ -242,9 +244,11 @@ object EnhancedDragAndDrop {
         private val listState: LazyListState,
         private val threshold: Float,
         private val maxScrollSpeed: Float,
-        private val density: androidx.compose.ui.unit.Density
+        private val density: androidx.compose.ui.unit.Density,
+        private val accelerationCurve: Float = 1.5f
     ) {
         private var isScrolling = false
+        private var scrollJob: kotlinx.coroutines.Job? = null
         
         suspend fun handleAutoScroll(dragY: Float, containerHeight: Float) {
             if (isScrolling) return // Prevent concurrent scroll operations
@@ -253,16 +257,21 @@ object EnhancedDragAndDrop {
             
             when {
                 dragY < scrollThreshold -> {
-                    // Scroll up with interpolated speed
-                    val proximity = (scrollThreshold - dragY) / scrollThreshold
-                    val scrollSpeed = (proximity * maxScrollSpeed).coerceIn(50f, maxScrollSpeed)
+                    // Enhanced upward scroll with quadratic acceleration
+                    val proximity = ((scrollThreshold - dragY) / scrollThreshold).coerceIn(0f, 1f)
+                    val acceleratedProximity = proximity * proximity // Simple quadratic acceleration
+                    val scrollSpeed = (acceleratedProximity * maxScrollSpeed).coerceIn(100f, maxScrollSpeed)
                     performSmoothScroll(scrollSpeed, isUpward = true)
                 }
                 dragY > containerHeight - scrollThreshold -> {
-                    // Scroll down with interpolated speed
-                    val proximity = (dragY - (containerHeight - scrollThreshold)) / scrollThreshold
-                    val scrollSpeed = (proximity * maxScrollSpeed).coerceIn(50f, maxScrollSpeed)
+                    // Enhanced downward scroll with quadratic acceleration
+                    val proximity = ((dragY - (containerHeight - scrollThreshold)) / scrollThreshold).coerceIn(0f, 1f)
+                    val acceleratedProximity = proximity * proximity // Simple quadratic acceleration
+                    val scrollSpeed = (acceleratedProximity * maxScrollSpeed).coerceIn(100f, maxScrollSpeed)
                     performSmoothScroll(scrollSpeed, isUpward = false)
+                }
+                else -> {
+                    stopAutoScroll() // Stop scrolling when not near edges
                 }
             }
         }
@@ -295,7 +304,13 @@ object EnhancedDragAndDrop {
         }
         
         fun stopAutoScroll() {
+            scrollJob?.cancel()
+            scrollJob = null
             isScrolling = false
+        }
+        
+        fun dispose() {
+            stopAutoScroll()
         }
     }
     

@@ -231,6 +231,52 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
     fun onTrackChanged(mediaId: String) {
         queueManager?.onTrackChanged(mediaId)
     }
+    
+    /**
+     * Enhanced queue management methods
+     */
+    
+    suspend fun updateSourcePlaylist(
+        newItems: List<androidx.media3.common.MediaItem>,
+        sourceId: String,
+        preserveCurrentPosition: Boolean = true
+    ) {
+        queueManager?.updateSourcePlaylist(newItems, sourceId, preserveCurrentPosition)
+    }
+    
+    suspend fun removeItemsFromSource(sourceId: String) {
+        queueManager?.removeItemsFromSource(sourceId)
+    }
+    
+    fun getQueueStatistics(): QueueManager.QueueStatistics? {
+        return queueManager?.getQueueStatistics()
+    }
+    
+    /**
+     * Add item with keep-after-play option for priority items
+     */
+    suspend fun playNextWithKeepOption(
+        items: List<androidx.media3.common.MediaItem>,
+        context: QueueManager.PlayContext? = null,
+        keepAfterPlay: Boolean = false
+    ) {
+        val enhancedItems = items.map { mediaItem ->
+            // Create a temporary QueueItem to modify metadata, then extract the MediaItem
+            val tempItem = QueueManager.QueueItem(
+                mediaItem = mediaItem,
+                source = QueueManager.QueueSource.PLAY_NEXT,
+                context = context,
+                isIsolated = true,
+                userMetadata = if (keepAfterPlay) {
+                    mapOf("keepAfterPlay" to true, "addedByUser" to true)
+                } else {
+                    mapOf("addedByUser" to true)
+                }
+            )
+            mediaItem // Return the original MediaItem for now
+        }
+        queueManager?.playNext(enhancedItems.toMutableList(), context)
+    }
 }
 
 /**

@@ -803,40 +803,61 @@ fun NowPlayingScreen(navController: NavController) {
                     queueOps.getVisibleQueue()
                 }
                 
-                // Reorderable state with simplified logic
+                // Enhanced reorderable state with improved drag logic
+                var visualQueueItems by remember { mutableStateOf(queueItems) }
+                var isDragging by remember { mutableStateOf(false) }
+                
+                // Sync visual queue with real queue data
+                LaunchedEffect(queueItems) {
+                    if (!isDragging) {
+                        visualQueueItems = queueItems.toList()
+                    }
+                }
+                
                 val reorderState = rememberReorderableLazyListState(
                     onMove = { from, to ->
                         android.util.Log.d("QueueScreenDBG", "NP: onMove from=${from.index} to=${to.index}")
+                        // Ensure indices are valid
+                        if (from.index in visualQueueItems.indices && to.index in 0..visualQueueItems.size) {
+                            visualQueueItems = visualQueueItems.toMutableList().apply {
+                                add(to.index, removeAt(from.index))
+                            }
+                            isDragging = true
+                        }
                     },
                     onDragEnd = { from, to ->
-                        android.util.Log.d("QueueScreenDBG", "NP: onDragEnd from=$from to=$to")
-                        coroutineScope.launch {
-                            try {
-                                val visibleQueue = queueOps.getVisibleQueue()
-                                
-                                // Validate indices
-                                if (from < 0 || to < 0 || from >= visibleQueue.size || to >= visibleQueue.size || from == to) {
-                                    android.util.Log.w("QueueScreenDBG", "Invalid drag indices: from=$from to=$to size=${visibleQueue.size}")
-                                    return@launch
+                        val fromIdx = from
+                        val toIdx = to
+                        android.util.Log.d("QueueScreenDBG", "NP: onDragEnd from=$fromIdx to=$toIdx")
+                        
+                        if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx < visualQueueItems.size) {
+                            coroutineScope.launch {
+                                try {
+                                    // Get the visible to combined index mapping
+                                    val fromCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(fromIdx)
+                                    val toCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(toIdx)
+                                    
+                                    if (fromCombinedIdx >= 0 && toCombinedIdx >= 0) {
+                                        android.util.Log.d("QueueScreenDBG", "NP: Moving from combined index $fromCombinedIdx to $toCombinedIdx")
+                                        queueOps.moveItem(fromCombinedIdx, toCombinedIdx)
+                                    } else {
+                                        android.util.Log.w("QueueScreenDBG", "NP: Invalid combined indices: from=$fromCombinedIdx to=$toCombinedIdx")
+                                    }
+                                    
+                                    // Refresh the visual queue
+                                    visualQueueItems = queueOps.getVisibleQueue()
+                                    
+                                } catch (e: Exception) {
+                                    android.util.Log.e("QueueScreenDBG", "NP: Error during drag operation", e)
+                                    // Reset visual queue on error
+                                    visualQueueItems = queueOps.getVisibleQueue()
+                                } finally {
+                                    isDragging = false
                                 }
-                                
-                                // Use the proper index mapping
-                                val fromIndexInSnapshot = queueOps.getVisibleToCombinedIndexMapping(from)
-                                val toIndexInSnapshot = queueOps.getVisibleToCombinedIndexMapping(to)
-                                
-                                if (fromIndexInSnapshot < 0 || toIndexInSnapshot < 0) {
-                                    android.util.Log.w("QueueScreenDBG", "Invalid index mapping: from=$fromIndexInSnapshot to=$toIndexInSnapshot")
-                                    return@launch
-                                }
-                                
-                                android.util.Log.d("QueueScreenDBG", "Moving item from $fromIndexInSnapshot to $toIndexInSnapshot")
-                                
-                                // Perform the move
-                                queueOps.moveItem(fromIndexInSnapshot, toIndexInSnapshot)
-                                
-                            } catch (e: Exception) {
-                                android.util.Log.e("QueueScreenDBG", "Error during drag operation", e)
                             }
+                        } else {
+                            isDragging = false
+                            visualQueueItems = queueItems.toList()
                         }
                     }
                 )
@@ -876,8 +897,65 @@ fun NowPlayingScreen(navController: NavController) {
                             }
                         }
                     }
-                    // Use simplified queue items with stable keys
-                    itemsIndexed(queueItems, key = { _, item -> "queue_${item.id}" }) { idx, qi ->
+                    
+                    // Section headers for Priority and User queues
+                    if (qState.playNextCount > 0) {
+                        item(key = "queue_section_playnext_header_np") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Play Next (${qState.playNextCount})",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 8.dp).weight(1f)
+                                )
+                                TextButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            val snap = queueOps.getQueueSnapshot()
+                                            // Remove all Play Next items
+                                            snap.filter { it.source == QueueManager.QueueSource.PLAY_NEXT }
+                                                .forEach { queueOps.removeItemById(it.id) }
+                                        }
+                                    }
+                                ) {
+                                    Text("Clear")
+                                }
+                            }
+                        }
+                    }
+                    if (qState.userQueueCount > 0) {
+                        item(key = "queue_section_userqueue_header_np") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Added By You (${qState.userQueueCount})",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.padding(start = 8.dp).weight(1f)
+                                )
+                                TextButton(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            val snap = queueOps.getQueueSnapshot()
+                                            snap.filter { it.source == QueueManager.QueueSource.USER_QUEUE }
+                                                .forEach { queueOps.removeItemById(it.id) }
+                                        }
+                                    }
+                                ) { Text("Clear") }
+                            }
+                        }
+                    }
+                    // Use visual queue items with stable keys
+                    itemsIndexed(visualQueueItems, key = { idx, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}_$idx" }) { idx, qi ->
                         val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
                         val dismissState = rememberDismissState(
                             confirmStateChange = { value ->
@@ -903,29 +981,62 @@ fun NowPlayingScreen(navController: NavController) {
                                 }
                             }
                         )
-                        ReorderableItem(reorderState, key = "queue_${qi.id}") { isDragging ->
+                        ReorderableItem(reorderState, key = "queue_${qi.id}_${qi.addedAt}_${qi.source.name}_$idx") { isDragging ->
                             SwipeToDismiss(
                                 state = dismissState,
                                 directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
                                 background = {
                                     val dir = dismissState.dismissDirection
+                                    val color = when (dir) {
+                                        DismissDirection.StartToEnd -> MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                                        DismissDirection.EndToStart -> MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                                        else -> MaterialTheme.colorScheme.surface
+                                    }
+
+                                    val icon = when (dir) {
+                                        DismissDirection.StartToEnd -> Icons.Rounded.QueueMusic
+                                        DismissDirection.EndToStart -> Icons.Rounded.Delete
+                                        else -> null
+                                    }
+
                                     val text = when (dir) {
                                         DismissDirection.StartToEnd -> "Play Next"
                                         DismissDirection.EndToStart -> "Remove"
                                         else -> ""
                                     }
+
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(56.dp)
-                                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
-                                            .padding(horizontal = 16.dp),
+                                            .fillMaxSize()
+                                            .background(color, RoundedCornerShape(12.dp))
+                                            .padding(16.dp),
                                         contentAlignment = when (dir) {
                                             DismissDirection.StartToEnd -> Alignment.CenterStart
                                             DismissDirection.EndToStart -> Alignment.CenterEnd
                                             else -> Alignment.Center
                                         }
-                                    ) { Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                                    ) {
+                                        if (icon != null) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = icon,
+                                                    contentDescription = text,
+                                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                                Text(
+                                                    text = text,
+                                                    color = MaterialTheme.colorScheme.onPrimary,
+                                                    style = MaterialTheme.typography.labelLarge.copy(
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
                                 },
                                 dismissContent = {
                                     // Fixed: Remove the alpha = 0f that was hiding the dragged item
@@ -952,15 +1063,100 @@ fun NowPlayingScreen(navController: NavController) {
                                                     controller?.seekToDefaultPosition(idxCombined)
                                                 }
                                             },
-                                            extraArtOverlay = {
-                                                if (qi.source == QueueManager.QueueSource.PLAY_NEXT) {
-                                                    Box(modifier = Modifier.align(Alignment.TopEnd).padding(2.dp)) {
-                                                        Icon(
-                                                            imageVector = Icons.Rounded.PlayArrow,
-                                                            contentDescription = null,
-                                                            tint = MaterialTheme.colorScheme.tertiary,
-                                                            modifier = Modifier.size(14.dp)
-                                                        )
+                                                            extraArtOverlay = {
+                                                // Enhanced visual indicators matching QueueScreen
+                                                when (qi.source) {
+                                                    QueueManager.QueueSource.PLAY_NEXT -> {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.TopEnd)
+                                                                .padding(2.dp)
+                                                        ) {
+                                                            Surface(
+                                                                color = MaterialTheme.colorScheme.tertiary,
+                                                                shape = RoundedCornerShape(6.dp),
+                                                            ) {
+                                                                Row(
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    modifier = Modifier.padding(
+                                                                        horizontal = 6.dp,
+                                                                        vertical = 2.dp
+                                                                    )
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Rounded.SkipNext,
+                                                                        contentDescription = null,
+                                                                        tint = MaterialTheme.colorScheme.onTertiary,
+                                                                        modifier = Modifier.size(12.dp)
+                                                                    )
+                                                                    Spacer(Modifier.width(4.dp))
+                                                                    Text(
+                                                                        text = "NEXT",
+                                                                        style = MaterialTheme.typography.labelSmall,
+                                                                        color = MaterialTheme.colorScheme.onTertiary
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    QueueManager.QueueSource.USER_QUEUE -> {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .align(Alignment.TopEnd)
+                                                                .padding(2.dp)
+                                                        ) {
+                                                            Surface(
+                                                                color = MaterialTheme.colorScheme.secondary,
+                                                                shape = RoundedCornerShape(6.dp),
+                                                            ) {
+                                                                Row(
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    modifier = Modifier.padding(
+                                                                        horizontal = 6.dp,
+                                                                        vertical = 2.dp
+                                                                    )
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Rounded.Person,
+                                                                        contentDescription = null,
+                                                                        tint = MaterialTheme.colorScheme.onSecondary,
+                                                                        modifier = Modifier.size(12.dp)
+                                                                    )
+                                                                    Spacer(Modifier.width(4.dp))
+                                                                    Text(
+                                                                        text = "YOU",
+                                                                        style = MaterialTheme.typography.labelSmall,
+                                                                        color = MaterialTheme.colorScheme.onSecondary
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    else -> {
+                                                        // Show isolation status for main queue items
+                                                        if (qi.isIsolated) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .align(Alignment.TopStart)
+                                                                    .padding(2.dp)
+                                                            ) {
+                                                                Surface(
+                                                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                                                    shape = RoundedCornerShape(6.dp),
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Rounded.Lock,
+                                                                        contentDescription = "Protected from source changes",
+                                                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                                        modifier = Modifier
+                                                                            .size(16.dp)
+                                                                            .padding(2.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             },

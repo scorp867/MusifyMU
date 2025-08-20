@@ -263,6 +263,24 @@ fun QueueScreen(navController: NavController) {
                             duration = SnackbarDuration.Short
                         )
                     }
+
+                    is QueueManager.QueueChangeEvent.QueueCleanup -> {
+                        android.util.Log.d(
+                            "QueueScreenDBG",
+                            "QueueCleanup removed=${change.removedCount} kept=${change.keptCount}"
+                        )
+                        if (change.removedCount > 0) {
+                            val message = if (change.keptCount > 0) {
+                                "Cleaned ${change.removedCount} played songs (kept ${change.keptCount})"
+                            } else {
+                                "Cleaned ${change.removedCount} played songs"
+                            }
+                            snackbarHostState.showSnackbar(
+                                message = message,
+                                duration = SnackbarDuration.Short
+                            )
+                        }
+                    }
                 }
             }
             // After any queue change event, refresh lists immediately on main thread
@@ -288,151 +306,40 @@ fun QueueScreen(navController: NavController) {
                 "QueueScreenDBG",
                 "onMove from=${from.index} to=${to.index} beforeSize=${visualQueueItems.size}"
             )
-            visualQueueItems = visualQueueItems.toMutableList().apply {
-                add(to.index, removeAt(from.index))
+            // Ensure indices are valid
+            if (from.index in visualQueueItems.indices && to.index in 0..visualQueueItems.size) {
+                visualQueueItems = visualQueueItems.toMutableList().apply {
+                    add(to.index, removeAt(from.index))
+                }
+                isDragging = true
             }
-            isDragging = true
         },
         onDragEnd = { from, to ->
             val fromIdx = from
-            val toIdxRaw = to
-            val lastIndex = (visualQueueItems.size - 1).coerceAtLeast(0)
-            val toIdx = toIdxRaw.coerceIn(0, lastIndex)
-            if (fromIdx != toIdx && fromIdx in 0..lastIndex && toIdx in 0..lastIndex) {
+            val toIdx = to
+            android.util.Log.d("QueueScreenDBG", "onDragEnd from=$fromIdx to=$toIdx")
+            
+            if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx < visualQueueItems.size) {
                 scope.launch {
                     try {
-                        android.util.Log.d(
-                            "QueueScreenDBG",
-                            "onDragEnd commit from=$fromIdx to=$toIdx last=$lastIndex"
-                        )
-                        val snapBefore = queueOperations.getQueueSnapshot()
-                        val fromItem = snapBefore.getOrNull(fromIdx)
-                        if (fromItem != null) {
-                            val pnIndices = snapBefore.withIndex()
-                                .filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }
-                                .map { it.index }
-                            val userIndices = snapBefore.withIndex()
-                                .filter { it.value.source == QueueManager.QueueSource.USER_QUEUE }
-                                .map { it.index }
-                            val hasPn = pnIndices.isNotEmpty()
-                            val hasUser = userIndices.isNotEmpty()
-                            val pnStart = if (hasPn) pnIndices.first() else -1
-                            val pnEnd = if (hasPn) pnIndices.last() + 1 else -1
-                            val userStart = if (hasUser) userIndices.first() else -1
-                            val userEnd = if (hasUser) userIndices.last() + 1 else -1
-                            val intoPn = hasPn && toIdx in pnStart until pnEnd
-                            val intoUser = hasUser && toIdx in userStart until userEnd
-
-                            if (fromItem.source != QueueManager.QueueSource.PLAY_NEXT && intoPn) {
-                                val ctx = queueState.context
-                                    ?: QueueContextHelper.createSearchContext("drag_to_playnext")
-                                queueOperations.removeItemById(fromItem.id)
-                                val correctedTarget = if (fromIdx < toIdx) toIdx - 1 else toIdx
-                                queueOperations.playNextWithContext(
-                                    items = listOf(fromItem.mediaItem),
-                                    context = ctx
-                                )
-                                val snap2 = queueOperations.getQueueSnapshot()
-                                val pn2 = snap2.withIndex()
-                                    .filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }
-                                    .map { it.index }
-                                if (pn2.isNotEmpty()) {
-                                    val pnStart2 = pn2.first()
-                                    val pnEnd2 = pn2.last() + 1
-                                    val appendedIdx =
-                                        snap2.indexOfLast { it.source == QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
-                                    if (appendedIdx >= 0) {
-                                        val desired = correctedTarget.coerceIn(pnStart2, pnEnd2 - 1)
-                                        if (appendedIdx != desired) queueOperations.moveItem(
-                                            appendedIdx,
-                                            desired
-                                        )
-                                    }
-                                }
-                            } else if (fromItem.source == QueueManager.QueueSource.PLAY_NEXT && !intoPn) {
-                                queueOperations.removeItemById(fromItem.id)
-                                var snap3 = queueOperations.getQueueSnapshot()
-                                var mainIdx =
-                                    snap3.indexOfFirst { it.source != QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
-                                if (mainIdx < 0) {
-                                    queueOperations.addToUserQueueWithContext(
-                                        items = listOf(
-                                            fromItem.mediaItem
-                                        ), context = fromItem.context
-                                    )
-                                    snap3 = queueOperations.getQueueSnapshot()
-                                    mainIdx =
-                                        snap3.indexOfLast { it.source != QueueManager.QueueSource.PLAY_NEXT && it.id == fromItem.id }
-                                }
-                                val last = (snap3.size - 1).coerceAtLeast(0)
-                                val pn3 = snap3.withIndex()
-                                    .filter { it.value.source == QueueManager.QueueSource.PLAY_NEXT }
-                                    .map { it.index }
-                                val pnStart3 = pn3.firstOrNull() ?: -1
-                                val pnEnd3 = if (pn3.isNotEmpty()) pn3.last() + 1 else -1
-                                val correctedTarget = if (fromIdx < toIdx) toIdx - 1 else toIdx
-                                var desired = correctedTarget.coerceIn(0, last)
-                                if (pnStart3 >= 0 && desired in pnStart3 until pnEnd3) desired =
-                                    pnEnd3
-                                if (mainIdx >= 0 && mainIdx != desired) queueOperations.moveItem(
-                                    mainIdx,
-                                    desired
-                                )
-                            } else if (fromItem.source != QueueManager.QueueSource.USER_QUEUE && intoUser) {
-                                val ctx = queueState.context
-                                    ?: QueueContextHelper.createSearchContext("drag_to_userqueue")
-                                queueOperations.removeItemById(fromItem.id)
-                                val correctedTarget = if (fromIdx < toIdx) toIdx - 1 else toIdx
-                                queueOperations.addToUserQueueWithContext(
-                                    items = listOf(fromItem.mediaItem),
-                                    context = ctx
-                                )
-                                val snapU = queueOperations.getQueueSnapshot()
-                                val uIdxs = snapU.withIndex()
-                                    .filter { it.value.source == QueueManager.QueueSource.USER_QUEUE }
-                                    .map { it.index }
-                                if (uIdxs.isNotEmpty()) {
-                                    val uStart = uIdxs.first()
-                                    val uEnd = uIdxs.last() + 1
-                                    val appended =
-                                        snapU.indexOfLast { it.source == QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
-                                    if (appended >= 0) {
-                                        val desired = correctedTarget.coerceIn(uStart, uEnd - 1)
-                                        if (appended != desired) queueOperations.moveItem(
-                                            appended,
-                                            desired
-                                        )
-                                    }
-                                }
-                            } else if (fromItem.source == QueueManager.QueueSource.USER_QUEUE && !intoUser) {
-                                queueOperations.removeItemById(fromItem.id)
-                                var snapM = queueOperations.getQueueSnapshot()
-                                var mainIdx =
-                                    snapM.indexOfFirst { it.source != QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
-                                if (mainIdx < 0) {
-                                    // create main copy by re-adding to user queue then move after both PN and USER segments
-                                    queueOperations.addToUserQueueWithContext(
-                                        items = listOf(
-                                            fromItem.mediaItem
-                                        ), context = fromItem.context
-                                    )
-                                    snapM = queueOperations.getQueueSnapshot()
-                                    mainIdx =
-                                        snapM.indexOfLast { it.source != QueueManager.QueueSource.USER_QUEUE && it.id == fromItem.id }
-                                }
-                                if (mainIdx >= 0 && mainIdx != toIdx) queueOperations.moveItem(
-                                    mainIdx,
-                                    toIdx
-                                )
-                            } else {
-                                queueOperations.moveItem(fromIdx, toIdx)
-                            }
+                        // Get the visible to combined index mapping
+                        val fromCombinedIdx = queueOperations.getVisibleToCombinedIndexMapping(fromIdx)
+                        val toCombinedIdx = queueOperations.getVisibleToCombinedIndexMapping(toIdx)
+                        
+                        if (fromCombinedIdx >= 0 && toCombinedIdx >= 0) {
+                            android.util.Log.d("QueueScreenDBG", "Moving from combined index $fromCombinedIdx to $toCombinedIdx")
+                            queueOperations.moveItem(fromCombinedIdx, toCombinedIdx)
+                        } else {
+                            android.util.Log.w("QueueScreenDBG", "Invalid combined indices: from=$fromCombinedIdx to=$toCombinedIdx")
                         }
+                        
+                        // Refresh the visual queue
                         visualQueueItems = queueOperations.getVisibleQueue()
-                        android.util.Log.d(
-                            "QueueScreenDBG",
-                            "after commit visibleSize=${visualQueueItems.size}"
-                        )
+                        
+                    } catch (e: Exception) {
+                        android.util.Log.e("QueueScreenDBG", "Error during drag operation", e)
+                        // Reset visual queue on error
+                        visualQueueItems = queueOperations.getVisibleQueue()
                     } finally {
                         isDragging = false
                     }
@@ -584,7 +491,7 @@ fun QueueScreen(navController: NavController) {
                         }
                         itemsIndexed(
                             visualQueueItems, // Use visual queue for display
-                            key = { _, item -> "queue_${item.id}_${item.addedAt}" }
+                            key = { idx, item -> "queue_${item.id}_${item.addedAt}_${item.source.name}_$idx" }
                         ) { idx, queueItem ->
                             val itemKey = "queue_${queueItem.id}_${queueItem.addedAt}"
                             // Try to get the full track data from repository first to ensure we have pre-extracted artwork
@@ -674,7 +581,7 @@ fun QueueScreen(navController: NavController) {
                                     dragOverlayTrack = null
                                 }
                             }
-                            ReorderableItem(reorderState, key = itemKey) { isDraggingItem ->
+                            ReorderableItem(reorderState, key = "queue_${queueItem.id}_${queueItem.addedAt}_${queueItem.source.name}_$idx") { isDraggingItem ->
                                 Box(
                                     modifier = Modifier.onGloballyPositioned { coords ->
                                         itemBounds[itemKey] = coords.boundsInRoot()
@@ -721,37 +628,97 @@ fun QueueScreen(navController: NavController) {
                                                         }
                                                         .graphicsLayer { clip = false },
                                                     extraArtOverlay = {
-                                                        if (queueItem.source == QueueManager.QueueSource.PLAY_NEXT) {
-                                                            Box(
-                                                                modifier = Modifier
-                                                                    .align(Alignment.TopEnd)
-                                                                    .padding(2.dp)
-                                                            ) {
-                                                                Surface(
-                                                                    color = MaterialTheme.colorScheme.tertiary,
-                                                                    shape = RoundedCornerShape(6.dp),
+                                                        // Enhanced visual indicators for different queue types
+                                                        when (queueItem.source) {
+                                                            QueueManager.QueueSource.PLAY_NEXT -> {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .align(Alignment.TopEnd)
+                                                                        .padding(2.dp)
                                                                 ) {
-                                                                    Row(
-                                                                        verticalAlignment = Alignment.CenterVertically,
-                                                                        modifier = Modifier.padding(
-                                                                            horizontal = 6.dp,
-                                                                            vertical = 2.dp
-                                                                        )
+                                                                    Surface(
+                                                                        color = MaterialTheme.colorScheme.tertiary,
+                                                                        shape = RoundedCornerShape(6.dp),
                                                                     ) {
-                                                                        Icon(
-                                                                            imageVector = Icons.Rounded.SkipNext,
-                                                                            contentDescription = null,
-                                                                            tint = MaterialTheme.colorScheme.onTertiary,
-                                                                            modifier = Modifier.size(
-                                                                                12.dp
+                                                                        Row(
+                                                                            verticalAlignment = Alignment.CenterVertically,
+                                                                            modifier = Modifier.padding(
+                                                                                horizontal = 6.dp,
+                                                                                vertical = 2.dp
                                                                             )
-                                                                        )
-                                                                        Spacer(Modifier.width(4.dp))
-                                                                        Text(
-                                                                            text = "NEXT",
-                                                                            style = MaterialTheme.typography.labelSmall,
-                                                                            color = MaterialTheme.colorScheme.onTertiary
-                                                                        )
+                                                                        ) {
+                                                                            Icon(
+                                                                                imageVector = Icons.Rounded.SkipNext,
+                                                                                contentDescription = null,
+                                                                                tint = MaterialTheme.colorScheme.onTertiary,
+                                                                                modifier = Modifier.size(12.dp)
+                                                                            )
+                                                                            Spacer(Modifier.width(4.dp))
+                                                                            Text(
+                                                                                text = "NEXT",
+                                                                                style = MaterialTheme.typography.labelSmall,
+                                                                                color = MaterialTheme.colorScheme.onTertiary
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            
+                                                            QueueManager.QueueSource.USER_QUEUE -> {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .align(Alignment.TopEnd)
+                                                                        .padding(2.dp)
+                                                                ) {
+                                                                    Surface(
+                                                                        color = MaterialTheme.colorScheme.secondary,
+                                                                        shape = RoundedCornerShape(6.dp),
+                                                                    ) {
+                                                                        Row(
+                                                                            verticalAlignment = Alignment.CenterVertically,
+                                                                            modifier = Modifier.padding(
+                                                                                horizontal = 6.dp,
+                                                                                vertical = 2.dp
+                                                                            )
+                                                                        ) {
+                                                                            Icon(
+                                                                                imageVector = Icons.Rounded.Person,
+                                                                                contentDescription = null,
+                                                                                tint = MaterialTheme.colorScheme.onSecondary,
+                                                                                modifier = Modifier.size(12.dp)
+                                                                            )
+                                                                            Spacer(Modifier.width(4.dp))
+                                                                            Text(
+                                                                                text = "YOU",
+                                                                                style = MaterialTheme.typography.labelSmall,
+                                                                                color = MaterialTheme.colorScheme.onSecondary
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            
+                                                            else -> {
+                                                                // Show isolation status for main queue items
+                                                                if (queueItem.isIsolated) {
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .align(Alignment.TopStart)
+                                                                            .padding(2.dp)
+                                                                    ) {
+                                                                        Surface(
+                                                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                                                            shape = RoundedCornerShape(6.dp),
+                                                                        ) {
+                                                                            Icon(
+                                                                                imageVector = Icons.Rounded.Lock,
+                                                                                contentDescription = "Protected from source changes",
+                                                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                                                modifier = Modifier
+                                                                                    .size(16.dp)
+                                                                                    .padding(2.dp)
+                                                                            )
+                                                                        }
                                                                     }
                                                                 }
                                                             }
