@@ -644,7 +644,7 @@ fun SettingsScreen(navController: NavController) {
                                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
                                 )
                                 Text(
-                                    text = "Scorpion King",
+                                    text = "King Scorpion",
                                     style = MaterialTheme.typography.bodyLarge.copy(
                                         fontWeight = FontWeight.Medium
                                     ),

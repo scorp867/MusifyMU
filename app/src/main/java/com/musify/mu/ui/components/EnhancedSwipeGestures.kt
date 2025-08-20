@@ -25,20 +25,22 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.layout.onGloballyPositioned
 import kotlin.math.abs
 import kotlin.math.sign
 
 /**
- * Enhanced swipe gesture component with Spotify-like behavior
- * Implements proper directional touch slop, velocity filters, and gesture locking
+ * Enhanced swipe gesture component with Spotify-like spring behavior
+ * Implements smooth elastic animations and extended swipe range
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EnhancedSwipeableItem(
     onSwipeRight: () -> Unit, // Play Next
     onSwipeLeft: () -> Unit,  // Add to Queue
     isInQueue: Boolean = false,
-    swipeThreshold: Float = 0.3f, // 30% of width to trigger action
-    velocityThreshold: Dp = 125.dp, // Minimum velocity to trigger
+    swipeThreshold: Float = 0.25f, // 25% of width to trigger action
+    velocityThreshold: Dp = 100.dp, // Lower velocity threshold for easier triggering
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
@@ -52,18 +54,27 @@ fun EnhancedSwipeableItem(
     var isGestureLocked by remember { mutableStateOf(false) }
     var gestureDirection by remember { mutableStateOf<SwipeDirection?>(null) }
     var hasTriggeredHaptic by remember { mutableStateOf(false) }
+    var screenWidth by remember { mutableStateOf(0f) }
 
     // Touch slop threshold
     val touchSlop = with(density) { viewConfiguration.touchSlop.toDp().toPx() }
     val velocityThresholdPx = with(density) { velocityThreshold.toPx() }
 
-    // Animation states
+    // Enhanced spring animation with Spotify-like elastic behavior
     val animatedOffsetX by animateFloatAsState(
         targetValue = if (isDragging) offsetX else 0f,
         animationSpec = if (isDragging) {
-            spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessHigh)
+            // While dragging: tight spring for responsive feel
+            spring(
+                dampingRatio = 0.8f, // Slightly bouncy
+                stiffness = 400f // Medium stiffness for smooth dragging
+            )
         } else {
-            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+            // When released: bouncy spring like Spotify
+            spring(
+                dampingRatio = 0.6f, // More bouncy for elastic feel
+                stiffness = 300f // Lower stiffness for smoother return
+            )
         },
         finishedListener = {
             if (!isDragging) {
@@ -75,11 +86,14 @@ fun EnhancedSwipeableItem(
         label = "swipeOffset"
     )
 
+    // Enhanced background alpha that shows earlier and more prominently
     val backgroundAlpha by animateFloatAsState(
-        targetValue = if (gestureDirection != null && abs(animatedOffsetX) > touchSlop * 2) {
-            (abs(animatedOffsetX) / (density.density * 100)).coerceIn(0f, 1f)
+        targetValue = if (gestureDirection != null && abs(animatedOffsetX) > touchSlop) {
+            // Make background more visible sooner
+            val progress = (abs(animatedOffsetX) / (screenWidth * 0.4f)).coerceIn(0f, 1f)
+            progress.coerceAtLeast(0.2f) // Minimum 20% opacity when swiping
         } else 0f,
-        animationSpec = tween(150),
+        animationSpec = tween(100), // Faster fade
         label = "backgroundAlpha"
     )
 
@@ -95,12 +109,23 @@ fun EnhancedSwipeableItem(
             }
 
             if (isDragging) {
-                // Limit swipe distance to prevent over-swiping
-                val maxOffset = density.density * 120 // Max 120dp
-                offsetX = newOffsetX.coerceIn(-maxOffset, maxOffset)
+                // Allow swipe up to half the screen width for better visibility
+                val maxOffset = screenWidth * 0.5f // 50% of screen width
 
-                // Haptic feedback at threshold
-                val threshold = density.density * 80 // 80dp threshold
+                // Apply resistance as swipe extends (rubber band effect)
+                val resistance = if (abs(newOffsetX) > screenWidth * 0.3f) {
+                    // After 30% of screen, apply increasing resistance
+                    val excess = abs(newOffsetX) - (screenWidth * 0.3f)
+                    val resistanceFactor = 1f - (excess / (screenWidth * 0.4f)).coerceIn(0f, 0.7f)
+                    resistanceFactor
+                } else {
+                    1f
+                }
+
+                offsetX = (newOffsetX * resistance).coerceIn(-maxOffset, maxOffset)
+
+                // Haptic feedback at threshold (earlier feedback)
+                val threshold = screenWidth * 0.15f // 15% of screen width
                 if (!hasTriggeredHaptic && abs(offsetX) > threshold) {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     hasTriggeredHaptic = true
@@ -118,13 +143,18 @@ fun EnhancedSwipeableItem(
         hasTriggeredHaptic = false
     }
 
-    Box(modifier = modifier) {
-        // Background indicators
+    Box(
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            screenWidth = coordinates.size.width.toFloat()
+        }
+    ) {
+        // Enhanced background that shows more prominently
         if (gestureDirection != null && backgroundAlpha > 0f) {
             SwipeBackground(
                 direction = gestureDirection!!,
                 alpha = backgroundAlpha,
                 isInQueue = isInQueue,
+                progress = abs(animatedOffsetX) / (screenWidth * 0.5f),
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -140,11 +170,12 @@ fun EnhancedSwipeableItem(
                     state = draggableState,
                     orientation = Orientation.Horizontal,
                     onDragStopped = { velocity ->
-                        val threshold = density.density * 100 * swipeThreshold // Convert threshold to px
+                        val threshold = screenWidth * swipeThreshold // 25% of screen width
                         val velocityAbs = abs(velocity)
 
-                        // Check if gesture should trigger action
-                        val shouldTrigger = abs(offsetX) > threshold && velocityAbs > velocityThresholdPx
+                        // More lenient trigger conditions
+                        val shouldTrigger = abs(offsetX) > threshold ||
+                                (abs(offsetX) > threshold * 0.7f && velocityAbs > velocityThresholdPx)
 
                         if (shouldTrigger) {
                             when {
@@ -175,6 +206,7 @@ private fun SwipeBackground(
     direction: SwipeDirection,
     alpha: Float,
     isInQueue: Boolean,
+    progress: Float, // 0 to 1 progress of swipe
     modifier: Modifier = Modifier
 ) {
     val color = when (direction) {
@@ -199,16 +231,30 @@ private fun SwipeBackground(
         }
     }
 
+    // Enhanced background with dynamic gradient based on swipe progress
     Box(
         modifier = modifier
             .background(
-                brush = Brush.horizontalGradient(
-                    colors = listOf(
-                        color.copy(alpha = alpha * 0.1f),
-                        color.copy(alpha = alpha * 0.3f),
-                        color.copy(alpha = alpha * 0.1f)
+                brush = when (direction) {
+                    SwipeDirection.RIGHT -> Brush.horizontalGradient(
+                        colors = listOf(
+                            color.copy(alpha = alpha * 0.6f),
+                            color.copy(alpha = alpha * 0.3f),
+                            Color.Transparent
+                        ),
+                        startX = 0f,
+                        endX = 300f * progress
                     )
-                ),
+                    SwipeDirection.LEFT -> Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            color.copy(alpha = alpha * 0.3f),
+                            color.copy(alpha = alpha * 0.6f)
+                        ),
+                        startX = Float.POSITIVE_INFINITY,
+                        endX = Float.POSITIVE_INFINITY - (300f * progress)
+                    )
+                },
                 shape = RoundedCornerShape(12.dp)
             ),
         contentAlignment = when (direction) {
@@ -217,28 +263,51 @@ private fun SwipeBackground(
         }
     ) {
         AnimatedVisibility(
-            visible = alpha > 0.3f, // Only show when swipe is significant
-            enter = fadeIn() + scaleIn(),
-            exit = fadeOut() + scaleOut()
+            visible = alpha > 0.1f, // Show earlier for better feedback
+            enter = fadeIn(animationSpec = tween(100)) + scaleIn(animationSpec = tween(100)),
+            exit = fadeOut(animationSpec = tween(100)) + scaleOut(animationSpec = tween(100))
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(horizontal = 24.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .padding(horizontal = 32.dp)
+                    .graphicsLayer {
+                        // Scale icon based on progress for dynamic feedback
+                        val scale = 0.8f + (progress * 0.4f)
+                        scaleX = scale
+                        scaleY = scale
+                    }
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = text,
-                    tint = color.copy(alpha = alpha),
-                    modifier = Modifier.size(24.dp)
-                )
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    color = color.copy(alpha = alpha)
-                )
+                if (direction == SwipeDirection.RIGHT) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = text,
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = Color.White
+                    )
+                } else {
+                    Text(
+                        text = text,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = Color.White
+                    )
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = text,
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         }
     }
