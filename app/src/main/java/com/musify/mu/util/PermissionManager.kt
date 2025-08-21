@@ -40,10 +40,13 @@ object PermissionManager {
     fun getOptionalPermissions(): Array<String> {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             arrayOf(
-                Manifest.permission.POST_NOTIFICATIONS
+                Manifest.permission.POST_NOTIFICATIONS,
+                Manifest.permission.RECORD_AUDIO // For voice controls in gym mode
             )
         } else {
-            emptyArray()
+            arrayOf(
+                Manifest.permission.RECORD_AUDIO // For voice controls in gym mode
+            )
         }
     }
 
@@ -83,6 +86,10 @@ object PermissionManager {
         return getRequiredMediaPermissions().filter { permission ->
             ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
         }
+    }
+    
+    fun checkMicPermission(context: Context): Boolean {
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
     }
 }
 
