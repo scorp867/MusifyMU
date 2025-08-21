@@ -105,8 +105,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-text-google-fonts:1.6.8")
     // Speech Module For Voice Commands (GYM MODE)
     implementation("com.alphacephei:vosk-android:0.3.47")
-    // VOSK small English model packaged as Android asset; used by StorageService.unpack
-    implementation("com.alphacephei:vosk-model-small-en-us-0.15-android:0.3.47")
+    // Bundle a VOSK model under src/main/assets/model-en-us and StorageService.unpack will copy it at runtime
 
 
 }
