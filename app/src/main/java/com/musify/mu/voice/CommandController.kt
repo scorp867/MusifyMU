@@ -215,13 +215,21 @@ class CommandController(
 
         fun parseVoskText(json: String?): String? {
             return try {
-                if (json.isNullOrBlank()) return@try null
-                val obj = org.json.JSONObject(json)
-                val finalText = obj.optString("text").trim()
-                if (finalText.isNotEmpty()) return@try finalText
-                val partial = obj.optString("partial").trim()
-                if (partial.isNotEmpty()) partial else null
-            } catch (_: Exception) { null }
+                if (json.isNullOrBlank()) {
+                    null
+                } else {
+                    val obj = org.json.JSONObject(json)
+                    val finalText = obj.optString("text").trim()
+                    if (finalText.isNotEmpty()) {
+                        finalText
+                    } else {
+                        val partial = obj.optString("partial").trim()
+                        if (partial.isNotEmpty()) partial else null
+                    }
+                }
+            } catch (_: Exception) {
+                null
+            }
         }
 
         fun startVoskListening(withModel: Model) {
