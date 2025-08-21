@@ -7,10 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.SwipeToDismiss
-import androidx.compose.material.rememberDismissState
-import androidx.compose.material.DismissDirection
-import androidx.compose.material.DismissValue
+
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
@@ -284,42 +281,31 @@ private fun SearchResultItem(
 ) {
     val queueOps = rememberQueueOperations()
     val scope = rememberCoroutineScope()
-    val dismissState = rememberDismissState(
-        confirmStateChange = { value ->
-            when (value) {
-                DismissValue.DismissedToEnd -> {
-                    // Swipe right: Play Next (priority queue)
-                    val ctx = QueueContextHelper.createSearchContext("search")
-                    scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-                    false
-                }
-                DismissValue.DismissedToStart -> {
-                    // Swipe left: Add to User Queue
-                    val ctx = QueueContextHelper.createSearchContext("search")
-                    scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-                    false
-                }
-                else -> false
-            }
-        }
-    )
-    SwipeToDismiss(
-        state = dismissState,
-        directions = setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
-        background = {
-            com.musify.mu.ui.components.EnhancedSwipeBackground(dismissState.dismissDirection)
+    
+    com.musify.mu.ui.components.EnhancedSwipeableItem(
+        onSwipeRight = {
+            // Swipe right: Play Next (priority queue)
+            val ctx = QueueContextHelper.createSearchContext("search")
+            scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
         },
-        dismissContent = {
-            Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onPlay() },
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
-        shape = RoundedCornerShape(12.dp)
+        onSwipeLeft = {
+            // Swipe left: Add to User Queue
+            val ctx = QueueContextHelper.createSearchContext("search")
+            scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+        },
+        isInQueue = false,
+        modifier = Modifier.fillMaxWidth()
     ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onPlay() },
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -376,7 +362,7 @@ private fun SearchResultItem(
         }
     }
         }
-    )
+
 }
 
 @Composable

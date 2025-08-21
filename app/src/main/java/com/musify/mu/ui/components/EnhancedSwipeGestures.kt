@@ -30,17 +30,17 @@ import kotlin.math.abs
 import kotlin.math.sign
 
 /**
- * Enhanced swipe gesture component with Spotify-like spring behavior
- * Implements smooth elastic animations and extended swipe range
+ * Spotify-like swipe gesture component with ultra-smooth physics
+ * Features: Elastic resistance, velocity-based triggers, smooth animations
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EnhancedSwipeableItem(
     onSwipeRight: () -> Unit, // Play Next
-    onSwipeLeft: () -> Unit,  // Add to Queue
+    onSwipeLeft: () -> Unit,  // Add to Queue/Remove
     isInQueue: Boolean = false,
-    swipeThreshold: Float = 0.25f, // 25% of width to trigger action
-    velocityThreshold: Dp = 100.dp, // Lower velocity threshold for easier triggering
+    swipeThreshold: Float = 0.2f, // 20% of width to trigger action (more responsive)
+    velocityThreshold: Dp = 80.dp, // Lower velocity threshold for easier triggering
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
@@ -48,32 +48,33 @@ fun EnhancedSwipeableItem(
     val viewConfiguration = LocalViewConfiguration.current
     val haptic = LocalHapticFeedback.current
 
-    // Swipe state management
+    // Enhanced swipe state management
     var offsetX by remember { mutableStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
-    var isGestureLocked by remember { mutableStateOf(false) }
     var gestureDirection by remember { mutableStateOf<SwipeDirection?>(null) }
     var hasTriggeredHaptic by remember { mutableStateOf(false) }
     var screenWidth by remember { mutableStateOf(0f) }
+    var lastDragTime by remember { mutableStateOf(0L) }
+    var dragVelocity by remember { mutableStateOf(0f) }
 
-    // Touch slop threshold
-    val touchSlop = with(density) { viewConfiguration.touchSlop.toDp().toPx() }
+    // Touch slop threshold (very low for responsive feel)
+    val touchSlop = with(density) { (viewConfiguration.touchSlop * 0.5f).toDp().toPx() }
     val velocityThresholdPx = with(density) { velocityThreshold.toPx() }
 
-    // Enhanced spring animation with Spotify-like elastic behavior
+    // Ultra-smooth spring animation with Spotify-like physics
     val animatedOffsetX by animateFloatAsState(
         targetValue = if (isDragging) offsetX else 0f,
         animationSpec = if (isDragging) {
-            // While dragging: tight spring for responsive feel
+            // While dragging: immediate response with slight resistance
             spring(
-                dampingRatio = 0.8f, // Slightly bouncy
-                stiffness = 400f // Medium stiffness for smooth dragging
+                dampingRatio = 0.9f, // Very responsive
+                stiffness = 800f // High stiffness for immediate feedback
             )
         } else {
             // When released: bouncy spring like Spotify
             spring(
-                dampingRatio = 0.6f, // More bouncy for elastic feel
-                stiffness = 300f // Lower stiffness for smoother return
+                dampingRatio = 0.5f, // Bouncy for elastic feel
+                stiffness = 200f // Lower stiffness for smooth return
             )
         },
         finishedListener = {
@@ -81,55 +82,60 @@ fun EnhancedSwipeableItem(
                 offsetX = 0f
                 gestureDirection = null
                 hasTriggeredHaptic = false
+                dragVelocity = 0f
             }
         },
         label = "swipeOffset"
     )
 
-    // Enhanced background alpha that shows earlier and more prominently
+    // Dynamic background alpha with smooth transitions
     val backgroundAlpha by animateFloatAsState(
         targetValue = if (gestureDirection != null && abs(animatedOffsetX) > touchSlop) {
-            // Make background more visible sooner
-            val progress = (abs(animatedOffsetX) / (screenWidth * 0.4f)).coerceIn(0f, 1f)
-            progress.coerceAtLeast(0.2f) // Minimum 20% opacity when swiping
+            val progress = (abs(animatedOffsetX) / (screenWidth * 0.3f)).coerceIn(0f, 1f)
+            // Show background immediately and build up smoothly
+            (0.15f + progress * 0.85f).coerceIn(0f, 1f)
         } else 0f,
-        animationSpec = tween(100), // Faster fade
+        animationSpec = tween(80), // Very fast fade for responsive feel
         label = "backgroundAlpha"
     )
 
     val draggableState = rememberDraggableState { delta ->
-        if (!isGestureLocked) {
-            val newOffsetX = offsetX + delta
+        val currentTime = System.currentTimeMillis()
+        val timeDelta = currentTime - lastDragTime
+        
+        if (timeDelta > 0) {
+            dragVelocity = delta / timeDelta.toFloat()
+        }
+        lastDragTime = currentTime
 
-            // Directional touch slop - lock gesture direction once threshold is passed
-            if (!isDragging && abs(newOffsetX) > touchSlop) {
-                isDragging = true
-                isGestureLocked = true
-                gestureDirection = if (newOffsetX > 0) SwipeDirection.RIGHT else SwipeDirection.LEFT
+        val newOffsetX = offsetX + delta
+
+        // Very responsive gesture detection
+        if (!isDragging && abs(newOffsetX) > touchSlop) {
+            isDragging = true
+            gestureDirection = if (newOffsetX > 0) SwipeDirection.RIGHT else SwipeDirection.LEFT
+        }
+
+        if (isDragging) {
+            // Extended swipe range for better visibility
+            val maxOffset = screenWidth * 0.6f // 60% of screen width
+
+            // Smooth resistance curve (rubber band effect)
+            val resistance = if (abs(newOffsetX) > screenWidth * 0.25f) {
+                val excess = abs(newOffsetX) - (screenWidth * 0.25f)
+                val resistanceFactor = 1f - (excess / (screenWidth * 0.35f)).coerceIn(0f, 0.8f)
+                resistanceFactor
+            } else {
+                1f
             }
 
-            if (isDragging) {
-                // Allow swipe up to half the screen width for better visibility
-                val maxOffset = screenWidth * 0.5f // 50% of screen width
+            offsetX = (newOffsetX * resistance).coerceIn(-maxOffset, maxOffset)
 
-                // Apply resistance as swipe extends (rubber band effect)
-                val resistance = if (abs(newOffsetX) > screenWidth * 0.3f) {
-                    // After 30% of screen, apply increasing resistance
-                    val excess = abs(newOffsetX) - (screenWidth * 0.3f)
-                    val resistanceFactor = 1f - (excess / (screenWidth * 0.4f)).coerceIn(0f, 0.7f)
-                    resistanceFactor
-                } else {
-                    1f
-                }
-
-                offsetX = (newOffsetX * resistance).coerceIn(-maxOffset, maxOffset)
-
-                // Haptic feedback at threshold (earlier feedback)
-                val threshold = screenWidth * 0.15f // 15% of screen width
-                if (!hasTriggeredHaptic && abs(offsetX) > threshold) {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    hasTriggeredHaptic = true
-                }
+            // Early haptic feedback for better feel
+            val threshold = screenWidth * 0.12f // 12% of screen width
+            if (!hasTriggeredHaptic && abs(offsetX) > threshold) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                hasTriggeredHaptic = true
             }
         }
     }
@@ -137,10 +143,10 @@ fun EnhancedSwipeableItem(
     // Reset gesture state
     fun resetGesture() {
         isDragging = false
-        isGestureLocked = false
         offsetX = 0f
         gestureDirection = null
         hasTriggeredHaptic = false
+        dragVelocity = 0f
     }
 
     Box(
@@ -148,34 +154,45 @@ fun EnhancedSwipeableItem(
             screenWidth = coordinates.size.width.toFloat()
         }
     ) {
-        // Enhanced background that shows more prominently
+        // Enhanced background with smooth animations
         if (gestureDirection != null && backgroundAlpha > 0f) {
             SwipeBackground(
                 direction = gestureDirection!!,
                 alpha = backgroundAlpha,
                 isInQueue = isInQueue,
-                progress = abs(animatedOffsetX) / (screenWidth * 0.5f),
+                progress = abs(animatedOffsetX) / (screenWidth * 0.6f),
                 modifier = Modifier.fillMaxSize()
             )
         }
 
-        // Main content with swipe offset
+        // Main content with ultra-smooth swipe offset
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
                     translationX = animatedOffsetX
+                    // Subtle scale effect during swipe for premium feel
+                    if (abs(animatedOffsetX) > touchSlop) {
+                        val scale = 1f - (abs(animatedOffsetX) / (screenWidth * 2f))
+                        scaleX = scale.coerceIn(0.95f, 1f)
+                        scaleY = scale.coerceIn(0.95f, 1f)
+                    } else {
+                        scaleX = 1f
+                        scaleY = 1f
+                    }
                 }
                 .draggable(
                     state = draggableState,
                     orientation = Orientation.Horizontal,
                     onDragStopped = { velocity ->
-                        val threshold = screenWidth * swipeThreshold // 25% of screen width
+                        val threshold = screenWidth * swipeThreshold
                         val velocityAbs = abs(velocity)
+                        val offsetAbs = abs(offsetX)
 
-                        // More lenient trigger conditions
-                        val shouldTrigger = abs(offsetX) > threshold ||
-                                (abs(offsetX) > threshold * 0.7f && velocityAbs > velocityThresholdPx)
+                        // Smart trigger conditions: distance OR velocity
+                        val shouldTrigger = offsetAbs > threshold ||
+                                (offsetAbs > threshold * 0.6f && velocityAbs > velocityThresholdPx) ||
+                                (offsetAbs > threshold * 0.4f && velocityAbs > velocityThresholdPx * 1.5f)
 
                         if (shouldTrigger) {
                             when {
@@ -185,7 +202,7 @@ fun EnhancedSwipeableItem(
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
                                 offsetX < 0 -> {
-                                    // Swipe left - Add to Queue
+                                    // Swipe left - Add to Queue/Remove
                                     onSwipeLeft()
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
@@ -201,18 +218,25 @@ fun EnhancedSwipeableItem(
     }
 }
 
+/**
+ * Enhanced swipe background with dynamic colors and smooth animations
+ */
 @Composable
 private fun SwipeBackground(
     direction: SwipeDirection,
     alpha: Float,
     isInQueue: Boolean,
-    progress: Float, // 0 to 1 progress of swipe
+    progress: Float,
     modifier: Modifier = Modifier
 ) {
-    val color = when (direction) {
-        SwipeDirection.RIGHT -> MaterialTheme.colorScheme.primary
-        SwipeDirection.LEFT -> if (isInQueue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
-    }
+    val color by animateColorAsState(
+        targetValue = when (direction) {
+            SwipeDirection.RIGHT -> MaterialTheme.colorScheme.primary
+            SwipeDirection.LEFT -> if (isInQueue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
+        },
+        animationSpec = tween(150),
+        label = "swipeColor"
+    )
 
     val (icon, text) = when (direction) {
         SwipeDirection.RIGHT -> {
@@ -231,31 +255,31 @@ private fun SwipeBackground(
         }
     }
 
-    // Enhanced background with dynamic gradient based on swipe progress
+    // Dynamic background with smooth gradients
     Box(
         modifier = modifier
             .background(
                 brush = when (direction) {
                     SwipeDirection.RIGHT -> Brush.horizontalGradient(
                         colors = listOf(
-                            color.copy(alpha = alpha * 0.6f),
-                            color.copy(alpha = alpha * 0.3f),
+                            color.copy(alpha = alpha * 0.8f),
+                            color.copy(alpha = alpha * 0.4f),
                             Color.Transparent
                         ),
                         startX = 0f,
-                        endX = 300f * progress
+                        endX = 400f * progress
                     )
                     SwipeDirection.LEFT -> Brush.horizontalGradient(
                         colors = listOf(
                             Color.Transparent,
-                            color.copy(alpha = alpha * 0.3f),
-                            color.copy(alpha = alpha * 0.6f)
+                            color.copy(alpha = alpha * 0.4f),
+                            color.copy(alpha = alpha * 0.8f)
                         ),
                         startX = Float.POSITIVE_INFINITY,
-                        endX = Float.POSITIVE_INFINITY - (300f * progress)
+                        endX = Float.POSITIVE_INFINITY - (400f * progress)
                     )
                 },
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(16.dp)
             ),
         contentAlignment = when (direction) {
             SwipeDirection.RIGHT -> Alignment.CenterStart
@@ -263,20 +287,26 @@ private fun SwipeBackground(
         }
     ) {
         AnimatedVisibility(
-            visible = alpha > 0.1f, // Show earlier for better feedback
-            enter = fadeIn(animationSpec = tween(100)) + scaleIn(animationSpec = tween(100)),
-            exit = fadeOut(animationSpec = tween(100)) + scaleOut(animationSpec = tween(100))
+            visible = alpha > 0.08f, // Show very early for immediate feedback
+            enter = fadeIn(animationSpec = tween(80)) + scaleIn(animationSpec = tween(80)),
+            exit = fadeOut(animationSpec = tween(80)) + scaleOut(animationSpec = tween(80))
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier
-                    .padding(horizontal = 32.dp)
+                    .padding(horizontal = 28.dp)
                     .graphicsLayer {
-                        // Scale icon based on progress for dynamic feedback
-                        val scale = 0.8f + (progress * 0.4f)
+                        // Dynamic scaling based on swipe progress
+                        val scale = 0.7f + (progress * 0.5f)
                         scaleX = scale
                         scaleY = scale
+                        // Subtle rotation for premium feel
+                        rotationZ = if (direction == SwipeDirection.RIGHT) {
+                            (progress * 5f).coerceIn(-5f, 5f)
+                        } else {
+                            (-progress * 5f).coerceIn(-5f, 5f)
+                        }
                     }
             ) {
                 if (direction == SwipeDirection.RIGHT) {
@@ -284,7 +314,7 @@ private fun SwipeBackground(
                         imageVector = icon,
                         contentDescription = text,
                         tint = Color.White,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(32.dp)
                     )
                     Text(
                         text = text,
@@ -305,7 +335,7 @@ private fun SwipeBackground(
                         imageVector = icon,
                         contentDescription = text,
                         tint = Color.White,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(32.dp)
                     )
                 }
             }

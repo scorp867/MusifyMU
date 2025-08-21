@@ -56,10 +56,10 @@ import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.playback.rememberCurrentItem
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.QueueManager
-import androidx.compose.material.DismissDirection
-import androidx.compose.material.DismissValue
-import androidx.compose.material.SwipeToDismiss
-import androidx.compose.material.rememberDismissState
+import com.musify.mu.voice.VoiceControlManager
+import com.musify.mu.ui.components.MoreOptionsMenu
+import com.musify.mu.ui.components.GymModeIndicator
+
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.ui.unit.Dp
@@ -74,6 +74,34 @@ fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
+    
+    // Voice control manager
+    val voiceControlManager = remember(controller) {
+        controller?.let { mediaController ->
+            // Use the MediaController directly as it implements Player interface
+            VoiceControlManager(context, mediaController)
+        }
+    }
+    
+    // Voice control state
+    var isGymModeEnabled by remember { mutableStateOf(false) }
+    var canEnableGymMode by remember { mutableStateOf(false) }
+    
+    // Observe headphone connection and gym mode changes
+    LaunchedEffect(voiceControlManager) {
+        voiceControlManager?.let { vcm ->
+            vcm.observeHeadphoneConnection().collect { isConnected ->
+                canEnableGymMode = isConnected
+                if (!isConnected && isGymModeEnabled) {
+                    isGymModeEnabled = false
+                }
+            }
+            
+            vcm.onGymModeChanged = { enabled ->
+                isGymModeEnabled = enabled
+            }
+        }
+    }
 
     var currentTrack by remember { mutableStateOf<Track?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -338,23 +366,20 @@ fun NowPlayingScreen(navController: NavController) {
                         )
                     }
 
-                    IconButton(
-                        onClick = { /* More options */ },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(
-                                Color.White.copy(alpha = 0.2f),
-                                CircleShape
-                            )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = "More",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
+                    MoreOptionsMenu(
+                        isGymModeEnabled = isGymModeEnabled,
+                        canEnableGymMode = canEnableGymMode,
+                        onGymModeToggle = {
+                            voiceControlManager?.toggleGymMode()
+                        }
+                    )
                 }
+                
+                // Gym Mode Indicator
+                GymModeIndicator(
+                    isActive = isGymModeEnabled,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -782,9 +807,17 @@ fun NowPlayingScreen(navController: NavController) {
                 }
             }
 
-            // Add space at bottom to ensure scrolling works properly
-            Spacer(modifier = Modifier.height(100.dp))
+                // Add space at bottom to ensure scrolling works properly
+    Spacer(modifier = Modifier.height(100.dp))
+}
+        
+        // Cleanup voice control manager when screen is disposed
+        DisposableEffect(Unit) {
+            onDispose {
+                voiceControlManager?.cleanup()
+            }
         }
+        
         if (showQueue) {
             val queueOps = com.musify.mu.playback.rememberQueueOperations()
             ModalBottomSheet(
@@ -943,179 +976,142 @@ fun NowPlayingScreen(navController: NavController) {
                     // Use visual queue items with stable keys
                     itemsIndexed(visualQueueItems, key = { _, item -> "queue_${item.uid}" }) { idx, qi ->
                         val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
-                        val dismissState = rememberDismissState(
-                            confirmStateChange = { value ->
-                                when (value) {
-                                    DismissValue.DismissedToEnd -> {
-                                        android.util.Log.d("QueueScreenDBG", "NP: swipe right (Play Next) id=${qi.id}")
-                                        val ctx = qState.context
-                                        coroutineScope.launch {
-                                            queueOps.playNextWithContext(items = listOf(vt.toMediaItem()), context = ctx)
-                                            android.util.Log.d("QueueScreenDBG", "NP: after swipe right")
-                                        }
-                                        false
-                                    }
-                                    DismissValue.DismissedToStart -> {
-                                        android.util.Log.d("QueueScreenDBG", "NP: swipe left (Remove) id=${qi.id}")
-                                        coroutineScope.launch {
-                                            queueOps.removeItemByUid(qi.uid)
-                                            android.util.Log.d("QueueScreenDBG", "NP: after remove")
-                                        }
-                                        true
-                                    }
-                                    else -> false
-                                }
-                            }
-                        )
-
-                        // Reset dismiss state when the queue changes to prevent color sticking
-                        LaunchedEffect(queueChanges, visualQueueItems.size) {
-                            try {
-                                dismissState.reset()
-                            } catch (e: Exception) {
-                                // Ignore reset errors
-                            }
-                        }
                         ReorderableItem(reorderState, key = "queue_${qi.uid}") { isDragging ->
-                            SwipeToDismiss(
-                                state = dismissState,
-                                directions = if (isDragging) emptySet() else setOf(DismissDirection.StartToEnd, DismissDirection.EndToStart),
-                                background = {
-                                    com.musify.mu.ui.components.EnhancedSwipeBackground(
-                                        dismissDirection = dismissState.dismissDirection,
-                                        isInQueue = true
-                                    )
-                                },
-                                dismissContent = {
-                                    // Fixed: Remove the alpha = 0f that was hiding the dragged item
-                                    Box(
-                                        modifier = Modifier
-                                            .zIndex(if (isDragging) 1f else 0f)
-                                            .graphicsLayer {
-                                                // Apply visual feedback for dragging without hiding the item
-                                                scaleX = if (isDragging) 1.02f else 1f
-                                                scaleY = if (isDragging) 1.02f else 1f
-                                                shadowElevation = if (isDragging) 8.dp.toPx() else 0f
-                                            }
-                                    ) {
-                                        com.musify.mu.ui.components.CompactTrackRow(
-                                            title = vt.title,
-                                            subtitle = "${vt.artist} • ${vt.album}",
-                                            artData = vt.artUri,
-                                            contentDescription = vt.title,
-                                            isPlaying = false, // Remove the now playing indicator from queue items since we have a sticky header
-                                            onClick = {
-                                                val combinedIndex = queueOps.getVisibleToCombinedIndexMapping(idx)
-                                                if (combinedIndex >= 0) {
-                                                    controller?.seekToDefaultPosition(combinedIndex)
-                                                }
-                                            },
-                                            extraArtOverlay = {
-                                                // Enhanced visual indicators matching QueueScreen
-                                                when (qi.source) {
-                                                    QueueManager.QueueSource.PLAY_NEXT -> {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .align(Alignment.TopEnd)
-                                                                .padding(2.dp)
-                                                        ) {
-                                                            Surface(
-                                                                color = MaterialTheme.colorScheme.tertiary,
-                                                                shape = RoundedCornerShape(6.dp),
-                                                            ) {
-                                                                Row(
-                                                                    verticalAlignment = Alignment.CenterVertically,
-                                                                    modifier = Modifier.padding(
-                                                                        horizontal = 6.dp,
-                                                                        vertical = 2.dp
-                                                                    )
-                                                                ) {
-                                                                    Icon(
-                                                                        imageVector = Icons.Rounded.SkipNext,
-                                                                        contentDescription = null,
-                                                                        tint = MaterialTheme.colorScheme.onTertiary,
-                                                                        modifier = Modifier.size(12.dp)
-                                                                    )
-                                                                    Spacer(Modifier.width(4.dp))
-                                                                    Text(
-                                                                        text = "NEXT",
-                                                                        style = MaterialTheme.typography.labelSmall,
-                                                                        color = MaterialTheme.colorScheme.onTertiary
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-
-                                                    QueueManager.QueueSource.USER_QUEUE -> {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .align(Alignment.TopEnd)
-                                                                .padding(2.dp)
-                                                        ) {
-                                                            Surface(
-                                                                color = MaterialTheme.colorScheme.secondary,
-                                                                shape = RoundedCornerShape(6.dp),
-                                                            ) {
-                                                                Row(
-                                                                    verticalAlignment = Alignment.CenterVertically,
-                                                                    modifier = Modifier.padding(
-                                                                        horizontal = 6.dp,
-                                                                        vertical = 2.dp
-                                                                    )
-                                                                ) {
-                                                                    Icon(
-                                                                        imageVector = Icons.Rounded.Person,
-                                                                        contentDescription = null,
-                                                                        tint = MaterialTheme.colorScheme.onSecondary,
-                                                                        modifier = Modifier.size(12.dp)
-                                                                    )
-                                                                    Spacer(Modifier.width(4.dp))
-                                                                    Text(
-                                                                        text = "YOU",
-                                                                        style = MaterialTheme.typography.labelSmall,
-                                                                        color = MaterialTheme.colorScheme.onSecondary
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-
-                                                    else -> {
-                                                        // Show isolation status for main queue items
-                                                        if (qi.isIsolated) {
-                                                            Box(
-                                                                modifier = Modifier
-                                                                    .align(Alignment.TopStart)
-                                                                    .padding(2.dp)
-                                                            ) {
-                                                                Surface(
-                                                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                                                    shape = RoundedCornerShape(6.dp),
-                                                                ) {
-                                                                    Icon(
-                                                                        imageVector = Icons.Rounded.Lock,
-                                                                        contentDescription = "Protected from source changes",
-                                                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                                        modifier = Modifier
-                                                                            .size(16.dp)
-                                                                            .padding(2.dp)
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            trailingContent = {
-                                                IconButton(onClick = { }, modifier = Modifier.detectReorderAfterLongPress(reorderState)) {
-                                                    Icon(imageVector = Icons.Rounded.DragHandle, contentDescription = "Drag")
-                                                }
-                                            }
-                                        )
+                            com.musify.mu.ui.components.EnhancedSwipeableItem(
+                                onSwipeRight = {
+                                    android.util.Log.d("QueueScreenDBG", "NP: swipe right (Play Next) id=${qi.id}")
+                                    val ctx = qState.context
+                                    coroutineScope.launch {
+                                        queueOps.playNextWithContext(items = listOf(vt.toMediaItem()), context = ctx)
+                                        android.util.Log.d("QueueScreenDBG", "NP: after swipe right")
                                     }
-                                }
-                            )
+                                },
+                                onSwipeLeft = {
+                                    android.util.Log.d("QueueScreenDBG", "NP: swipe left (Remove) id=${qi.id}")
+                                    coroutineScope.launch {
+                                        queueOps.removeItemByUid(qi.uid)
+                                        android.util.Log.d("QueueScreenDBG", "NP: after remove")
+                                    }
+                                },
+                                isInQueue = true,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                com.musify.mu.ui.components.CompactTrackRow(
+                                    title = vt.title,
+                                    subtitle = "${vt.artist} • ${vt.album}",
+                                    artData = vt.artUri,
+                                    contentDescription = vt.title,
+                                    isPlaying = false, // Remove the now playing indicator from queue items since we have a sticky header
+                                    onClick = {
+                                        val combinedIndex = queueOps.getVisibleToCombinedIndexMapping(idx)
+                                        if (combinedIndex >= 0) {
+                                            controller?.seekToDefaultPosition(combinedIndex)
+                                        }
+                                    },
+                                    extraArtOverlay = {
+                                        // Enhanced visual indicators matching QueueScreen
+                                        when (qi.source) {
+                                            QueueManager.QueueSource.PLAY_NEXT -> {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(2.dp)
+                                                ) {
+                                                    Surface(
+                                                        color = MaterialTheme.colorScheme.tertiary,
+                                                        shape = RoundedCornerShape(6.dp),
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.padding(
+                                                                horizontal = 6.dp,
+                                                                vertical = 2.dp
+                                                            )
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Rounded.SkipNext,
+                                                                contentDescription = null,
+                                                                tint = MaterialTheme.colorScheme.onTertiary,
+                                                                modifier = Modifier.size(12.dp)
+                                                            )
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Text(
+                                                                text = "NEXT",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onTertiary
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            QueueManager.QueueSource.USER_QUEUE -> {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(2.dp)
+                                                ) {
+                                                    Surface(
+                                                        color = MaterialTheme.colorScheme.secondary,
+                                                        shape = RoundedCornerShape(6.dp),
+                                                    ) {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            modifier = Modifier.padding(
+                                                                horizontal = 6.dp,
+                                                                vertical = 2.dp
+                                                            )
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Rounded.Person,
+                                                                contentDescription = null,
+                                                                tint = MaterialTheme.colorScheme.onSecondary,
+                                                                modifier = Modifier.size(12.dp)
+                                                            )
+                                                            Spacer(Modifier.width(4.dp))
+                                                            Text(
+                                                                text = "YOU",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onSecondary
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            else -> {
+                                                // Show isolation status for main queue items
+                                                if (qi.isIsolated) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.TopStart)
+                                                            .padding(2.dp)
+                                                    ) {
+                                                        Surface(
+                                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                                            shape = RoundedCornerShape(6.dp),
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Rounded.Lock,
+                                                                contentDescription = "Protected from source changes",
+                                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                                modifier = Modifier
+                                                                    .size(16.dp)
+                                                                    .padding(2.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    trailingContent = {
+                                        IconButton(onClick = { }, modifier = Modifier.detectReorderAfterLongPress(reorderState)) {
+                                            Icon(imageVector = Icons.Rounded.DragHandle, contentDescription = "Drag")
+                                        }
+                                    }
+                                )
+                            }
                         }
                     }
                 }
