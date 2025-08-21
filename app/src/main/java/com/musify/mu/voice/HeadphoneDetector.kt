@@ -28,13 +28,12 @@ class HeadphoneDetector(private val context: Context) {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 AudioManager.ACTION_HEADSET_PLUG -> {
-                    val state = intent.getIntExtra("state", -1)
-                    val isConnected = state == 1
-                    val hasHeadphones = isConnected || hasBluetoothHeadphones()
+                    // Use unified detection instead of relying only on "state"
+                    val hasHeadphones = hasAnyHeadphonesConnected()
                     val previousState = _isHeadphonesConnected.value
                     _isHeadphonesConnected.value = hasHeadphones
 
-                    android.util.Log.d("HeadphoneDetector", "Wired headset ${if (isConnected) "connected" else "disconnected"}, total: $hasHeadphones")
+                    android.util.Log.d("HeadphoneDetector", "HEADSET_PLUG event, total connected: $hasHeadphones")
 
                     // Only show toast if state actually changed and not too frequent
                     val currentTime = System.currentTimeMillis()
@@ -42,20 +41,18 @@ class HeadphoneDetector(private val context: Context) {
                         lastToastTime = currentTime
                         android.widget.Toast.makeText(
                             context,
-                            "Wired headset ${if (isConnected) "connected" else "disconnected"}",
+                            "Headphones ${if (hasHeadphones) "connected" else "disconnected"}",
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     }
                 }
                 AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED -> {
-                    // Bluetooth SCO (Synchronous Connection-Oriented) audio state changed
-                    val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
-                    val isConnected = state == AudioManager.SCO_AUDIO_STATE_CONNECTED
-                    val hasHeadphones = isConnected || hasWiredHeadphones()
+                    // Use unified detection to avoid false disconnects during SCO transitions
+                    val hasHeadphones = hasAnyHeadphonesConnected()
                     val previousState = _isHeadphonesConnected.value
                     _isHeadphonesConnected.value = hasHeadphones
 
-                    android.util.Log.d("HeadphoneDetector", "Bluetooth SCO ${if (isConnected) "connected" else "disconnected"}, total: $hasHeadphones")
+                    android.util.Log.d("HeadphoneDetector", "SCO state updated, total connected: $hasHeadphones")
 
                     // Only show toast if state actually changed and not too frequent
                     val currentTime = System.currentTimeMillis()
@@ -63,7 +60,7 @@ class HeadphoneDetector(private val context: Context) {
                         lastToastTime = currentTime
                         android.widget.Toast.makeText(
                             context,
-                            "Bluetooth headset ${if (isConnected) "connected" else "disconnected"}",
+                            "Headphones ${if (hasHeadphones) "connected" else "disconnected"}",
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     }
@@ -93,7 +90,12 @@ class HeadphoneDetector(private val context: Context) {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
             while (true) {
                 try {
-                    val currentState = hasWiredHeadphones() || hasBluetoothHeadphones()
+                    var currentState = hasAnyHeadphonesConnected()
+                    // Debounce: confirm once more after a short delay before declaring disconnected
+                    if (!currentState) {
+                        kotlinx.coroutines.delay(300)
+                        currentState = hasAnyHeadphonesConnected()
+                    }
                     val previousState = _isHeadphonesConnected.value
 
                     if (previousState != currentState) {
@@ -167,6 +169,10 @@ class HeadphoneDetector(private val context: Context) {
             hasWiredHeadphones() -> AudioDeviceInfo.TYPE_WIRED_HEADSET
             else -> AudioDeviceInfo.TYPE_BUILTIN_MIC
         }
+    }
+
+    private fun hasAnyHeadphonesConnected(): Boolean {
+        return hasWiredHeadphones() || hasBluetoothHeadphones()
     }
 
     /**

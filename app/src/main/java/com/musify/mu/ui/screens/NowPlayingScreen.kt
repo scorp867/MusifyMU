@@ -412,6 +412,7 @@ fun NowPlayingScreen(navController: NavController) {
                         isGymModeEnabled = isGymModeEnabled,
                         canEnableGymMode = canEnableGymMode,
                         onGymModeToggle = {
+                            isGymModeEnabled = !isGymModeEnabled
                             voiceControlManager?.toggleGymMode()
                         }
                     )
