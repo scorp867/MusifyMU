@@ -44,6 +44,7 @@ import kotlinx.coroutines.withContext
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.AnimatedBackground
 import com.musify.mu.ui.components.EnhancedLyricsView
+import com.musify.mu.ui.components.VoiceControlsOverlay
 import com.musify.mu.ui.navigation.Screen
 import org.burnoutcrew.reorderable.rememberReorderableLazyListState
 import org.burnoutcrew.reorderable.reorderable
@@ -65,6 +66,9 @@ import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MenuDefaults
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
     ExperimentalMaterialApi::class
@@ -277,6 +281,8 @@ fun NowPlayingScreen(navController: NavController) {
     )
 
     var showQueue by remember { mutableStateOf(false) }
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var isGymMode by remember { mutableStateOf(false) }
     LaunchedEffect(showQueue) {
         if (showQueue) android.util.Log.d("QueueScreenDBG", "Queue modal opened")
         else android.util.Log.d("QueueScreenDBG", "Queue modal closed")
@@ -338,21 +344,150 @@ fun NowPlayingScreen(navController: NavController) {
                         )
                     }
 
-                    IconButton(
-                        onClick = { /* More options */ },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(
-                                Color.White.copy(alpha = 0.2f),
-                                CircleShape
+                    Box {
+                        IconButton(
+                            onClick = { showMoreMenu = true },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(
+                                    Color.White.copy(alpha = 0.2f),
+                                    CircleShape
+                                )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.MoreVert,
+                                contentDescription = "More",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
                             )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = "More",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        }
+                        
+                        // Dropdown menu as overlay
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false },
+                            modifier = Modifier
+                                .background(
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)
+                                        )
+                                    ),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                        ) {
+                            DropdownMenuItem(
+                                text = { 
+                                    Text(
+                                        "Add to Playlist",
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    // TODO: Implement add to playlist
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.PlaylistAdd,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                colors = MenuDefaults.itemColors()
+                            )
+                            
+                            DropdownMenuItem(
+                                text = { 
+                                    Text(
+                                        "Go to Album",
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    currentTrack?.albumId?.let { albumId ->
+                                        navController.navigate("album_details/$albumId")
+                                    }
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Album,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                colors = MenuDefaults.itemColors()
+                            )
+                            
+                            DropdownMenuItem(
+                                text = { 
+                                    Text(
+                                        "Go to Artist",
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    // TODO: Implement go to artist
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Person,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                colors = MenuDefaults.itemColors()
+                            )
+                            
+                            DropdownMenuItem(
+                                text = { 
+                                    Text(
+                                        if (isGymMode) "Exit Gym Mode" else "Gym Mode",
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    isGymMode = !isGymMode
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.FitnessCenter,
+                                        contentDescription = null,
+                                        tint = if (isGymMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                colors = MenuDefaults.itemColors()
+                            )
+                            
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+                            )
+                            
+                            DropdownMenuItem(
+                                text = { 
+                                    Text(
+                                        "Song Info",
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                onClick = {
+                                    showMoreMenu = false
+                                    // TODO: Implement song info dialog
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                colors = MenuDefaults.itemColors()
+                            )
+                        }
                     }
                 }
 
@@ -1121,6 +1256,13 @@ fun NowPlayingScreen(navController: NavController) {
                 }
             }
         }
+        
+        // Voice Controls Overlay for Gym Mode
+        VoiceControlsOverlay(
+            isGymMode = isGymMode,
+            onToggleGymMode = { isGymMode = !isGymMode },
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
 }
 
