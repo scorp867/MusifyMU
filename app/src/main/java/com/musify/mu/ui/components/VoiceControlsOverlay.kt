@@ -44,6 +44,22 @@ fun VoiceControlsOverlay(
     
     val commandController = remember { CommandController(context) }
     
+    // Check headset availability
+    var hasHeadset by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        hasHeadset = commandController.isHeadsetMicrophoneAvailable()
+    }
+    
+    // Refresh headset status periodically
+    LaunchedEffect(isGymMode) {
+        if (isGymMode) {
+            while (true) {
+                hasHeadset = commandController.isHeadsetMicrophoneAvailable()
+                kotlinx.coroutines.delay(2000) // Check every 2 seconds
+            }
+        }
+    }
+    
     // Voice command handling
     LaunchedEffect(isListening) {
         if (isListening) {
@@ -155,12 +171,30 @@ fun VoiceControlsOverlay(
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            "Gym Mode",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Column {
+                            Text(
+                                "Gym Mode",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    if (hasHeadset) Icons.Rounded.Headset else Icons.Rounded.HeadsetOff,
+                                    contentDescription = null,
+                                    tint = if (hasHeadset) Color.Green else Color.Red,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    if (hasHeadset) "Headset connected" else "No headset",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (hasHeadset) Color.Green else Color.Red
+                                )
+                            }
+                        }
                     }
                     
                     IconButton(onClick = onToggleGymMode) {
@@ -219,6 +253,12 @@ fun VoiceControlsOverlay(
                                     kotlinx.coroutines.delay(2000)
                                     commandFeedback = null
                                 }
+                            } else if (!hasHeadset) {
+                                commandFeedback = "Please connect headset with microphone"
+                                scope.launch {
+                                    kotlinx.coroutines.delay(3000)
+                                    commandFeedback = null
+                                }
                             } else if (!isListening) {
                                 isListening = true
                                 commandFeedback = null
@@ -239,13 +279,19 @@ fun VoiceControlsOverlay(
                 // Status text
                 Text(
                     text = when {
-                        isListening -> "Listening..."
+                        isListening -> "Listening via headset..."
                         commandFeedback != null -> commandFeedback!!
-                        else -> "Tap to give voice command"
+                        !hasMicPermission -> "Microphone permission required"
+                        !hasHeadset -> "Connect headset with microphone"
+                        else -> "Tap to give voice command via headset"
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (isListening) Color.Red else MaterialTheme.colorScheme.onSurface,
-                    fontWeight = if (commandFeedback != null) FontWeight.Bold else FontWeight.Normal
+                    color = when {
+                        isListening -> Color.Red
+                        !hasMicPermission || !hasHeadset -> Color.Red.copy(alpha = 0.8f)
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    fontWeight = if (commandFeedback != null || !hasMicPermission || !hasHeadset) FontWeight.Bold else FontWeight.Normal
                 )
                 
                 // Last command display
@@ -272,7 +318,7 @@ fun VoiceControlsOverlay(
                         modifier = Modifier.padding(12.dp)
                     ) {
                         Text(
-                            "Voice Commands:",
+                            "Voice Commands (Headset Required):",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -281,7 +327,8 @@ fun VoiceControlsOverlay(
                         
                         val commands = listOf(
                             "Play • Pause • Next • Previous",
-                            "Shuffle on/off • Repeat one/all/off"
+                            "Shuffle on/off • Repeat one/all/off",
+                            "Note: Only headset microphone is used"
                         )
                         
                         commands.forEach { commandText ->
