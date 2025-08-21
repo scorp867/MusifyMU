@@ -5,7 +5,6 @@ import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Bundle
-import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import kotlinx.coroutines.channels.awaitClose
@@ -16,6 +15,8 @@ import java.util.Locale
 import org.vosk.Model
 import org.vosk.Recognizer
 import org.vosk.android.SpeechService
+import org.vosk.android.StorageService
+import org.json.JSONObject
 
 
 class CommandController(
@@ -26,12 +27,20 @@ class CommandController(
     private var recognizer: SpeechRecognizer? = null
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    // VOSK state
+    private var voskModel: Model? = null
+    private var voskRecognizer: Recognizer? = null
+    private var voskSpeechService: SpeechService? = null
+
     fun listen(): Flow<String> = callbackFlow {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            android.util.Log.e("CommandController", "Speech recognition not available on this device")
+        // Check permission first
+        if (android.content.pm.PackageManager.PERMISSION_GRANTED !=
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.RECORD_AUDIO)) {
+            android.util.Log.e("CommandController", "RECORD_AUDIO permission not granted")
             android.widget.Toast.makeText(
                 context,
-                "Speech recognition not available on this device",
+                "Microphone permission required for voice commands",
                 android.widget.Toast.LENGTH_LONG
             ).show()
             close()
@@ -142,194 +151,169 @@ class CommandController(
                 return@callbackFlow
             }
         }
-        
-        recognizer = SpeechRecognizer.createSpeechRecognizer(context)
-        val listener = object : RecognitionListener {
-            override fun onResults(results: Bundle) {
-                val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                matches?.firstOrNull()?.let { 
-                    val recognizedText = it.lowercase(Locale.getDefault())
-                    android.util.Log.d("CommandController", "Recognized: $recognizedText")
-                    trySend(recognizedText) 
-                }
-            }
-            
-            override fun onReadyForSpeech(params: Bundle) {
-                android.util.Log.d("CommandController", "Ready for speech")
-            }
-            
-            override fun onError(error: Int) {
-                val errorMessage = when (error) {
-                    SpeechRecognizer.ERROR_NO_MATCH -> "No match found"
-                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timeout"
-                    SpeechRecognizer.ERROR_AUDIO -> "Audio error"
-                    SpeechRecognizer.ERROR_NETWORK -> "Network error"
-                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
-                    SpeechRecognizer.ERROR_SERVER -> "Server error"
-                    SpeechRecognizer.ERROR_CLIENT -> "Client error"
-                    else -> "Unknown error: $error"
-                }
-                android.util.Log.w("CommandController", "Speech recognition error: $errorMessage")
-            }
-            
-            override fun onBeginningOfSpeech() {
-                android.util.Log.d("CommandController", "Beginning of speech")
-            }
-            
-            override fun onBufferReceived(buffer: ByteArray) {}
-            
-            override fun onEndOfSpeech() {
-                android.util.Log.d("CommandController", "End of speech")
-            }
-            
-            override fun onEvent(eventType: Int, params: Bundle) {}
-            
-            override fun onPartialResults(partialResults: Bundle) {}
-            
-            override fun onRmsChanged(rmsdB: Float) {}
-        }
-        
-        recognizer?.setRecognitionListener(listener)
 
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
-
-            // Force headset microphone usage if available
-            if (headphoneDetector.hasHeadsetMicrophone()) {
-                putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                android.util.Log.d("CommandController", "Configured for headset microphone with offline preference")
-            } else {
-                android.util.Log.w("CommandController", "No headset microphone - using device microphone")
-            }
-        }
-        
-        try {
-            // Ensure we have a valid recognizer instance
-            if (recognizer == null) {
-                android.util.Log.e("CommandController", "SpeechRecognizer is null")
-                close()
-                return@callbackFlow
-            }
-
-            // Check if we have RECORD_AUDIO permission
-            if (android.content.pm.PackageManager.PERMISSION_GRANTED !=
-                androidx.core.content.ContextCompat.checkSelfPermission(
-                    context, android.Manifest.permission.RECORD_AUDIO)) {
-                android.util.Log.e("CommandController", "RECORD_AUDIO permission not granted")
+        // Try VOSK first; fall back to Android SpeechRecognizer if model load fails
+        fun startAndroidRecognizer() {
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                android.util.Log.e("CommandController", "Speech recognition not available on this device")
                 android.widget.Toast.makeText(
                     context,
-                    "Microphone permission required for voice commands",
+                    "Speech recognition not available on this device",
                     android.widget.Toast.LENGTH_LONG
                 ).show()
                 close()
-                return@callbackFlow
+                return
             }
 
-            recognizer?.startListening(intent)
-            android.util.Log.d("CommandController", "Started listening for voice commands")
-        } catch (e: Exception) {
-            android.util.Log.e("CommandController", "Failed to start listening", e)
-            android.widget.Toast.makeText(
-                context,
-                "Failed to start voice recognition: ${e.localizedMessage}",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-            close()
-            return@callbackFlow
+            recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            val listener = object : android.speech.RecognitionListener {
+                override fun onResults(results: Bundle) {
+                    val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    matches?.firstOrNull()?.let { 
+                        val recognizedText = it.lowercase(Locale.getDefault())
+                        android.util.Log.d("CommandController", "Recognized: $recognizedText")
+                        trySend(recognizedText) 
+                    }
+                }
+                override fun onReadyForSpeech(params: Bundle) { }
+                override fun onError(error: Int) { }
+                override fun onBeginningOfSpeech() { }
+                override fun onBufferReceived(buffer: ByteArray) { }
+                override fun onEndOfSpeech() { }
+                override fun onEvent(eventType: Int, params: Bundle) { }
+                override fun onPartialResults(partialResults: Bundle) { }
+                override fun onRmsChanged(rmsdB: Float) { }
+            }
+            recognizer?.setRecognitionListener(listener)
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
+                if (headphoneDetector.hasHeadsetMicrophone()) {
+                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                }
+            }
+            try {
+                recognizer?.startListening(intent)
+                android.util.Log.d("CommandController", "Started listening (Android SpeechRecognizer)")
+            } catch (e: Exception) {
+                android.util.Log.e("CommandController", "Failed to start listening", e)
+                android.widget.Toast.makeText(
+                    context,
+                    "Failed to start voice recognition: ${e.localizedMessage}",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                close()
+                return
+            }
+        }
+
+        fun parseVoskText(json: String?): String? {
+            return try {
+                if (json.isNullOrBlank()) {
+                    null
+                } else {
+                    val obj = org.json.JSONObject(json)
+                    val finalText = obj.optString("text").trim()
+                    if (finalText.isNotEmpty()) {
+                        finalText
+                    } else {
+                        val partial = obj.optString("partial").trim()
+                        if (partial.isNotEmpty()) partial else null
+                    }
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        fun startVoskListening(withModel: Model) {
+            try {
+                voskRecognizer = Recognizer(withModel, 16000.0f)
+                voskSpeechService = SpeechService(voskRecognizer, 16000.0f)
+                voskSpeechService?.startListening(object : org.vosk.android.RecognitionListener {
+                    override fun onPartialResult(hypothesis: String?) { }
+                    override fun onResult(hypothesis: String?) {
+                        parseVoskText(hypothesis)?.let { text ->
+                            trySend(text.lowercase(Locale.getDefault()))
+                        }
+                    }
+                    override fun onFinalResult(hypothesis: String?) {
+                        parseVoskText(hypothesis)?.let { text ->
+                            trySend(text.lowercase(Locale.getDefault()))
+                        }
+                    }
+                    override fun onError(e: Exception?) { }
+                    override fun onTimeout() { }
+                })
+                android.util.Log.d("CommandController", "Started listening (VOSK continuous)")
+            } catch (e: Exception) {
+                android.util.Log.w("CommandController", "Failed to start VOSK listening, falling back", e)
+                startAndroidRecognizer()
+            }
+        }
+
+        // Ensure model via assets first, then download fallback
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                val model = VoskModelProvider.ensureModel(context)
+                voskModel = model
+                startVoskListening(model)
+            } catch (e: Exception) {
+                android.util.Log.w("CommandController", "Model ensure failed: ${e.message}")
+                startAndroidRecognizer()
+            }
         }
 
         awaitClose {
-            try {
-                recognizer?.stopListening()
-                recognizer?.destroy()
-                android.util.Log.d("CommandController", "Stopped listening for voice commands")
-            } catch (e: Exception) {
-                android.util.Log.w("CommandController", "Error stopping recognizer", e)
-            }
+            try { voskSpeechService?.stop(); voskRecognizer?.close() } catch (_: Exception) {}
+            try { recognizer?.stopListening(); recognizer?.destroy() } catch (_: Exception) {}
 
             // Clean up audio routing - restore to default state
-            val preferredAudioSource = headphoneDetector.getPreferredAudioSource()
-            when (preferredAudioSource) {
+            val preferredAudioSourceClose = headphoneDetector.getPreferredAudioSource()
+            when (preferredAudioSourceClose) {
                 AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
                     try {
-                        // Suppress system audio mode change sounds during cleanup
                         val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_SYSTEM)
                         audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
-
-                        // Stop Bluetooth SCO
                         audioManager.stopBluetoothSco()
                         audioManager.isBluetoothScoOn = false
-
-                        // Restore normal audio mode
                         audioManager.mode = AudioManager.MODE_NORMAL
-
-                        // Restore system volume after a brief delay
                         kotlinx.coroutines.GlobalScope.launch {
                             kotlinx.coroutines.delay(300)
                             audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, originalVolume, 0)
                         }
-
-                        android.util.Log.d("CommandController", "Restored default audio routing - headset mic exclusive mode ended")
-                    } catch (e: Exception) {
-                        android.util.Log.w("CommandController", "Failed to restore default audio routing", e)
-                    }
+                    } catch (_: Exception) { }
                 }
-                else -> {
-                    // For wired/USB headsets, just log - no special cleanup needed
-                    android.util.Log.d("CommandController", "Cleaned up audio routing")
-                }
+                else -> { }
             }
         }
     }
 
     fun interpretCommand(text: String): Command? {
         val cleanText = text.trim().lowercase(Locale.getDefault())
-        
         return when {
-            // Play commands
             listOf("play", "resume", "start", "go").any { cleanText.contains(it) } -> Command.PLAY
-            
-            // Pause commands
             listOf("pause", "stop", "halt", "freeze").any { cleanText.contains(it) } -> Command.PAUSE
-            
-            // Next track commands
             listOf("next", "skip", "forward", "advance").any { cleanText.contains(it) } -> Command.NEXT
-            
-            // Previous track commands
             listOf("previous", "back", "rewind", "last").any { cleanText.contains(it) } -> Command.PREV
-            
-            // Shuffle commands
             cleanText.contains("shuffle") && (cleanText.contains("on") || cleanText.contains("enable")) -> Command.SHUFFLE_ON
             cleanText.contains("shuffle") && (cleanText.contains("off") || cleanText.contains("disable")) -> Command.SHUFFLE_OFF
-            
-            // Repeat commands
             cleanText.contains("repeat") && cleanText.contains("one") -> Command.REPEAT_ONE
             cleanText.contains("repeat") && cleanText.contains("all") -> Command.REPEAT_ALL
             cleanText.contains("repeat") && (cleanText.contains("off") || cleanText.contains("disable")) -> Command.REPEAT_OFF
-            
-            // Volume commands
             cleanText.contains("volume") && (cleanText.contains("up") || cleanText.contains("increase")) -> Command.VOLUME_UP
             cleanText.contains("volume") && (cleanText.contains("down") || cleanText.contains("decrease")) -> Command.VOLUME_DOWN
             cleanText.contains("mute") -> Command.MUTE
-            
-            // Gym mode specific commands
             cleanText.contains("gym") && cleanText.contains("mode") -> Command.TOGGLE_GYM_MODE
-            
             else -> null
         }
     }
 
-    enum class Command {
-        PLAY, PAUSE, NEXT, PREV,
-        SHUFFLE_ON, SHUFFLE_OFF,
-        REPEAT_ONE, REPEAT_ALL, REPEAT_OFF,
-        VOLUME_UP, VOLUME_DOWN, MUTE,
-        TOGGLE_GYM_MODE
-    }
+    enum class Command { PLAY, PAUSE, NEXT, PREV, SHUFFLE_ON, SHUFFLE_OFF, REPEAT_ONE, REPEAT_ALL, REPEAT_OFF, VOLUME_UP, VOLUME_DOWN, MUTE, TOGGLE_GYM_MODE }
 }
