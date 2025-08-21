@@ -11,7 +11,12 @@ import android.speech.SpeechRecognizer
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 import java.util.Locale
+import org.vosk.Model
+import org.vosk.Recognizer
+import org.vosk.android.SpeechService
+
 
 class CommandController(
     private val context: Context,
@@ -23,35 +28,118 @@ class CommandController(
 
     fun listen(): Flow<String> = callbackFlow {
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            android.util.Log.e("CommandController", "Speech recognition not available on this device")
+            android.widget.Toast.makeText(
+                context,
+                "Speech recognition not available on this device",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
             close()
             return@callbackFlow
         }
-        
-        // Force audio routing to headset microphone when available
+
+        // STRICT headset-only policy: refuse to start if no headset microphone is available
         val preferredAudioSource = headphoneDetector.getPreferredAudioSource()
-        android.util.Log.d("CommandController", "Preferred audio source: $preferredAudioSource")
-        
+        val hasHeadsetMicrophone = headphoneDetector.hasHeadsetMicrophone()
+
+        android.util.Log.d("CommandController", "Preferred audio source: $preferredAudioSource, Has headset mic: $hasHeadsetMicrophone")
+
+        // If no headset microphone is available, close immediately
+        if (!hasHeadsetMicrophone) {
+            android.util.Log.w("CommandController", "No headset microphone available - voice commands disabled")
+            android.widget.Toast.makeText(
+                context,
+                "Voice commands require a headset microphone",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            close()
+            return@callbackFlow
+        }
+
+        // Force EXCLUSIVE audio routing to headset microphone (headset is confirmed to be available)
         when (preferredAudioSource) {
             AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
-                // Force Bluetooth SCO audio for headset microphone
+                // Force EXCLUSIVE Bluetooth SCO audio for headset microphone only
                 try {
+                    // Suppress system audio mode change sounds
+                    val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_SYSTEM)
+                    audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
+
+                    // Disable all built-in audio inputs first
+                    headphoneDetector.disableBuiltInAudioInputs()
+
+                    // Stop any existing audio routing first
+                    audioManager.stopBluetoothSco()
+                    audioManager.isBluetoothScoOn = false
+
+                    // Start Bluetooth SCO with exclusive routing
                     audioManager.startBluetoothSco()
                     audioManager.isBluetoothScoOn = true
-                    android.util.Log.d("CommandController", "Forced Bluetooth SCO audio routing")
+
+                    // Restore system volume after a brief delay
+                    kotlinx.coroutines.GlobalScope.launch {
+                        kotlinx.coroutines.delay(500)
+                        audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, originalVolume, 0)
+                    }
+
+                    android.util.Log.d("CommandController", "Forced EXCLUSIVE Bluetooth SCO audio routing - headset mic only")
+
+                    android.widget.Toast.makeText(
+                        context,
+                        "Using headset microphone only",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
                 } catch (e: Exception) {
-                    android.util.Log.w("CommandController", "Failed to start Bluetooth SCO", e)
+                    android.util.Log.w("CommandController", "Failed to start exclusive Bluetooth SCO", e)
+                    android.widget.Toast.makeText(
+                        context,
+                        "Failed to use headset microphone exclusively",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                    close()
+                    return@callbackFlow
                 }
             }
             AudioDeviceInfo.TYPE_WIRED_HEADSET -> {
-                // Ensure wired headset is preferred
-                android.util.Log.d("CommandController", "Using wired headset microphone")
+                // For wired headsets, also disable built-in inputs
+                try {
+                    headphoneDetector.disableBuiltInAudioInputs()
+                    android.util.Log.d("CommandController", "Using wired headset microphone exclusively")
+
+                    android.widget.Toast.makeText(
+                        context,
+                        "Using wired headset microphone only",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } catch (e: Exception) {
+                    android.util.Log.w("CommandController", "Failed to disable built-in inputs for wired headset", e)
+                }
             }
             AudioDeviceInfo.TYPE_USB_HEADSET -> {
-                // Ensure USB headset is preferred
-                android.util.Log.d("CommandController", "Using USB headset microphone")
+                // For USB headsets, also disable built-in inputs
+                try {
+                    headphoneDetector.disableBuiltInAudioInputs()
+                    android.util.Log.d("CommandController", "Using USB headset microphone exclusively")
+
+                    android.widget.Toast.makeText(
+                        context,
+                        "Using USB headset microphone only",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } catch (e: Exception) {
+                    android.util.Log.w("CommandController", "Failed to disable built-in inputs for USB headset", e)
+                }
             }
             else -> {
-                android.util.Log.w("CommandController", "No headset microphone available, using device microphone")
+                // This should never happen since we check hasHeadsetMicrophone() above
+                android.util.Log.w("CommandController", "Unexpected: No valid headset microphone found despite check")
+                android.widget.Toast.makeText(
+                    context,
+                    "Headset microphone required",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+                close()
+                return@callbackFlow
             }
         }
         
@@ -108,29 +196,88 @@ class CommandController(
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1000L)
+
             // Force headset microphone usage if available
             if (headphoneDetector.hasHeadsetMicrophone()) {
                 putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                android.util.Log.d("CommandController", "Configured for headset microphone with offline preference")
+            } else {
+                android.util.Log.w("CommandController", "No headset microphone - using device microphone")
             }
         }
         
-        recognizer?.startListening(intent)
+        try {
+            // Ensure we have a valid recognizer instance
+            if (recognizer == null) {
+                android.util.Log.e("CommandController", "SpeechRecognizer is null")
+                close()
+                return@callbackFlow
+            }
+
+            // Check if we have RECORD_AUDIO permission
+            if (android.content.pm.PackageManager.PERMISSION_GRANTED !=
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.RECORD_AUDIO)) {
+                android.util.Log.e("CommandController", "RECORD_AUDIO permission not granted")
+                android.widget.Toast.makeText(
+                    context,
+                    "Microphone permission required for voice commands",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                close()
+                return@callbackFlow
+            }
+
+            recognizer?.startListening(intent)
+            android.util.Log.d("CommandController", "Started listening for voice commands")
+        } catch (e: Exception) {
+            android.util.Log.e("CommandController", "Failed to start listening", e)
+            android.widget.Toast.makeText(
+                context,
+                "Failed to start voice recognition: ${e.localizedMessage}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            close()
+            return@callbackFlow
+        }
 
         awaitClose {
-            recognizer?.stopListening()
-            recognizer?.destroy()
-            
+            try {
+                recognizer?.stopListening()
+                recognizer?.destroy()
+                android.util.Log.d("CommandController", "Stopped listening for voice commands")
+            } catch (e: Exception) {
+                android.util.Log.w("CommandController", "Error stopping recognizer", e)
+            }
+
             // Clean up audio routing - restore to default state
             val preferredAudioSource = headphoneDetector.getPreferredAudioSource()
             when (preferredAudioSource) {
                 AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
                     try {
+                        // Suppress system audio mode change sounds during cleanup
+                        val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_SYSTEM)
+                        audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
+
+                        // Stop Bluetooth SCO
                         audioManager.stopBluetoothSco()
                         audioManager.isBluetoothScoOn = false
-                        android.util.Log.d("CommandController", "Restored default audio routing")
+
+                        // Restore normal audio mode
+                        audioManager.mode = AudioManager.MODE_NORMAL
+
+                        // Restore system volume after a brief delay
+                        kotlinx.coroutines.GlobalScope.launch {
+                            kotlinx.coroutines.delay(300)
+                            audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, originalVolume, 0)
+                        }
+
+                        android.util.Log.d("CommandController", "Restored default audio routing - headset mic exclusive mode ended")
                     } catch (e: Exception) {
-                        android.util.Log.w("CommandController", "Failed to stop Bluetooth SCO", e)
+                        android.util.Log.w("CommandController", "Failed to restore default audio routing", e)
                     }
                 }
                 else -> {

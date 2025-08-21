@@ -48,99 +48,86 @@ class PlayerService : MediaLibraryService() {
     private var currentMediaIdCache: String? = null
 
     private fun ensurePlayerInitialized() {
+        // If we already have a properly initialized player and queue, return
         if (_player != null && _queue != null && _player == mediaLibrarySession?.player) return
+
         android.util.Log.d("PlayerService", "Initializing player and queue")
 
+        // Only create a new player if we don't have one
         val newPlayer = _player ?: ExoPlayer.Builder(this).build().also { _player = it }
 
-        // Snapshot any existing queue to migrate to the real player-bound manager
-        val prevItems = _queue?.getQueueSnapshot()?.map { it.mediaItem } ?: emptyList()
-        val prevIndex = _queue?.getCurrentIndex() ?: 0
+        // Only create QueueManager if we don't have one, to prevent duplicates
+        if (_queue == null) {
+            _queue = QueueManager(newPlayer, queueStateStore)
+            QueueManagerProvider.setInstance(queue)
 
-        // Always bind QueueManager to the actual player used by the session
-        _queue = QueueManager(newPlayer, queueStateStore)
-        QueueManagerProvider.setInstance(queue)
-
-        // Update the session with the new player
-        mediaLibrarySession?.player = newPlayer
-
-        // Attach listeners once
-        newPlayer.addListener(object : Player.Listener {
-            override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (hasValidMedia) {
-                    if (isPlaying) audioFocusManager.request() else audioFocusManager.abandon()
+            // Attach listeners only once when QueueManager is first created
+            newPlayer.addListener(object : Player.Listener {
+                override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    if (hasValidMedia) {
+                        if (isPlaying) audioFocusManager.request() else audioFocusManager.abandon()
+                    }
                 }
-            }
 
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                mediaItem?.let { item ->
-                    // Remove consumed transient items (Play Next or User Queue) on any advance (auto or manual)
-                    val finishedMediaId = currentMediaIdCache
-                    if (finishedMediaId != null) {
-                        serviceScope.launch(Dispatchers.Main) {
-                            try {
-                                // First try play-next head consume (preserves multi-play-next semantics)
-                                val removedPlayNext = queue.consumePlayNextHeadIfMatches(finishedMediaId)
-                                if (removedPlayNext) {
-                                    queueStateStore.decrementOnAdvance()
-                                } else {
-                                    // If not play-next, remove the first matching USER_QUEUE item for this id
-                                    // This ensures User Queue items are consumed after play
-                                    val removedUser = queue.removeFirstUserQueueByMediaId(finishedMediaId)
-                                    if (removedUser) {
-                                        // No count to adjust for user queue
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    mediaItem?.let { item ->
+                        // Remove consumed transient items (Play Next or User Queue) on any advance (auto or manual)
+                        val finishedMediaId = currentMediaIdCache
+                        if (finishedMediaId != null) {
+                            serviceScope.launch(Dispatchers.Main) {
+                                try {
+                                    // First try play-next head consume (preserves multi-play-next semantics)
+                                    val removedPlayNext = queue.consumePlayNextHeadIfMatches(finishedMediaId)
+                                    if (removedPlayNext) {
+                                        queueStateStore.decrementOnAdvance()
+                                    } else {
+                                        // If not play-next, remove the first matching USER_QUEUE item for this id
+                                        // This ensures User Queue items are consumed after play
+                                        val removedUser = queue.removeFirstUserQueueByMediaId(finishedMediaId)
+                                        if (removedUser) {
+                                            // No count to adjust for user queue
+                                        }
                                     }
-                                }
-                            } catch (_: Exception) { }
-                        }
-                    }
-                    // Update current cached id to new current
-                    currentMediaIdCache = item.mediaId
-                    queue.onTrackChanged(item.mediaId)
-                    // If the playlist was externally changed, resync; otherwise keep our sources intact
-                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
-                        serviceScope.launch(Dispatchers.Main) {
-                            try { queue.syncFromPlayer(player) } catch (_: Exception) { }
-                        }
-                    }
-                    serviceScope.launch(Dispatchers.IO) {
-                        // Record track as played
-                        repo.recordPlayed(item.mediaId)
-                        queueStateStore.decrementOnAdvance()
-
-                        // Load lyrics only if it's a different track
-                        if (lastLoadedLyricsId != item.mediaId) {
-                            lastLoadedLyricsId = item.mediaId
-                            android.util.Log.d("PlayerService", "onMediaItemTransition: Loading lyrics for ${item.mediaId}")
-                            try {
-                                lyricsStateStore.loadLyrics(item.mediaId)
-                            } catch (e: Exception) {
-                                android.util.Log.e("PlayerService", "Failed to load lyrics on transition", e)
+                                } catch (_: Exception) { }
                             }
-                        } else {
-                            android.util.Log.d("PlayerService", "Skipping lyrics load - already loaded for ${item.mediaId}")
+                        }
+                        // Update current cached id to new current
+                        currentMediaIdCache = item.mediaId
+                        queue.onTrackChanged(item.mediaId)
+                        // If the playlist was externally changed, resync; otherwise keep our sources intact
+                        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+                            serviceScope.launch(Dispatchers.Main) {
+                                try { queue.syncFromPlayer(player) } catch (_: Exception) { }
+                            }
+                        }
+                        serviceScope.launch(Dispatchers.IO) {
+                            // Record track as played
+                            repo.recordPlayed(item.mediaId)
+                            queueStateStore.decrementOnAdvance()
+
+                            // Load lyrics only if it's a different track
+                            if (lastLoadedLyricsId != item.mediaId) {
+                                lastLoadedLyricsId = item.mediaId
+                                android.util.Log.d("PlayerService", "onMediaItemTransition: Loading lyrics for ${item.mediaId}")
+                                try {
+                                    lyricsStateStore.loadLyrics(item.mediaId)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("PlayerService", "Failed to load lyrics on transition", e)
+                                }
+                            } else {
+                                android.util.Log.d("PlayerService", "Skipping lyrics load - already loaded for ${item.mediaId}")
+                            }
                         }
                     }
                 }
-            }
-        })
-
-        // Migrate previous queue (if any) into the new manager without starting playback
-        if (prevItems.isNotEmpty()) {
-            serviceScope.launch(Dispatchers.Main) {
-                try {
-                    queue.setQueue(
-                        items = prevItems.toMutableList(),
-                        startIndex = prevIndex.coerceAtLeast(0),
-                        play = false,
-                        startPosMs = 0L,
-                        context = null
-                    )
-                } catch (e: Exception) {
-                    android.util.Log.w("PlayerService", "Failed to migrate previous queue", e)
-                }
-            }
+            })
+        } else {
+            // If we already have a QueueManager, just update the player reference
+            android.util.Log.d("PlayerService", "Reusing existing QueueManager with new player")
         }
+
+        // Update the session with the current player
+        mediaLibrarySession?.player = newPlayer
     }
 
     @OptIn(UnstableApi::class)
@@ -254,8 +241,6 @@ class PlayerService : MediaLibraryService() {
 
         // Build session with a placeholder player that will be replaced on first playback
         val placeholderPlayer = ExoPlayer.Builder(this).build()
-        _queue = QueueManager(placeholderPlayer, queueStateStore)
-        QueueManagerProvider.setInstance(queue)
 
         mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(this, placeholderPlayer, callback)
             .setId("MusifyMU_Session")
@@ -263,9 +248,8 @@ class PlayerService : MediaLibraryService() {
             .setSessionActivity(createPlayerActivityIntent())
             .build()
 
-        // Placeholder player is just for session creation, no listeners needed
-
-        // Player event handling is done in ensurePlayerInitialized()
+        // Player and QueueManager will be created in ensurePlayerInitialized() when needed
+        // This prevents duplicate creation and ensures proper initialization order
 
         // We no longer show our own persistent notification; Android system may show media controls if the session is active.
 

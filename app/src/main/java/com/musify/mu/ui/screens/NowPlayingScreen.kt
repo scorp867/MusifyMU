@@ -75,30 +75,72 @@ fun NowPlayingScreen(navController: NavController) {
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     
-    // Voice control manager
-    val voiceControlManager = remember(controller) {
+    // Get or create VoiceControlManager singleton
+    val voiceControlManager = remember {
         controller?.let { mediaController ->
-            // Use the MediaController directly as it implements Player interface
-            VoiceControlManager(context, mediaController)
+            VoiceControlManager.createInstance(context, mediaController)
         }
     }
-    
-    // Voice control state
-    var isGymModeEnabled by remember { mutableStateOf(false) }
-    var canEnableGymMode by remember { mutableStateOf(false) }
-    
+
+    // Update controller reference when it changes
+    LaunchedEffect(controller) {
+        if (controller != null && voiceControlManager != null) {
+            voiceControlManager.updatePlayer(controller)
+        }
+    }
+
+    // Voice control state - sync with VoiceControlManager state
+    var isGymModeEnabled by remember {
+        mutableStateOf(voiceControlManager?.isGymModeEnabled() ?: false)
+    }
+    var canEnableGymMode by remember {
+        mutableStateOf(voiceControlManager?.canEnableGymMode() ?: false)
+    }
+
+    // Sync state when screen resumes or voiceControlManager changes
+    LaunchedEffect(voiceControlManager) {
+        voiceControlManager?.let { vcm ->
+            // Initial state sync
+            val initialGymMode = vcm.isGymModeEnabled()
+            val initialCanEnable = vcm.canEnableGymMode()
+
+            isGymModeEnabled = initialGymMode
+            canEnableGymMode = initialCanEnable
+
+            android.util.Log.d("NowPlayingScreen", "Initial state sync - Gym mode: $initialGymMode, Can enable: $initialCanEnable")
+
+            // Set callback to update UI state immediately when VoiceControlManager changes
+            vcm.onGymModeChanged = { enabled ->
+                android.util.Log.d("NowPlayingScreen", "VoiceControlManager callback - Gym mode changed to: $enabled")
+                // Update UI state on Main thread using Handler
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    isGymModeEnabled = enabled
+                    android.util.Log.d("NowPlayingScreen", "UI state updated - isGymModeEnabled: $enabled")
+                }
+            }
+        }
+    }
+
     // Observe headphone connection and gym mode changes
     LaunchedEffect(voiceControlManager) {
         voiceControlManager?.let { vcm ->
+            // Observe headphone connection with microphone check
             vcm.observeHeadphoneConnection().collect { isConnected ->
-                canEnableGymMode = isConnected
-                if (!isConnected && isGymModeEnabled) {
-                    isGymModeEnabled = false
+                val hasMicrophone = vcm.getHeadphoneDetector().hasHeadsetMicrophone()
+                val newCanEnable = isConnected && hasMicrophone
+
+                // Update on Main thread to ensure UI consistency
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    if (canEnableGymMode != newCanEnable) {
+                        canEnableGymMode = newCanEnable
+                        android.util.Log.d("NowPlayingScreen", "canEnableGymMode updated to: $newCanEnable")
+                    }
+
+                    if (!isConnected && isGymModeEnabled) {
+                        isGymModeEnabled = false
+                        android.util.Log.d("NowPlayingScreen", "Gym mode disabled due to disconnect")
+                    }
                 }
-            }
-            
-            vcm.onGymModeChanged = { enabled ->
-                isGymModeEnabled = enabled
             }
         }
     }

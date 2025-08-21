@@ -103,6 +103,10 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
     // Google Fonts for Compose (downloadable fonts)
     implementation("androidx.compose.ui:ui-text-google-fonts:1.6.8")
+    // Speech Module For Voice Commands (GYM MODE)
+    implementation("com.alphacephei:vosk-android:0.3.47")
+
+
 }
 
 // Room KSP options

@@ -17,27 +17,67 @@ import kotlinx.coroutines.withContext
 
 class VoiceControlManager(
     private val context: Context,
-    private val player: Player
+    private var player: Player
 ) {
-    
+
     private val headphoneDetector = HeadphoneDetector(context)
     private val commandController = CommandController(context, headphoneDetector)
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var listeningJob: Job? = null
     private var isGymModeActive = false
-    
+
     // Callback for UI updates
     var onGymModeChanged: ((Boolean) -> Unit)? = null
+
+    companion object {
+        @Volatile
+        private var instance: VoiceControlManager? = null
+
+        fun getInstance(context: Context): VoiceControlManager? = instance
+
+        fun createInstance(context: Context, player: Player): VoiceControlManager {
+            return instance ?: synchronized(this) {
+                instance ?: VoiceControlManager(context, player).also { instance = it }
+            }
+        }
+    }
     
     fun isGymModeEnabled(): Boolean = isGymModeActive
-    
-    fun canEnableGymMode(): Boolean = headphoneDetector.isHeadphonesConnected.value
+
+    fun canEnableGymMode(): Boolean = headphoneDetector.isHeadphonesConnected.value && headphoneDetector.hasHeadsetMicrophone()
+
+    // Getter for headphone detector
+    fun getHeadphoneDetector(): HeadphoneDetector = headphoneDetector
+
+    // Method to update player reference
+    fun updatePlayer(newPlayer: Player) {
+        if (player != newPlayer) {
+            android.util.Log.d("VoiceControlManager", "Updating player reference")
+            player = newPlayer
+        }
+    }
     
     fun toggleGymMode() {
         if (!canEnableGymMode()) {
             android.util.Log.w("VoiceControlManager", "Cannot enable gym mode: no headphones connected")
+            android.widget.Toast.makeText(
+                context,
+                "Headphones required for voice commands",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        // Additional check: ensure headset has a microphone
+        if (!headphoneDetector.hasHeadsetMicrophone()) {
+            android.util.Log.w("VoiceControlManager", "Cannot enable gym mode: headphones have no microphone")
+            android.widget.Toast.makeText(
+                context,
+                "Headset with microphone required for voice commands",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
             return
         }
         
@@ -90,7 +130,7 @@ class VoiceControlManager(
                         withContext(Dispatchers.Main) {
                             isGymModeActive = false
                             onGymModeChanged?.invoke(false)
-                            
+
                             // Show toast that gym mode was disabled due to headphone disconnect
                             android.widget.Toast.makeText(
                                 context,
@@ -100,25 +140,69 @@ class VoiceControlManager(
                         }
                         break
                     }
-                    
-                                         // Start listening for commands
-                     try {
-                         commandController.listen().collectLatest { recognizedText ->
-                             if (isActive && isGymModeActive) {
-                                 processVoiceCommand(recognizedText)
-                             }
-                         }
-                     } catch (e: Exception) {
-                         android.util.Log.w("VoiceControlManager", "Error in voice listening cycle", e)
-                         delay(1000) // Wait before retrying
-                     }
-                     
-                     // Small delay before next listening cycle
-                     delay(500)
-                    
+
+                    // Check if headset has microphone
+                    if (!headphoneDetector.hasHeadsetMicrophone()) {
+                        android.util.Log.w("VoiceControlManager", "No headset microphone available, stopping gym mode")
+                        withContext(Dispatchers.Main) {
+                            isGymModeActive = false
+                            onGymModeChanged?.invoke(false)
+
+                            android.widget.Toast.makeText(
+                                context,
+                                "Gym Mode disabled - no headset microphone",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        break
+                    }
+
+                    // Start listening for commands - run continuously without stopping
+                    try {
+                        android.util.Log.d("VoiceControlManager", "Starting continuous voice command listening")
+                        commandController.listen().collectLatest { recognizedText ->
+                            if (isActive && isGymModeActive) {
+                                android.util.Log.d("VoiceControlManager", "Voice command recognized: '$recognizedText'")
+                                processVoiceCommand(recognizedText)
+
+                                // Show confirmation toast
+                                withContext(Dispatchers.Main) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Voice: '$recognizedText'",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("VoiceControlManager", "Error in voice listening cycle", e)
+
+                        // Check if it's a recoverable error
+                        val isRecoverable = e.localizedMessage?.contains("No match found") == true ||
+                                           e.localizedMessage?.contains("timeout") == true ||
+                                           e.localizedMessage?.contains("network") == true
+
+                        if (isRecoverable) {
+                            android.util.Log.d("VoiceControlManager", "Recoverable error, continuing to listen")
+                            // Don't show error toast for recoverable errors, just continue listening
+                            delay(500) // Brief delay before restarting listening
+                        } else {
+                            // Show error toast only for non-recoverable errors
+                            withContext(Dispatchers.Main) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Voice recognition error: ${e.localizedMessage ?: "Unknown error"}",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            delay(2000) // Longer delay for non-recoverable errors
+                        }
+                    }
+
                 } catch (e: Exception) {
-                    android.util.Log.e("VoiceControlManager", "Error in voice listening", e)
-                    delay(1000) // Wait before retrying
+                    android.util.Log.e("VoiceControlManager", "Error in voice listening loop", e)
+                    delay(2000) // Wait longer before retrying on error
                 }
             }
         }
@@ -240,6 +324,7 @@ class VoiceControlManager(
     }
     
     fun cleanup() {
+        android.util.Log.d("VoiceControlManager", "Cleaning up VoiceControlManager")
         stopVoiceListening()
         // Restore default audio routing before cleanup
         if (isGymModeActive) {
@@ -247,6 +332,12 @@ class VoiceControlManager(
         }
         scope.cancel()
         headphoneDetector.cleanup()
+        instance = null // Clear singleton instance
+    }
+
+    fun cleanupOnAppDestroy() {
+        android.util.Log.d("VoiceControlManager", "App destroying - cleaning up")
+        cleanup()
     }
     
     // Observe headphone connection changes
