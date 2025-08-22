@@ -533,7 +533,7 @@ class WakeWordService : Service() {
 
 	private fun showToast(message: String) {
 		Handler(Looper.getMainLooper()).post {
-			Toast.makeText(this, Toast.LENGTH_SHORT).show()
+			Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 		}
 	}
 }
