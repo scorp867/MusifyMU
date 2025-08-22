@@ -7,12 +7,15 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
-import ai.picovoice.porcupine.PorcupineManager
-import ai.picovoice.porcupine.PorcupineManagerCallback
+import ai.picovoice.porcupine.Porcupine
 import ai.picovoice.porcupine.PorcupineException
 import com.musify.mu.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
@@ -20,10 +23,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.max
+import org.vosk.Model
+import org.vosk.Recognizer
 
 class WakeWordService : Service() {
 
@@ -32,6 +39,7 @@ class WakeWordService : Service() {
 		private const val NOTIF_ID = 6102
 		private const val ACTION_START = "com.musify.mu.voice.action.START"
 		private const val ACTION_STOP = "com.musify.mu.voice.action.STOP"
+		private const val COMMAND_WINDOW_MS = 3500L
 
 		fun start(context: Context) {
 			val intent = Intent(context, WakeWordService::class.java).apply { action = ACTION_START }
@@ -49,10 +57,20 @@ class WakeWordService : Service() {
 	}
 
 	private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-	private var porcupineManager: PorcupineManager? = null
 	private lateinit var headphoneDetector: HeadphoneDetector
 	private lateinit var commandController: CommandController
 	private lateinit var audioManager: AudioManager
+
+	// Engines and audio
+	private var porcupine: Porcupine? = null
+	private var audioRecord: AudioRecord? = null
+	private var audioLoopJob: Job? = null
+	private var voskModel: Model? = null
+	private var voskRecognizer: Recognizer? = null
+	private var isInCommandWindow = false
+	private var commandWindowEndAt = 0L
+
+	@Volatile private var confidenceThreshold: Float = 0.9f
 
 	// Injected via runtime; do not persist secrets
 	private val accessKey: String by lazy {
@@ -65,18 +83,26 @@ class WakeWordService : Service() {
 		commandController = CommandController(this, headphoneDetector)
 		audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 		createNotificationChannel()
+
+		// Prepare Vosk model in background early
+		serviceScope.launch(Dispatchers.IO) {
+			try { org.vosk.LibVosk.setLogLevel(org.vosk.LogLevel.WARN) } catch (_: Exception) { }
+			try { voskModel = VoskModelProvider.ensureModel(this@WakeWordService) } catch (e: Exception) {
+				android.util.Log.w("WakeWordService", "Failed to ensure VOSK model early: ${e.message}")
+			}
+		}
 	}
 
 	override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
 		when (intent?.action) {
 			ACTION_STOP -> {
-				stopWakeWord()
+				stopListening()
 				stopSelf()
 				return START_NOT_STICKY
 			}
 			else -> {
 				startForeground(NOTIF_ID, buildNotification())
-				startWakeWord()
+				startListening()
 				return START_STICKY
 			}
 		}
@@ -86,7 +112,7 @@ class WakeWordService : Service() {
 
 	override fun onDestroy() {
 		super.onDestroy()
-		stopWakeWord()
+		stopListening()
 		serviceScope.cancel()
 	}
 
@@ -112,70 +138,137 @@ class WakeWordService : Service() {
 		}
 	}
 
-	private fun startWakeWord() {
-		if (porcupineManager != null) return
+	private fun startListening() {
+		if (audioLoopJob != null) return
 
 		if (!headphoneDetector.hasHeadsetMicrophone()) {
 			android.widget.Toast.makeText(this, "Headset with microphone required", android.widget.Toast.LENGTH_LONG).show()
 			return
 		}
+		// Ensure exclusive routing once
+		headphoneDetector.forceAudioRoutingToHeadset()
 
 		try {
-			// Ensure exclusive routing to headset mic during wake word listening
-			headphoneDetector.forceAudioRoutingToHeadset()
-
-			// Copy keyword from res/raw to a readable file and use absolute path
+			// Prepare Porcupine engine
 			val resName = "hey_musify"
 			val resId = resources.getIdentifier(resName, "raw", packageName)
 			if (resId == 0) throw PorcupineException("Wake word resource not found: $resName")
 			val keywordFilePath = ensureKeywordFile(resId, "$resName.ppn")
-
-			porcupineManager = PorcupineManager.Builder()
+			porcupine = Porcupine.Builder()
 				.setAccessKey(accessKey)
 				.setKeywordPath(keywordFilePath)
 				.setSensitivity(0.6f)
-				.build(applicationContext, PorcupineManagerCallback { _ ->
-					// Wake word detected -> open 4s command window
-					handleWakeWordDetected()
-				})
-			porcupineManager?.start()
-			android.util.Log.d("WakeWordService", "Porcupine started")
-		} catch (e: PorcupineException) {
-			android.util.Log.e("WakeWordService", "Failed to start Porcupine", e)
+				.build(applicationContext)
+
+			val sampleRate = porcupine!!.sampleRate
+			val frameLength = porcupine!!.frameLength
+			val minBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+			val bufferSize = max(minBuf, frameLength * 2 * 4)
+			audioRecord = AudioRecord(
+				MediaRecorder.AudioSource.MIC,
+				sampleRate,
+				AudioFormat.CHANNEL_IN_MONO,
+				AudioFormat.ENCODING_PCM_16BIT,
+				bufferSize
+			)
+			audioRecord?.startRecording()
+
+			audioLoopJob = serviceScope.launch(Dispatchers.Default) {
+				val frame = ShortArray(frameLength)
+				while (isActive) {
+					val n = audioRecord?.read(frame, 0, frameLength) ?: -1
+					if (n <= 0) continue
+
+					if (!isInCommandWindow) {
+						val keywordIndex = try { porcupine?.process(frame) ?: -1 } catch (e: Exception) { -1 }
+						if (keywordIndex >= 0) {
+							openCommandWindow()
+						}
+					} else {
+						processCommandFrame(frame, n)
+						if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
+							finalizeCommandWindow()
+						}
+					}
+				}
+			}
+			android.util.Log.d("WakeWordService", "Listening started (single AudioRecord)")
+		} catch (e: Exception) {
+			android.util.Log.e("WakeWordService", "Failed to start listening", e)
+			stopListening()
 		}
 	}
 
-	private var commandWindowJob: Job? = null
+	private fun stopListening() {
+		try { audioLoopJob?.cancel() } catch (_: Exception) {}
+		audioLoopJob = null
+		try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
+		audioRecord = null
+		try { porcupine?.delete() } catch (_: Exception) {}
+		porcupine = null
+		try { voskRecognizer?.close() } catch (_: Exception) {}
+		voskRecognizer = null
+	}
 
-	private fun handleWakeWordDetected() {
-		// Pause wake word while command window active
-		try { porcupineManager?.stop() } catch (_: Exception) {}
-
-		commandWindowJob?.cancel()
-		commandWindowJob = serviceScope.launch(Dispatchers.Main) {
+	private suspend fun ensureVoskRecognizer(): Recognizer? {
+		return withContext(Dispatchers.IO) {
 			try {
-				// 3.5s window to capture the command via Vosk with restricted grammar
-				commandController.listenForCommandWindow(3500L).collectLatest { text ->
-					android.util.Log.d("WakeWordService", "Command heard: $text")
-					processCommand(text)
-				}
+				val model = voskModel ?: VoskModelProvider.ensureModel(this@WakeWordService).also { voskModel = it }
+				val grammar = buildGrammar()
+				recognizer = Recognizer(model, 16000.0f, grammar)
+				voskRecognizer = recognizer
+				voskRecognizer
 			} catch (e: Exception) {
-				android.util.Log.w("WakeWordService", "Command window error: ${e.message}")
-			} finally {
-				// Resume wake word listening
-				try { porcupineManager?.start() } catch (_: Exception) {}
+				android.util.Log.w("WakeWordService", "Failed to create Vosk recognizer: ${e.message}")
+				null
 			}
 		}
 	}
 
+	private fun openCommandWindow() {
+		isInCommandWindow = true
+		commandWindowEndAt = SystemClock.elapsedRealtime() + COMMAND_WINDOW_MS
+		serviceScope.launch(Dispatchers.Main) {
+			ensureVoskRecognizer()
+		}
+	}
+
+	private fun finalizeCommandWindow() {
+		try {
+			val json = voskRecognizer?.finalResult
+			val text = parseText(json)
+			if (!text.isNullOrBlank()) processCommand(text)
+		} catch (_: Exception) { }
+		try { voskRecognizer?.close() } catch (_: Exception) {}
+		voskRecognizer = null
+		isInCommandWindow = false
+	}
+
+	private fun processCommandFrame(frame: ShortArray, n: Int) {
+		val rec = voskRecognizer ?: return
+		try {
+			val bytes = shortsToBytesLE(frame, n)
+			val accepted = rec.acceptWaveForm(bytes, bytes.size)
+			if (accepted) {
+				val json = rec.result
+				val text = parseText(json)
+				if (!text.isNullOrBlank()) {
+					processCommand(text)
+					// Close early and return to wakeword
+					try { rec.reset() } catch (_: Exception) {}
+					isInCommandWindow = false
+				}
+			}
+		} catch (e: Exception) {
+			android.util.Log.w("WakeWordService", "Vosk accept frame failed: ${e.message}")
+		}
+	}
+
 	private fun processCommand(text: String) {
-		// Forward to global VoiceControlManager if exists
 		try {
 			val vcm = VoiceControlManager.getInstance(this)
 			if (vcm != null) {
-				try {
-					vcm.processVoiceCommand(text)
-				} catch (_: Exception) { }
+				try { vcm.processVoiceCommand(text) } catch (_: Exception) { }
 			} else {
 				android.util.Log.w("WakeWordService", "VoiceControlManager not available")
 			}
@@ -184,10 +277,31 @@ class WakeWordService : Service() {
 		}
 	}
 
-	private fun stopWakeWord() {
-		try { porcupineManager?.stop() } catch (_: Exception) {}
-		try { porcupineManager?.delete() } catch (_: Exception) {}
-		porcupineManager = null
+	private fun parseText(json: String?): String? {
+		if (json.isNullOrBlank()) return null
+		return try {
+			val obj = org.json.JSONObject(json)
+			obj.optString("text").trim().lowercase()
+		} catch (_: Exception) { null }
+	}
+
+	private fun shortsToBytesLE(src: ShortArray, len: Int): ByteArray {
+		val out = ByteArray(len * 2)
+		var i = 0
+		var j = 0
+		while (i < len) {
+			val v = src[i].toInt()
+			out[j++] = (v and 0xFF).toByte()
+			out[j++] = ((v ushr 8) and 0xFF).toByte()
+			i++
+		}
+		return out
+	}
+
+	private fun buildGrammar(): String {
+		return CommandController.Command.values()
+			.flatMap { it.phrases }
+			.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
 	}
 
 	private fun ensureKeywordFile(resId: Int, outName: String): String {
