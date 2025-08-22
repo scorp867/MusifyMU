@@ -34,9 +34,11 @@ import org.vosk.Recognizer
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
 
 class WakeWordService : Service() {
-
 	companion object {
 		private const val NOTIF_CHANNEL_ID = "wake_word_channel"
 		private const val NOTIF_ID = 6102
@@ -141,15 +143,36 @@ class WakeWordService : Service() {
 		}
 	}
 
+	private fun hasPermission(permission: String): Boolean {
+		return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+	}
+
 	private fun startListening() {
 		if (audioLoopJob != null) return
+
+		if (!hasPermission(android.Manifest.permission.RECORD_AUDIO)) {
+			showToast("Microphone permission required for wakeword")
+			android.util.Log.w("WakeWordService", "Missing RECORD_AUDIO permission")
+			return
+		}
 
 		if (!headphoneDetector.hasHeadsetMicrophone()) {
 			android.widget.Toast.makeText(this, "Headset with microphone required", android.widget.Toast.LENGTH_LONG).show()
 			return
 		}
-		// Ensure exclusive routing once
-		headphoneDetector.forceAudioRoutingToHeadset()
+		// Ensure exclusive routing once (guard Bluetooth permission on S+)
+		try {
+			val isBt = headphoneDetector.getPreferredAudioSource() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+			if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !isBt || hasPermission(android.Manifest.permission.BLUETOOTH_CONNECT)) {
+				headphoneDetector.forceAudioRoutingToHeadset()
+			} else {
+				android.util.Log.w("WakeWordService", "BLUETOOTH_CONNECT not granted - skipping forced BT routing")
+				showToast("Bluetooth permission missing - default mic routing")
+			}
+		} catch (se: SecurityException) {
+			android.util.Log.w("WakeWordService", "Audio routing denied by SecurityException")
+			showToast("Audio routing permission denied")
+		}
 
 		try {
 			// Prepare Porcupine engine
@@ -167,14 +190,28 @@ class WakeWordService : Service() {
 			val frameLength = porcupine!!.frameLength
 			val minBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
 			val bufferSize = max(minBuf, frameLength * 2 * 4)
-			audioRecord = AudioRecord(
-				MediaRecorder.AudioSource.MIC,
-				sampleRate,
-				AudioFormat.CHANNEL_IN_MONO,
-				AudioFormat.ENCODING_PCM_16BIT,
-				bufferSize
-			)
-			audioRecord?.startRecording()
+			try {
+				audioRecord = AudioRecord(
+					MediaRecorder.AudioSource.MIC,
+					sampleRate,
+					AudioFormat.CHANNEL_IN_MONO,
+					AudioFormat.ENCODING_PCM_16BIT,
+					bufferSize
+				)
+			} catch (se: SecurityException) {
+				android.util.Log.e("WakeWordService", "AudioRecord creation denied by SecurityException")
+				showToast("Mic access denied")
+				stopListening()
+				return
+			}
+			try {
+				audioRecord?.startRecording()
+			} catch (se: SecurityException) {
+				android.util.Log.e("WakeWordService", "startRecording denied by SecurityException")
+				showToast("Mic start denied")
+				stopListening()
+				return
+			}
 
 			audioLoopJob = serviceScope.launch(Dispatchers.Default) {
 				val frame = ShortArray(frameLength)
