@@ -26,7 +26,11 @@ class VoiceControlManager(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var listeningJob: Job? = null
+    private var headsetMonitorJob: Job? = null
     private var isGymModeActive = false
+
+    // Wake-word detector (Precise placeholder using Vosk grammar)
+    private val wakeWordDetector = PreciseWakeWordDetector(context, headphoneDetector)
 
     // Callback for UI updates
     var onGymModeChanged: ((Boolean) -> Unit)? = null
@@ -107,103 +111,67 @@ class VoiceControlManager(
     
     private fun startVoiceListening() {
         if (listeningJob?.isActive == true) return
+
+        // Monitor headset connectivity and auto-disable
+        headsetMonitorJob?.cancel()
+        headsetMonitorJob = scope.launch {
+            headphoneDetector.isHeadphonesConnected.collectLatest { connected ->
+                if (!connected && isGymModeActive) {
+                    android.util.Log.w("VoiceControlManager", "Headphones disconnected, stopping gym mode")
+                    isGymModeActive = false
+                    onGymModeChanged?.invoke(false)
+                    stopVoiceListening()
+                    headphoneDetector.restoreDefaultAudioRouting()
+                    android.widget.Toast.makeText(
+                        context,
+                        "Gym Mode disabled - headphones disconnected",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
         
         listeningJob = scope.launch {
-            android.util.Log.d("VoiceControlManager", "Starting voice listening...")
-            
-            // Show toast that voice listening is starting
-            android.widget.Toast.makeText(
-                context,
-                "Voice listening started - say a command!",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-            
-            // Force audio routing to headset microphone immediately when gym mode starts
-            val preferredAudioSource = headphoneDetector.getPreferredAudioSource()
-            android.util.Log.d("VoiceControlManager", "Gym Mode: Forcing audio source to: $preferredAudioSource")
-            
-            while (isActive && isGymModeActive) {
-                try {
-                    // Check if headphones are still connected
-                    if (!headphoneDetector.isHeadphonesConnected.value) {
-                        android.util.Log.w("VoiceControlManager", "Headphones disconnected, stopping gym mode")
-                        withContext(Dispatchers.Main) {
-                            isGymModeActive = false
-                            onGymModeChanged?.invoke(false)
+            android.util.Log.d("VoiceControlManager", "Starting wake-word listener...")
 
-                            // Show toast that gym mode was disabled due to headphone disconnect
-                            android.widget.Toast.makeText(
-                                context,
-                                "Gym Mode disabled - headphones disconnected",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                        break
+            // Hook wake-word callback
+            wakeWordDetector.onWakeWordDetected = {
+                scope.launch {
+                    android.util.Log.d("VoiceControlManager", "Wake word detected - opening command window")
+                    // Run a 4-second command window
+                    runCommandWindow(windowMs = 4000L)
+                    // Resume wake-word detector if still active
+                    if (isGymModeActive) {
+                        try { wakeWordDetector.start() } catch (_: Exception) { }
                     }
-
-                    // Check if headset has microphone
-                    if (!headphoneDetector.hasHeadsetMicrophone()) {
-                        android.util.Log.w("VoiceControlManager", "No headset microphone available, stopping gym mode")
-                        withContext(Dispatchers.Main) {
-                            isGymModeActive = false
-                            onGymModeChanged?.invoke(false)
-
-                            android.widget.Toast.makeText(
-                                context,
-                                "Gym Mode disabled - no headset microphone",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                        break
-                    }
-
-                    // Start listening for commands - run continuously without stopping
-                    try {
-                        android.util.Log.d("VoiceControlManager", "Starting continuous voice command listening")
-                        commandController.listen().collectLatest { recognizedText ->
-                            if (isActive && isGymModeActive) {
-                                android.util.Log.d("VoiceControlManager", "Voice command recognized: '$recognizedText'")
-                                processVoiceCommand(recognizedText)
-
-                                // Show confirmation toast
-                                withContext(Dispatchers.Main) {
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Voice: '$recognizedText'",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.w("VoiceControlManager", "Error in voice listening cycle", e)
-
-                        // Check if it's a recoverable error
-                        val isRecoverable = e.localizedMessage?.contains("No match found") == true ||
-                                           e.localizedMessage?.contains("timeout") == true ||
-                                           e.localizedMessage?.contains("network") == true
-
-                        if (isRecoverable) {
-                            android.util.Log.d("VoiceControlManager", "Recoverable error, continuing to listen")
-                            // Don't show error toast for recoverable errors, just continue listening
-                            delay(500) // Brief delay before restarting listening
-                        } else {
-                            // Show error toast only for non-recoverable errors
-                            withContext(Dispatchers.Main) {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "Voice recognition error: ${e.localizedMessage ?: "Unknown error"}",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                            delay(2000) // Longer delay for non-recoverable errors
-                        }
-                    }
-
-                } catch (e: Exception) {
-                    android.util.Log.e("VoiceControlManager", "Error in voice listening loop", e)
-                    delay(2000) // Wait longer before retrying on error
                 }
+            }
+
+            // Start continuous wake-word listening
+            wakeWordDetector.start()
+        }
+    }
+
+    private suspend fun runCommandWindow(windowMs: Long) {
+        // Vosk needs exclusive mic: ensure wake detector is stopped
+        try { wakeWordDetector.stop() } catch (_: Exception) { }
+        withContext(Dispatchers.IO) {
+            try {
+                commandController.listenForCommandWindow(windowMs).collectLatest { recognizedText ->
+                    if (isGymModeActive) {
+                        android.util.Log.d("VoiceControlManager", "Voice command recognized: '$recognizedText'")
+                        withContext(Dispatchers.Main) { processVoiceCommand(recognizedText) }
+                        withContext(Dispatchers.Main) {
+                            android.widget.Toast.makeText(
+                                context,
+                                "Voice: '$recognizedText'",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("VoiceControlManager", "Command window ended with error: ${e.localizedMessage}")
             }
         }
     }
@@ -211,6 +179,9 @@ class VoiceControlManager(
     private fun stopVoiceListening() {
         listeningJob?.cancel()
         listeningJob = null
+        headsetMonitorJob?.cancel()
+        headsetMonitorJob = null
+        try { wakeWordDetector.stop() } catch (_: Exception) { }
         android.util.Log.d("VoiceControlManager", "Voice listening stopped")
         
         // Show toast that voice listening has stopped
@@ -310,7 +281,6 @@ class VoiceControlManager(
                 
                 CommandController.Command.TOGGLE_GYM_MODE -> {
                     android.util.Log.d("VoiceControlManager", "Voice command: Toggle Gym Mode")
-                    // This could be used to toggle gym mode via voice
                 }
             }
         } ?: run {
@@ -332,6 +302,7 @@ class VoiceControlManager(
         }
         scope.cancel()
         headphoneDetector.cleanup()
+        wakeWordDetector.cleanup()
         instance = null // Clear singleton instance
     }
 
