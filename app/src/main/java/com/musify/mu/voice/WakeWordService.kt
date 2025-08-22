@@ -185,8 +185,8 @@ class WakeWordService : Service() {
 					if (n <= 0) continue
 
 					if (!isInCommandWindow) {
-						val detected = try { porcupine?.process(frame) == true } catch (e: Exception) { false }
-						if (detected) {
+						val keywordIndex = try { porcupine?.process(frame) ?: -1 } catch (e: Exception) { -1 }
+						if (keywordIndex >= 0) {
 							android.util.Log.d("WakeWordService", "Wakeword detected")
 							showToast("Wakeword detected")
 							openCommandWindow()
