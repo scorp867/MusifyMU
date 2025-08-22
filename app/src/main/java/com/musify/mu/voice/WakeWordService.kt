@@ -22,6 +22,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 
 class WakeWordService : Service() {
 
@@ -122,15 +124,15 @@ class WakeWordService : Service() {
 			// Ensure exclusive routing to headset mic during wake word listening
 			headphoneDetector.forceAudioRoutingToHeadset()
 
-			// Resolve resource name path for Porcupine
+			// Copy keyword from res/raw to a readable file and use absolute path
 			val resName = "hey_musify"
 			val resId = resources.getIdentifier(resName, "raw", packageName)
 			if (resId == 0) throw PorcupineException("Wake word resource not found: $resName")
-			val keywordPath = "res:raw/$resName"
+			val keywordFilePath = ensureKeywordFile(resId, "$resName.ppn")
 
 			porcupineManager = PorcupineManager.Builder()
 				.setAccessKey(accessKey)
-				.setKeywordPath(keywordPath)
+				.setKeywordPath(keywordFilePath)
 				.setSensitivity(0.6f)
 				.build(applicationContext, PorcupineManagerCallback { _ ->
 					// Wake word detected -> open 4s command window
@@ -186,5 +188,27 @@ class WakeWordService : Service() {
 		try { porcupineManager?.stop() } catch (_: Exception) {}
 		try { porcupineManager?.delete() } catch (_: Exception) {}
 		porcupineManager = null
+	}
+
+	private fun ensureKeywordFile(resId: Int, outName: String): String {
+		val outFile = File(filesDir, outName)
+		return try {
+			if (!outFile.exists()) {
+				resources.openRawResource(resId).use { input ->
+					FileOutputStream(outFile).use { output ->
+						val buffer = ByteArray(8 * 1024)
+						while (true) {
+							val read = input.read(buffer)
+							if (read <= 0) break
+							output.write(buffer, 0, read)
+						}
+						output.flush()
+					}
+				}
+			}
+			outFile.absolutePath
+		} catch (e: Exception) {
+			throw PorcupineException("Failed to prepare keyword file: ${e.message}")
+		}
 	}
 }
