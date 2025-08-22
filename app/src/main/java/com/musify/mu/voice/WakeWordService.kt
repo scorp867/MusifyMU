@@ -54,9 +54,6 @@ class WakeWordService : Service() {
 
 	// Injected via runtime; do not persist secrets
 	private val accessKey: String by lazy {
-		// For security, access key should not be hardcoded in source in production
-		// Here we read from app resources BuildConfig or similar; fallback to provided literal for dev
-		// Replace with a secure provider if available
 		"qcLu6oLmNq9fkqv5tbWqoIt23/qhJFFUerWZGsg0fim99/npnxhxdg=="
 	}
 
@@ -125,8 +122,11 @@ class WakeWordService : Service() {
 			// Ensure exclusive routing to headset mic during wake word listening
 			headphoneDetector.forceAudioRoutingToHeadset()
 
-			val keywordResId = resources.getIdentifier("hey_musify", "raw", packageName)
-			val keywordPath = "res:raw/$keywordResId"
+			// Resolve resource name path for Porcupine
+			val resName = "hey_musify"
+			val resId = resources.getIdentifier(resName, "raw", packageName)
+			if (resId == 0) throw PorcupineException("Wake word resource not found: $resName")
+			val keywordPath = "res:raw/$resName"
 
 			porcupineManager = PorcupineManager.Builder()
 				.setAccessKey(accessKey)
@@ -171,26 +171,10 @@ class WakeWordService : Service() {
 		try {
 			val vcm = VoiceControlManager.getInstance(this)
 			if (vcm != null) {
-				// Process using existing command interpretation and player controls
-				val cmd = CommandController(this, headphoneDetector).interpretCommand(text)
-				cmd?.let {
-					when (it) {
-						CommandController.Command.PLAY -> vcm.javaClass.getDeclaredMethod("processVoiceCommand", String::class.java)
-						CommandController.Command.PAUSE -> { /* processed below via same path */ }
-						else -> { /* no-op here */ }
-					}
-				}
-				// Directly call VoiceControlManager's process method via public pathway
-				// Expose a method to process free text via reflection guard if needed
 				try {
-					val m = VoiceControlManager::class.java.getDeclaredMethod("processVoiceCommand", String::class.java)
-					m.isAccessible = true
-					m.invoke(vcm, text)
-				} catch (_: Exception) {
-					// If not accessible, as fallback, we can broadcast or handle locally
-				}
+					vcm.processVoiceCommand(text)
+				} catch (_: Exception) { }
 			} else {
-				// Local fallback: interpret and execute minimal set via AudioManager/Media3 would require player ref
 				android.util.Log.w("WakeWordService", "VoiceControlManager not available")
 			}
 		} catch (e: Exception) {

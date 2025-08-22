@@ -264,6 +264,8 @@ class CommandController(
         // Ensure model via assets first, then download fallback
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
+                // Reduce Vosk logs
+                try { org.vosk.LibVosk.setLogLevel(0) } catch (_: Exception) {}
                 val model = VoskModelProvider.ensureModel(context)
                 voskModel = model
                 startVoskListening(model)
@@ -310,6 +312,8 @@ class CommandController(
 
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
+                // Reduce Vosk logs
+                try { org.vosk.LibVosk.setLogLevel(0) } catch (_: Exception) {}
                 val model = voskModel ?: VoskModelProvider.ensureModel(context).also { voskModel = it }
                 // Restricted grammar to known commands
                 val grammar: String = Command.values().flatMap { it.phrases }.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }

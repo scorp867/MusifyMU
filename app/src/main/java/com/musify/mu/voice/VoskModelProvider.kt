@@ -33,11 +33,11 @@ object VoskModelProvider {
             return@withContext Model(modelDir.absolutePath)
         }
 
-        // Unpack from bundled assets only
+        // Try to copy from bundled assets (supports nested model directories)
         try {
-            android.util.Log.d("VoskModelProvider", "Unpacking model from assets...")
-            val model = suspendUnpackFromAssets(context)
-            android.util.Log.d("VoskModelProvider", "Model unpacked from assets")
+            android.util.Log.d("VoskModelProvider", "Copying model from assets...")
+            val model = copyFromAssets(context, modelDir)
+            android.util.Log.d("VoskModelProvider", "Model copied from assets")
             return@withContext model
         } catch (e: Exception) {
             android.util.Log.e("VoskModelProvider", "Bundled VOSK model not available: ${e.message}")
@@ -54,6 +54,79 @@ object VoskModelProvider {
 
     private fun isValidModelDir(dir: File): Boolean {
         return dir.exists() && dir.isDirectory && File(dir, "conf").exists()
+    }
+
+    private suspend fun copyFromAssets(context: Context, outDir: File): Model {
+        val am = context.assets
+
+        // Prefer a nested directory under ASSET_DIR_NAME that contains 'conf'
+        val candidates = am.list(ASSET_DIR_NAME)?.toList() ?: emptyList()
+        var assetRoot: String? = null
+
+        // Check nested children first
+        for (child in candidates) {
+            val childEntries = am.list("$ASSET_DIR_NAME/$child")?.toList() ?: emptyList()
+            if (childEntries.contains("conf")) {
+                assetRoot = "$ASSET_DIR_NAME/$child"
+                break
+            }
+        }
+        // Fallback: ASSET_DIR_NAME itself contains 'conf'
+        if (assetRoot == null) {
+            val rootEntries = am.list(ASSET_DIR_NAME)?.toList() ?: emptyList()
+            if (rootEntries.contains("conf")) {
+                assetRoot = ASSET_DIR_NAME
+            }
+        }
+
+        if (assetRoot == null) {
+            throw IllegalStateException("No asset directory containing 'conf' found under $ASSET_DIR_NAME")
+        }
+
+        if (!outDir.exists()) outDir.mkdirs()
+        // Recursively copy the chosen asset root's contents into outDir
+        copyAssetDir(am, assetRoot, outDir)
+
+        if (!isValidModelDir(outDir)) throw IllegalStateException("Copied model invalid at ${outDir.absolutePath}")
+        return Model(outDir.absolutePath)
+    }
+
+    private fun copyAssetDir(am: android.content.res.AssetManager, assetPath: String, outDir: File) {
+        val entries = am.list(assetPath) ?: emptyArray()
+        if (entries.isEmpty()) {
+            // This is a file
+            copyAssetFile(am, assetPath, File(outDir, assetPath.substringAfterLast('/')))
+            return
+        }
+        // Directory
+        for (name in entries) {
+            val childAssetPath = if (assetPath.isEmpty()) name else "$assetPath/$name"
+            val childOut = File(outDir, name)
+            val subEntries = am.list(childAssetPath) ?: emptyArray()
+            if (subEntries.isEmpty()) {
+                // file
+                copyAssetFile(am, childAssetPath, childOut)
+            } else {
+                // dir
+                if (!childOut.exists()) childOut.mkdirs()
+                copyAssetDir(am, childAssetPath, childOut)
+            }
+        }
+    }
+
+    private fun copyAssetFile(am: android.content.res.AssetManager, assetPath: String, outFile: File) {
+        am.open(assetPath).use { input ->
+            FileOutputStream(outFile).use { fos ->
+                val buffer = ByteArray(8 * 1024)
+                var read: Int
+                while (true) {
+                    read = input.read(buffer)
+                    if (read <= 0) break
+                    fos.write(buffer, 0, read)
+                }
+                fos.flush()
+            }
+        }
     }
 
     private suspend fun suspendUnpackFromAssets(context: Context): Model = suspendCancellableCoroutine { cont ->
