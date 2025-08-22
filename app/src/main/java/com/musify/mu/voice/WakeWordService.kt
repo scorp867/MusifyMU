@@ -215,9 +215,9 @@ class WakeWordService : Service() {
 			try {
 				val model = voskModel ?: VoskModelProvider.ensureModel(this@WakeWordService).also { voskModel = it }
 				val grammar = buildGrammar()
-				recognizer = Recognizer(model, 16000.0f, grammar)
-				voskRecognizer = recognizer
-				voskRecognizer
+				val rec = Recognizer(model, 16000.0f, grammar)
+				voskRecognizer = rec
+				rec
 			} catch (e: Exception) {
 				android.util.Log.w("WakeWordService", "Failed to create Vosk recognizer: ${e.message}")
 				null
