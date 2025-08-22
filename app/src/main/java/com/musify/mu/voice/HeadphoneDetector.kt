@@ -16,11 +16,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class HeadphoneDetector(private val context: Context) {
-    
+
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val _isHeadphonesConnected = MutableStateFlow(false)
     val isHeadphonesConnected: StateFlow<Boolean> = _isHeadphonesConnected.asStateFlow()
-    
+
     private var lastToastTime = 0L
     private val toastDebounceMs = 2000L // Don't show toasts more often than every 2 seconds
 
@@ -28,13 +28,12 @@ class HeadphoneDetector(private val context: Context) {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 AudioManager.ACTION_HEADSET_PLUG -> {
-                    val state = intent.getIntExtra("state", -1)
-                    val isConnected = state == 1
-                    val hasHeadphones = isConnected || hasBluetoothHeadphones()
+                    // Use unified detection instead of relying only on "state"
+                    val hasHeadphones = hasAnyHeadphonesConnected()
                     val previousState = _isHeadphonesConnected.value
                     _isHeadphonesConnected.value = hasHeadphones
 
-                    android.util.Log.d("HeadphoneDetector", "Wired headset ${if (isConnected) "connected" else "disconnected"}, total: $hasHeadphones")
+                    android.util.Log.d("HeadphoneDetector", "HEADSET_PLUG event, total connected: $hasHeadphones")
 
                     // Only show toast if state actually changed and not too frequent
                     val currentTime = System.currentTimeMillis()
@@ -42,20 +41,18 @@ class HeadphoneDetector(private val context: Context) {
                         lastToastTime = currentTime
                         android.widget.Toast.makeText(
                             context,
-                            "Wired headset ${if (isConnected) "connected" else "disconnected"}",
+                            "Headphones ${if (hasHeadphones) "connected" else "disconnected"}",
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     }
                 }
                 AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED -> {
-                    // Bluetooth SCO (Synchronous Connection-Oriented) audio state changed
-                    val state = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
-                    val isConnected = state == AudioManager.SCO_AUDIO_STATE_CONNECTED
-                    val hasHeadphones = isConnected || hasWiredHeadphones()
+                    // Use unified detection to avoid false disconnects during SCO transitions
+                    val hasHeadphones = hasAnyHeadphonesConnected()
                     val previousState = _isHeadphonesConnected.value
                     _isHeadphonesConnected.value = hasHeadphones
 
-                    android.util.Log.d("HeadphoneDetector", "Bluetooth SCO ${if (isConnected) "connected" else "disconnected"}, total: $hasHeadphones")
+                    android.util.Log.d("HeadphoneDetector", "SCO state updated, total connected: $hasHeadphones")
 
                     // Only show toast if state actually changed and not too frequent
                     val currentTime = System.currentTimeMillis()
@@ -63,7 +60,7 @@ class HeadphoneDetector(private val context: Context) {
                         lastToastTime = currentTime
                         android.widget.Toast.makeText(
                             context,
-                            "Bluetooth headset ${if (isConnected) "connected" else "disconnected"}",
+                            "Headphones ${if (hasHeadphones) "connected" else "disconnected"}",
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     }
@@ -73,27 +70,32 @@ class HeadphoneDetector(private val context: Context) {
             }
         }
     }
-    
+
     init {
         // Initial check
         _isHeadphonesConnected.value = hasWiredHeadphones() || hasBluetoothHeadphones()
-        
+
         // Register receiver for headphone plug/unplug events
         val filter = IntentFilter().apply {
             addAction(AudioManager.ACTION_HEADSET_PLUG)
             addAction(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
         }
         context.registerReceiver(headphoneReceiver, filter)
-        
+
         // Start periodic connectivity check
         startPeriodicCheck()
     }
-    
+
     private fun startPeriodicCheck() {
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
             while (true) {
                 try {
-                    val currentState = hasWiredHeadphones() || hasBluetoothHeadphones()
+                    var currentState = hasAnyHeadphonesConnected()
+                    // Debounce: confirm once more after a short delay before declaring disconnected
+                    if (!currentState) {
+                        kotlinx.coroutines.delay(300)
+                        currentState = hasAnyHeadphonesConnected()
+                    }
                     val previousState = _isHeadphonesConnected.value
 
                     if (previousState != currentState) {
@@ -119,54 +121,58 @@ class HeadphoneDetector(private val context: Context) {
             }
         }
     }
-    
+
     private fun hasWiredHeadphones(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
             devices.any { device ->
                 device.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-                device.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-                device.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                        device.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
+                        device.type == AudioDeviceInfo.TYPE_USB_HEADSET
             }
         } else {
             // Fallback for older versions
             audioManager.isWiredHeadsetOn
         }
     }
-    
+
     fun hasBluetoothHeadphones(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
             devices.any { device ->
                 device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
-                device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                        device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
             }
         } else {
             // Fallback for older versions
             audioManager.isBluetoothScoOn
         }
     }
-    
+
     fun hasHeadsetMicrophone(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val devices = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
             devices.any { device ->
                 device.type == AudioDeviceInfo.TYPE_WIRED_HEADSET ||
-                device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
-                device.type == AudioDeviceInfo.TYPE_USB_HEADSET
+                        device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                        device.type == AudioDeviceInfo.TYPE_USB_HEADSET
             }
         } else {
             // Fallback for older versions
             audioManager.isWiredHeadsetOn || audioManager.isBluetoothScoOn
         }
     }
-    
+
     fun getPreferredAudioSource(): Int {
         return when {
             hasBluetoothHeadphones() -> AudioDeviceInfo.TYPE_BLUETOOTH_SCO
             hasWiredHeadphones() -> AudioDeviceInfo.TYPE_WIRED_HEADSET
             else -> AudioDeviceInfo.TYPE_BUILTIN_MIC
         }
+    }
+
+    private fun hasAnyHeadphonesConnected(): Boolean {
+        return hasWiredHeadphones() || hasBluetoothHeadphones()
     }
 
     /**
@@ -192,7 +198,7 @@ class HeadphoneDetector(private val context: Context) {
             android.util.Log.w("HeadphoneDetector", "Failed to disable built-in audio inputs", e)
         }
     }
-    
+
     /**
      * Force EXCLUSIVE audio routing to the preferred headset microphone
      * This ensures that voice commands use ONLY the headset mic, not the device mic
@@ -241,7 +247,7 @@ class HeadphoneDetector(private val context: Context) {
                 // For wired headsets, the system should automatically use the headset mic
                 // when it's connected, but we can log this for debugging
                 android.util.Log.d("HeadphoneDetector", "Wired headset detected - should use headset microphone")
-                
+
                 // Show toast for audio routing change
                 android.widget.Toast.makeText(
                     context,
@@ -252,7 +258,7 @@ class HeadphoneDetector(private val context: Context) {
             AudioDeviceInfo.TYPE_USB_HEADSET -> {
                 // For USB headsets, the system should automatically use the headset mic
                 android.util.Log.d("HeadphoneDetector", "USB headset detected - should use headset microphone")
-                
+
                 // Show toast for audio routing change
                 android.widget.Toast.makeText(
                     context,
@@ -262,7 +268,7 @@ class HeadphoneDetector(private val context: Context) {
             }
             else -> {
                 android.util.Log.w("HeadphoneDetector", "No headset microphone available - will use device microphone")
-                
+
                 // Show warning toast
                 android.widget.Toast.makeText(
                     context,
@@ -272,7 +278,7 @@ class HeadphoneDetector(private val context: Context) {
             }
         }
     }
-    
+
     /**
      * Restore default audio routing when Gym Mode is deactivated
      */
@@ -301,7 +307,7 @@ class HeadphoneDetector(private val context: Context) {
             }
         }
     }
-    
+
     fun cleanup() {
         try {
             context.unregisterReceiver(headphoneReceiver)

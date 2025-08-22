@@ -74,7 +74,7 @@ fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
-    
+
     // Get or create VoiceControlManager singleton
     val voiceControlManager = remember {
         controller?.let { mediaController ->
@@ -412,11 +412,12 @@ fun NowPlayingScreen(navController: NavController) {
                         isGymModeEnabled = isGymModeEnabled,
                         canEnableGymMode = canEnableGymMode,
                         onGymModeToggle = {
+                            isGymModeEnabled = !isGymModeEnabled
                             voiceControlManager?.toggleGymMode()
                         }
                     )
                 }
-                
+
                 // Gym Mode Indicator
                 GymModeIndicator(
                     isActive = isGymModeEnabled,
@@ -849,17 +850,17 @@ fun NowPlayingScreen(navController: NavController) {
                 }
             }
 
-                // Add space at bottom to ensure scrolling works properly
-    Spacer(modifier = Modifier.height(100.dp))
-}
-        
+            // Add space at bottom to ensure scrolling works properly
+            Spacer(modifier = Modifier.height(100.dp))
+        }
+
         // Cleanup voice control manager when screen is disposed
         DisposableEffect(Unit) {
             onDispose {
                 voiceControlManager?.cleanup()
             }
         }
-        
+
         if (showQueue) {
             val queueOps = com.musify.mu.playback.rememberQueueOperations()
             ModalBottomSheet(
