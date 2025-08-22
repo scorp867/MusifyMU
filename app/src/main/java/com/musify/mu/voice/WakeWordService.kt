@@ -37,6 +37,10 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import android.media.AudioDeviceInfo
+import android.content.ComponentName
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import kotlinx.coroutines.guava.await
 
 class WakeWordService : Service() {
 	companion object {
@@ -77,6 +81,9 @@ class WakeWordService : Service() {
 
 	@Volatile private var confidenceThreshold: Float = 0.9f
 
+	// Direct control fallback when VCM is unavailable
+	@Volatile private var mediaController: MediaController? = null
+
 	// Injected via runtime; do not persist secrets
 	private val accessKey: String by lazy {
 		"qcLu6oLmNq9fkqv5tbWqoIt23/qhJFFUerWZGsg0fim99/npnxhxdg=="
@@ -95,6 +102,11 @@ class WakeWordService : Service() {
 			try { voskModel = VoskModelProvider.ensureModel(this@WakeWordService) } catch (e: Exception) {
 				android.util.Log.w("WakeWordService", "Failed to ensure VOSK model early: ${e.message}")
 			}
+		}
+
+		// Warm up media controller fallback in background
+		serviceScope.launch(Dispatchers.Main) {
+			ensureController()
 		}
 	}
 
@@ -276,6 +288,20 @@ class WakeWordService : Service() {
 		}
 	}
 
+	private suspend fun ensureController(): MediaController? {
+		if (mediaController != null) return mediaController
+		return try {
+			val token = SessionToken(this, ComponentName(this, com.musify.mu.playback.PlayerService::class.java))
+			val future = MediaController.Builder(this, token).buildAsync()
+			val controller = future.await()
+			mediaController = controller
+			controller
+		} catch (e: Exception) {
+			android.util.Log.w("WakeWordService", "Failed to create MediaController: ${e.message}")
+			null
+		}
+	}
+
 	private fun openCommandWindow() {
 		isInCommandWindow = true
 		commandWindowEndAt = SystemClock.elapsedRealtime() + COMMAND_WINDOW_MS
@@ -350,8 +376,43 @@ class WakeWordService : Service() {
 				showToast("Executing: $text")
 				android.util.Log.d("WakeWordService", "Executing: $text")
 			} else {
-				android.util.Log.w("WakeWordService", "VoiceControlManager not available")
-				showToast("VCM unavailable")
+				// Direct fallback
+				serviceScope.launch(Dispatchers.Main) {
+					val controller = ensureController()
+					if (controller == null) {
+						android.util.Log.w("WakeWordService", "Controller unavailable for direct execution")
+						showToast("Controller unavailable")
+						return@launch
+					}
+					val cmd = commandController.interpretCommand(text)
+					if (cmd == null) {
+						showToast("Unrecognized: $text")
+						return@launch
+					}
+					when (cmd) {
+						CommandController.Command.PLAY -> if (!controller.isPlaying) controller.play()
+						CommandController.Command.PAUSE -> if (controller.isPlaying) controller.pause()
+						CommandController.Command.NEXT -> if (controller.hasNextMediaItem()) controller.seekToNext()
+						CommandController.Command.PREV -> if (controller.hasPreviousMediaItem()) controller.seekToPrevious()
+						CommandController.Command.SHUFFLE_ON -> controller.shuffleModeEnabled = true
+						CommandController.Command.SHUFFLE_OFF -> controller.shuffleModeEnabled = false
+						CommandController.Command.REPEAT_ONE -> controller.repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+						CommandController.Command.REPEAT_ALL -> controller.repeatMode = androidx.media3.common.Player.REPEAT_MODE_ALL
+						CommandController.Command.REPEAT_OFF -> controller.repeatMode = androidx.media3.common.Player.REPEAT_MODE_OFF
+						CommandController.Command.VOLUME_UP -> {
+							val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+							val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+							audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (current + 1).coerceAtMost(max), 0)
+						}
+						CommandController.Command.VOLUME_DOWN -> {
+							val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+							audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (current - 1).coerceAtLeast(0), 0)
+						}
+						CommandController.Command.MUTE -> audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+						CommandController.Command.TOGGLE_GYM_MODE -> { /* no-op here */ }
+					}
+					showToast("Executed: ${cmd.name}")
+				}
 			}
 		} catch (e: Exception) {
 			android.util.Log.e("WakeWordService", "Failed to process command: ${e.message}")
