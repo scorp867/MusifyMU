@@ -296,11 +296,16 @@ class WakeWordService : Service() {
 	private fun finalizeCommandWindow() {
 		try {
 			val json = voskRecognizer?.finalResult
-			val text = parseText(json)
-			if (!text.isNullOrBlank()) {
-				showToast("Heard: $text")
-				android.util.Log.d("WakeWordService", "Final command: $text")
-				processCommand(text)
+			val pair = parseVoskResult(json)
+			if (pair != null) {
+				val (text, conf) = pair
+				android.util.Log.d("WakeWordService", "Final Vosk result: conf=$conf text=$text")
+				if (conf >= confidenceThreshold) {
+					showToast("Heard: $text")
+					processCommand(text)
+				} else {
+					showToast("Ignored (low conf ${"%.2f".format(conf)} < ${"%.2f".format(confidenceThreshold)})")
+				}
 			} else {
 				android.util.Log.d("WakeWordService", "No final command recognized")
 			}
@@ -318,15 +323,18 @@ class WakeWordService : Service() {
 			val accepted = rec.acceptWaveForm(bytes, bytes.size)
 			if (accepted) {
 				val json = rec.result
-				val text = parseText(json)
-				if (!text.isNullOrBlank()) {
-					showToast("Heard: $text")
-					android.util.Log.d("WakeWordService", "Command recognized: $text")
-					processCommand(text)
-					// Close early and return to wakeword
-					try { rec.reset() } catch (_: Exception) {}
-					isInCommandWindow = false
-					showToast("Wakeword listening…")
+				val pair = parseVoskResult(json)
+				if (pair != null) {
+					val (text, conf) = pair
+					android.util.Log.d("WakeWordService", "Interim Vosk result: conf=$conf text=$text")
+					if (conf >= confidenceThreshold) {
+						showToast("Heard: $text")
+						processCommand(text)
+						// Close early and return to wakeword
+						try { rec.reset() } catch (_: Exception) {}
+						isInCommandWindow = false
+						showToast("Wakeword listening…")
+					}
 				}
 			}
 		} catch (e: Exception) {
@@ -356,6 +364,41 @@ class WakeWordService : Service() {
 		return try {
 			val obj = org.json.JSONObject(json)
 			obj.optString("text").trim().lowercase()
+		} catch (_: Exception) { null }
+	}
+
+	private fun parseVoskResult(json: String?): Pair<String, Float>? {
+		if (json.isNullOrBlank()) return null
+		return try {
+			val obj = org.json.JSONObject(json)
+			val text = obj.optString("text").trim()
+			if (text.isEmpty()) return null
+			var confidence = Float.NaN
+			val alts = obj.optJSONArray("alternatives")
+			if (alts != null && alts.length() > 0) {
+				val first = alts.optJSONObject(0)
+				if (first != null) {
+					val c = first.optDouble("confidence", Double.NaN)
+					if (!c.isNaN()) confidence = c.toFloat()
+				}
+			}
+			if (confidence.isNaN()) {
+				val results = obj.optJSONArray("result")
+				if (results != null && results.length() > 0) {
+					var sum = 0.0
+					var count = 0
+					for (i in 0 until results.length()) {
+						val item = results.optJSONObject(i)
+						if (item != null) {
+							val c = item.optDouble("conf", Double.NaN)
+							if (!c.isNaN()) { sum += c; count++ }
+						}
+					}
+					if (count > 0) confidence = (sum / count).toFloat()
+				}
+			}
+			val finalConfidence = if (confidence.isNaN()) 1.0f else confidence
+			Pair(text.lowercase(), finalConfidence)
 		} catch (_: Exception) { null }
 	}
 
