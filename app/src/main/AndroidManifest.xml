@@ -89,6 +89,12 @@
             </intent-filter>
         </service>
 
+        <!-- Wake Word Foreground Service -->
+        <service
+            android:name=".voice.WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <!-- Media session receiver for handling media button events -->
         <receiver
             android:name="androidx.media.session.MediaButtonReceiver"
