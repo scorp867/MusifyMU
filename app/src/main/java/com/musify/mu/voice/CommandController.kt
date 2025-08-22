@@ -34,7 +34,7 @@ class CommandController(
 
     // Minimum required confidence for a command to be accepted
     @Volatile
-    var confidenceThreshold: Float = 0.6f
+    var confidenceThreshold: Float = 0.9f
 
     fun listen(): Flow<String> = callbackFlow {
         // Check permission first
