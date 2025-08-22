@@ -854,12 +854,6 @@ fun NowPlayingScreen(navController: NavController) {
             Spacer(modifier = Modifier.height(100.dp))
         }
 
-        // Cleanup voice control manager when screen is disposed
-        DisposableEffect(Unit) {
-            onDispose {
-                voiceControlManager?.cleanup()
-            }
-        }
 
         if (showQueue) {
             val queueOps = com.musify.mu.playback.rememberQueueOperations()

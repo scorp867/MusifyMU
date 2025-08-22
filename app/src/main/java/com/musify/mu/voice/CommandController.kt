@@ -32,6 +32,10 @@ class CommandController(
     private var voskRecognizer: Recognizer? = null
     private var voskSpeechService: SpeechService? = null
 
+    // Minimum required confidence for a command to be accepted
+    @Volatile
+    var confidenceThreshold: Float = 0.6f
+
     fun listen(): Flow<String> = callbackFlow {
         // Check permission first
         if (android.content.pm.PackageManager.PERMISSION_GRANTED !=
@@ -213,27 +217,9 @@ class CommandController(
             }
         }
 
-        fun parseVoskText(json: String?): String? {
-            return try {
-                if (json.isNullOrBlank()) {
-                    null
-                } else {
-                    val obj = org.json.JSONObject(json)
-                    val finalText = obj.optString("text").trim()
-                    if (finalText.isNotEmpty()) {
-                        finalText
-                    } else {
-                        val partial = obj.optString("partial").trim()
-                        if (partial.isNotEmpty()) partial else null
-                    }
-                }
-            } catch (_: Exception) {
-                null
-            }
-        }
-
         fun startVoskListening(withModel: Model) {
-            try {// Define grammar JSON (restricts recognition)
+            try {
+                // Define grammar JSON (restricts recognition)
                 val grammar: String = Command.values()
                     .flatMap { it.phrases } // collect all phrases
                     .joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
@@ -244,13 +230,25 @@ class CommandController(
                 voskSpeechService?.startListening(object : org.vosk.android.RecognitionListener {
                     override fun onPartialResult(hypothesis: String?) { }
                     override fun onResult(hypothesis: String?) {
-                        parseVoskText(hypothesis)?.let { text ->
-                            trySend(text.lowercase(Locale.getDefault()))
+                        parseVoskResult(hypothesis)?.let { pair ->
+                            val text = pair.first
+                            val conf = pair.second
+                            if (conf >= confidenceThreshold) {
+                                trySend(text)
+                            } else {
+                                android.util.Log.d("CommandController", "Discarded low-confidence result ($conf): $text")
+                            }
                         }
                     }
                     override fun onFinalResult(hypothesis: String?) {
-                        parseVoskText(hypothesis)?.let { text ->
-                            trySend(text.lowercase(Locale.getDefault()))
+                        parseVoskResult(hypothesis)?.let { pair ->
+                            val text = pair.first
+                            val conf = pair.second
+                            if (conf >= confidenceThreshold) {
+                                trySend(text)
+                            } else {
+                                android.util.Log.d("CommandController", "Discarded low-confidence final ($conf): $text")
+                            }
                         }
                     }
                     override fun onError(e: Exception?) { }
@@ -301,6 +299,105 @@ class CommandController(
         }
     }
 
+    fun listenForCommandWindow(timeoutMs: Long): Flow<String> = callbackFlow {
+        if (android.content.pm.PackageManager.PERMISSION_GRANTED !=
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context, android.Manifest.permission.RECORD_AUDIO)) {
+            android.util.Log.e("CommandController", "RECORD_AUDIO permission not granted")
+            close()
+            return@callbackFlow
+        }
+
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                val model = voskModel ?: VoskModelProvider.ensureModel(context).also { voskModel = it }
+                // Restricted grammar to known commands
+                val grammar: String = Command.values().flatMap { it.phrases }.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
+                voskRecognizer = Recognizer(model, 16000.0f, grammar)
+                voskSpeechService = SpeechService(voskRecognizer, 16000.0f)
+
+                // Schedule timeout to stop listening window
+                val stopper = kotlinx.coroutines.GlobalScope.launch {
+                    kotlinx.coroutines.delay(timeoutMs)
+                    try { voskSpeechService?.stop() } catch (_: Exception) { }
+                }
+
+                voskSpeechService?.startListening(object : org.vosk.android.RecognitionListener {
+                    override fun onPartialResult(hypothesis: String?) { }
+                    override fun onResult(hypothesis: String?) {
+                        parseVoskResult(hypothesis)?.let { pair ->
+                            val text = pair.first
+                            val conf = pair.second
+                            if (conf >= confidenceThreshold) trySend(text)
+                        }
+                    }
+                    override fun onFinalResult(hypothesis: String?) {
+                        parseVoskResult(hypothesis)?.let { pair ->
+                            val text = pair.first
+                            val conf = pair.second
+                            if (conf >= confidenceThreshold) trySend(text)
+                        }
+                        try { voskSpeechService?.stop() } catch (_: Exception) { }
+                    }
+                    override fun onError(e: Exception?) { try { voskSpeechService?.stop() } catch (_: Exception) { } }
+                    override fun onTimeout() { try { voskSpeechService?.stop() } catch (_: Exception) { } }
+                })
+            } catch (e: Exception) {
+                android.util.Log.w("CommandController", "Failed to start VOSK window: ${e.message}")
+                close(e)
+                return@launch
+            }
+        }
+
+        awaitClose {
+            try { voskSpeechService?.stop(); voskRecognizer?.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun parseVoskResult(json: String?): Pair<String, Float>? {
+        if (json.isNullOrBlank()) return null
+        return try {
+            val obj = JSONObject(json)
+            val text = obj.optString("text").trim()
+            if (text.isEmpty()) return null
+
+            var confidence = Float.NaN
+            // Prefer alternatives.confidence if present
+            val alts = obj.optJSONArray("alternatives")
+            if (alts != null && alts.length() > 0) {
+                val first = alts.optJSONObject(0)
+                if (first != null) {
+                    val c = first.optDouble("confidence", Double.NaN)
+                    if (!c.isNaN()) confidence = c.toFloat()
+                }
+            }
+            // Fallback to average token conf
+            if (confidence.isNaN()) {
+                val results = obj.optJSONArray("result")
+                if (results != null && results.length() > 0) {
+                    var sum = 0.0
+                    var count = 0
+                    for (i in 0 until results.length()) {
+                        val item = results.optJSONObject(i)
+                        if (item != null) {
+                            val c = item.optDouble("conf", Double.NaN)
+                            if (!c.isNaN()) {
+                                sum += c
+                                count++
+                            }
+                        }
+                    }
+                    if (count > 0) confidence = (sum / count).toFloat()
+                }
+            }
+            // If still unknown, assume high confidence due to grammar constraints
+            val finalConfidence = if (confidence.isNaN()) 1.0f else confidence
+            Pair(text.lowercase(Locale.getDefault()), finalConfidence)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun interpretCommand(text: String): Command? {
         val cleanText = text.trim().lowercase(Locale.getDefault())
         return when {
@@ -336,5 +433,4 @@ class CommandController(
         MUTE(listOf("mute")),
         TOGGLE_GYM_MODE(listOf("gym mode"))
     }
-
 }

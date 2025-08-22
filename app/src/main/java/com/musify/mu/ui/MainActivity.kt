@@ -206,6 +206,12 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error releasing MediaController in onDestroy", e)
         }
+        // Cleanup voice controls on app destroy
+        try {
+            com.musify.mu.voice.VoiceControlManager.getInstance(this)?.cleanupOnAppDestroy()
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error cleaning up VoiceControlManager", e)
+        }
     }
 }
 
