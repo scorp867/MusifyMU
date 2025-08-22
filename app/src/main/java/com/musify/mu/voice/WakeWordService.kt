@@ -41,6 +41,7 @@ import android.content.ComponentName
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.flow.collect
 
 class WakeWordService : Service() {
 	companion object {
@@ -78,6 +79,7 @@ class WakeWordService : Service() {
 	private var voskRecognizer: Recognizer? = null
 	private var isInCommandWindow = false
 	private var commandWindowEndAt = 0L
+	private var headphoneMonitorJob: Job? = null
 
 	@Volatile private var confidenceThreshold: Float = 0.9f
 
@@ -225,6 +227,20 @@ class WakeWordService : Service() {
 				return
 			}
 
+			// Monitor headphone connectivity and stop if disconnected
+			headphoneMonitorJob?.cancel()
+			headphoneMonitorJob = serviceScope.launch(Dispatchers.Main) {
+				headphoneDetector.isHeadphonesConnected.collect { connected ->
+					if (!connected) {
+						android.util.Log.w("WakeWordService", "Headphones disconnected - stopping wakeword listening")
+						showToast("Headphones disconnected - stopping")
+						try { headphoneDetector.restoreDefaultAudioRouting() } catch (_: Exception) {}
+						stopListening()
+						stopSelf()
+					}
+				}
+			}
+
 			audioLoopJob = serviceScope.launch(Dispatchers.Default) {
 				val frame = ShortArray(frameLength)
 				showToast("Wakeword listening started")
@@ -265,6 +281,8 @@ class WakeWordService : Service() {
 	private fun stopListening() {
 		try { audioLoopJob?.cancel() } catch (_: Exception) {}
 		audioLoopJob = null
+		try { headphoneMonitorJob?.cancel() } catch (_: Exception) {}
+		headphoneMonitorJob = null
 		try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
 		audioRecord = null
 		try { porcupine?.delete() } catch (_: Exception) {}
@@ -515,7 +533,7 @@ class WakeWordService : Service() {
 
 	private fun showToast(message: String) {
 		Handler(Looper.getMainLooper()).post {
-			Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+			Toast.makeText(this, Toast.LENGTH_SHORT).show()
 		}
 	}
 }
