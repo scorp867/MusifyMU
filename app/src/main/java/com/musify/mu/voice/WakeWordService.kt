@@ -374,10 +374,8 @@ class WakeWordService : Service() {
 					if (conf >= confidenceThreshold) {
 						showToast("Heard: $text")
 						processCommand(text)
-						// Close early and return to wakeword
+						// Prepare for next utterance but keep command window active until timeout
 						try { rec.reset() } catch (_: Exception) {}
-						isInCommandWindow = false
-						showToast("Wakeword listening…")
 					}
 				}
 			}
