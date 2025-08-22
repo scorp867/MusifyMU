@@ -10,7 +10,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -26,11 +25,7 @@ class VoiceControlManager(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var listeningJob: Job? = null
-    private var headsetMonitorJob: Job? = null
     private var isGymModeActive = false
-
-    // Wake-word detector (Precise placeholder using Vosk grammar)
-    private val wakeWordDetector = PreciseWakeWordDetector(context, headphoneDetector)
 
     // Callback for UI updates
     var onGymModeChanged: ((Boolean) -> Unit)? = null
@@ -111,67 +106,57 @@ class VoiceControlManager(
     
     private fun startVoiceListening() {
         if (listeningJob?.isActive == true) return
-
-        // Monitor headset connectivity and auto-disable
-        headsetMonitorJob?.cancel()
-        headsetMonitorJob = scope.launch {
-            headphoneDetector.isHeadphonesConnected.collectLatest { connected ->
-                if (!connected && isGymModeActive) {
-                    android.util.Log.w("VoiceControlManager", "Headphones disconnected, stopping gym mode")
-                    isGymModeActive = false
-                    onGymModeChanged?.invoke(false)
-                    stopVoiceListening()
-                    headphoneDetector.restoreDefaultAudioRouting()
-                    android.widget.Toast.makeText(
-                        context,
-                        "Gym Mode disabled - headphones disconnected",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
         
         listeningJob = scope.launch {
-            android.util.Log.d("VoiceControlManager", "Starting wake-word listener...")
-
-            // Hook wake-word callback
-            wakeWordDetector.onWakeWordDetected = {
-                scope.launch {
-                    android.util.Log.d("VoiceControlManager", "Wake word detected - opening command window")
-                    // Run a 4-second command window
-                    runCommandWindow(windowMs = 4000L)
-                    // Resume wake-word detector if still active
-                    if (isGymModeActive) {
-                        try { wakeWordDetector.start() } catch (_: Exception) { }
+            android.util.Log.d("VoiceControlManager", "Starting continuous voice command listening")
+            
+            while (isActive && isGymModeActive) {
+                try {
+                    // Check if headphones are still connected
+                    if (!headphoneDetector.isHeadphonesConnected.value) {
+                        android.util.Log.w("VoiceControlManager", "Headphones disconnected, stopping gym mode")
+                        isGymModeActive = false
+                        onGymModeChanged?.invoke(false)
+                        headphoneDetector.restoreDefaultAudioRouting()
+                        android.widget.Toast.makeText(
+                            context,
+                            "Gym Mode disabled - headphones disconnected",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        break
                     }
-                }
-            }
 
-            // Start continuous wake-word listening
-            wakeWordDetector.start()
-        }
-    }
+                    // Check if headset has microphone
+                    if (!headphoneDetector.hasHeadsetMicrophone()) {
+                        android.util.Log.w("VoiceControlManager", "No headset microphone available, stopping gym mode")
+                        isGymModeActive = false
+                        onGymModeChanged?.invoke(false)
+                        android.widget.Toast.makeText(
+                            context,
+                            "Gym Mode disabled - no headset microphone",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        break
+                    }
 
-    private suspend fun runCommandWindow(windowMs: Long) {
-        // Vosk needs exclusive mic: ensure wake detector is stopped
-        try { wakeWordDetector.stop() } catch (_: Exception) { }
-        withContext(Dispatchers.IO) {
-            try {
-                commandController.listenForCommandWindow(windowMs).collectLatest { recognizedText ->
-                    if (isGymModeActive) {
-                        android.util.Log.d("VoiceControlManager", "Voice command recognized: '$recognizedText'")
-                        withContext(Dispatchers.Main) { processVoiceCommand(recognizedText) }
-                        withContext(Dispatchers.Main) {
-                            android.widget.Toast.makeText(
-                                context,
-                                "Voice: '$recognizedText'",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
+                    // Collect Vosk commands continuously
+                    commandController.listen().collectLatest { recognizedText ->
+                        if (isActive && isGymModeActive) {
+                            android.util.Log.d("VoiceControlManager", "Voice command recognized: '$recognizedText'")
+                            processVoiceCommand(recognizedText)
+                            withContext(Dispatchers.Main) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Voice: '$recognizedText'",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    android.util.Log.w("VoiceControlManager", "Error in voice listening cycle", e)
+                    delay(500)
                 }
-            } catch (e: Exception) {
-                android.util.Log.w("VoiceControlManager", "Command window ended with error: ${e.localizedMessage}")
             }
         }
     }
@@ -179,9 +164,6 @@ class VoiceControlManager(
     private fun stopVoiceListening() {
         listeningJob?.cancel()
         listeningJob = null
-        headsetMonitorJob?.cancel()
-        headsetMonitorJob = null
-        try { wakeWordDetector.stop() } catch (_: Exception) { }
         android.util.Log.d("VoiceControlManager", "Voice listening stopped")
         
         // Show toast that voice listening has stopped
@@ -293,6 +275,8 @@ class VoiceControlManager(
         }
     }
     
+    private suspend fun runCommandWindow(windowMs: Long) { /* no-op: wakeword flow removed */ }
+
     fun cleanup() {
         android.util.Log.d("VoiceControlManager", "Cleaning up VoiceControlManager")
         stopVoiceListening()
@@ -302,7 +286,6 @@ class VoiceControlManager(
         }
         scope.cancel()
         headphoneDetector.cleanup()
-        wakeWordDetector.cleanup()
         instance = null // Clear singleton instance
     }
 

@@ -218,11 +218,11 @@ class CommandController(
         }
 
         fun parseVoskResult(json: String?): Pair<String, Float>? {
+            if (json.isNullOrBlank()) return null
             return try {
-                if (json.isNullOrBlank()) return@try null
                 val obj = JSONObject(json)
                 val text = obj.optString("text").trim()
-                if (text.isEmpty()) return@try null
+                if (text.isEmpty()) return null
 
                 var confidence = Float.NaN
                 // Prefer alternatives.confidence if present
