@@ -86,9 +86,11 @@ class VoiceControlManager(
         if (newState) {
             // Force audio routing to headset microphone immediately
             headphoneDetector.forceAudioRoutingToHeadset()
-            startVoiceListening()
+            // Start foreground wake word service
+            WakeWordService.start(context)
         } else {
-            stopVoiceListening()
+            // Stop wake word service
+            WakeWordService.stop(context)
             // Restore default audio routing when gym mode is disabled
             headphoneDetector.restoreDefaultAudioRouting()
         }
@@ -104,77 +106,12 @@ class VoiceControlManager(
         ).show()
     }
     
-    private fun startVoiceListening() {
-        if (listeningJob?.isActive == true) return
-        
-        listeningJob = scope.launch {
-            android.util.Log.d("VoiceControlManager", "Starting continuous voice command listening")
-            
-            while (isActive && isGymModeActive) {
-                try {
-                    // Check if headphones are still connected
-                    if (!headphoneDetector.isHeadphonesConnected.value) {
-                        android.util.Log.w("VoiceControlManager", "Headphones disconnected, stopping gym mode")
-                        isGymModeActive = false
-                        onGymModeChanged?.invoke(false)
-                        headphoneDetector.restoreDefaultAudioRouting()
-                        android.widget.Toast.makeText(
-                            context,
-                            "Gym Mode disabled - headphones disconnected",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
-                        break
-                    }
-
-                    // Check if headset has microphone
-                    if (!headphoneDetector.hasHeadsetMicrophone()) {
-                        android.util.Log.w("VoiceControlManager", "No headset microphone available, stopping gym mode")
-                        isGymModeActive = false
-                        onGymModeChanged?.invoke(false)
-                        android.widget.Toast.makeText(
-                            context,
-                            "Gym Mode disabled - no headset microphone",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
-                        break
-                    }
-
-                    // Collect Vosk commands continuously
-                    commandController.listen().collectLatest { recognizedText ->
-                        if (isActive && isGymModeActive) {
-                            android.util.Log.d("VoiceControlManager", "Voice command recognized: '$recognizedText'")
-                            processVoiceCommand(recognizedText)
-                            withContext(Dispatchers.Main) {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "Voice: '$recognizedText'",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.w("VoiceControlManager", "Error in voice listening cycle", e)
-                    delay(500)
-                }
-            }
-        }
-    }
+    // Keep old methods for future, but disable continuous Vosk when wakeword flow is active
+    private fun startVoiceListening() { /* no-op: replaced by WakeWordService */ }
     
-    private fun stopVoiceListening() {
-        listeningJob?.cancel()
-        listeningJob = null
-        android.util.Log.d("VoiceControlManager", "Voice listening stopped")
-        
-        // Show toast that voice listening has stopped
-        android.widget.Toast.makeText(
-            context,
-            "Voice listening stopped",
-            android.widget.Toast.LENGTH_SHORT
-        ).show()
-    }
+    private fun stopVoiceListening() { /* no-op: replaced by WakeWordService */ }
     
-    private fun processVoiceCommand(recognizedText: String) {
+    fun processVoiceCommand(recognizedText: String) {
         val command = commandController.interpretCommand(recognizedText)
         
         command?.let { cmd ->
@@ -275,11 +212,10 @@ class VoiceControlManager(
         }
     }
     
-    private suspend fun runCommandWindow(windowMs: Long) { /* no-op: wakeword flow removed */ }
+    private suspend fun runCommandWindow(windowMs: Long) { /* no-op: wakeword flow */ }
 
     fun cleanup() {
         android.util.Log.d("VoiceControlManager", "Cleaning up VoiceControlManager")
-        stopVoiceListening()
         // Restore default audio routing before cleanup
         if (isGymModeActive) {
             headphoneDetector.restoreDefaultAudioRouting()

@@ -106,6 +106,9 @@ dependencies {
     // Speech Module For Voice Commands (GYM MODE)
     implementation("com.alphacephei:vosk-android:0.3.47")
 
+    // Picovoice Porcupine for wake word detection
+    implementation("ai.picovoice:porcupine-android:3.0.3")
+
 
 }
 
