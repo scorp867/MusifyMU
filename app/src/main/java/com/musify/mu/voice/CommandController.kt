@@ -217,52 +217,9 @@ class CommandController(
             }
         }
 
-        fun parseVoskResult(json: String?): Pair<String, Float>? {
-            if (json.isNullOrBlank()) return null
-            return try {
-                val obj = JSONObject(json)
-                val text = obj.optString("text").trim()
-                if (text.isEmpty()) return null
-
-                var confidence = Float.NaN
-                // Prefer alternatives.confidence if present
-                val alts = obj.optJSONArray("alternatives")
-                if (alts != null && alts.length() > 0) {
-                    val first = alts.optJSONObject(0)
-                    if (first != null) {
-                        val c = first.optDouble("confidence", Double.NaN)
-                        if (!c.isNaN()) confidence = c.toFloat()
-                    }
-                }
-                // Fallback to average token conf
-                if (confidence.isNaN()) {
-                    val results = obj.optJSONArray("result")
-                    if (results != null && results.length() > 0) {
-                        var sum = 0.0
-                        var count = 0
-                        for (i in 0 until results.length()) {
-                            val item = results.optJSONObject(i)
-                            if (item != null) {
-                                val c = item.optDouble("conf", Double.NaN)
-                                if (!c.isNaN()) {
-                                    sum += c
-                                    count++
-                                }
-                            }
-                        }
-                        if (count > 0) confidence = (sum / count).toFloat()
-                    }
-                }
-                // If still unknown, assume high confidence due to grammar constraints
-                val finalConfidence = if (confidence.isNaN()) 1.0f else confidence
-                Pair(text.lowercase(Locale.getDefault()), finalConfidence)
-            } catch (_: Exception) {
-                null
-            }
-        }
-
         fun startVoskListening(withModel: Model) {
-            try {// Define grammar JSON (restricts recognition)
+            try {
+                // Define grammar JSON (restricts recognition)
                 val grammar: String = Command.values()
                     .flatMap { it.phrases } // collect all phrases
                     .joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
@@ -273,7 +230,9 @@ class CommandController(
                 voskSpeechService?.startListening(object : org.vosk.android.RecognitionListener {
                     override fun onPartialResult(hypothesis: String?) { }
                     override fun onResult(hypothesis: String?) {
-                        parseVoskResult(hypothesis)?.let { (text, conf) ->
+                        parseVoskResult(hypothesis)?.let { pair ->
+                            val text = pair.first
+                            val conf = pair.second
                             if (conf >= confidenceThreshold) {
                                 trySend(text)
                             } else {
@@ -282,7 +241,9 @@ class CommandController(
                         }
                     }
                     override fun onFinalResult(hypothesis: String?) {
-                        parseVoskResult(hypothesis)?.let { (text, conf) ->
+                        parseVoskResult(hypothesis)?.let { pair ->
+                            val text = pair.first
+                            val conf = pair.second
                             if (conf >= confidenceThreshold) {
                                 trySend(text)
                             } else {
@@ -364,12 +325,16 @@ class CommandController(
                 voskSpeechService?.startListening(object : org.vosk.android.RecognitionListener {
                     override fun onPartialResult(hypothesis: String?) { }
                     override fun onResult(hypothesis: String?) {
-                        parseVoskResult(hypothesis)?.let { (text, conf) ->
+                        parseVoskResult(hypothesis)?.let { pair ->
+                            val text = pair.first
+                            val conf = pair.second
                             if (conf >= confidenceThreshold) trySend(text)
                         }
                     }
                     override fun onFinalResult(hypothesis: String?) {
-                        parseVoskResult(hypothesis)?.let { (text, conf) ->
+                        parseVoskResult(hypothesis)?.let { pair ->
+                            val text = pair.first
+                            val conf = pair.second
                             if (conf >= confidenceThreshold) trySend(text)
                         }
                         try { voskSpeechService?.stop() } catch (_: Exception) { }
@@ -386,6 +351,50 @@ class CommandController(
 
         awaitClose {
             try { voskSpeechService?.stop(); voskRecognizer?.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun parseVoskResult(json: String?): Pair<String, Float>? {
+        if (json.isNullOrBlank()) return null
+        return try {
+            val obj = JSONObject(json)
+            val text = obj.optString("text").trim()
+            if (text.isEmpty()) return null
+
+            var confidence = Float.NaN
+            // Prefer alternatives.confidence if present
+            val alts = obj.optJSONArray("alternatives")
+            if (alts != null && alts.length() > 0) {
+                val first = alts.optJSONObject(0)
+                if (first != null) {
+                    val c = first.optDouble("confidence", Double.NaN)
+                    if (!c.isNaN()) confidence = c.toFloat()
+                }
+            }
+            // Fallback to average token conf
+            if (confidence.isNaN()) {
+                val results = obj.optJSONArray("result")
+                if (results != null && results.length() > 0) {
+                    var sum = 0.0
+                    var count = 0
+                    for (i in 0 until results.length()) {
+                        val item = results.optJSONObject(i)
+                        if (item != null) {
+                            val c = item.optDouble("conf", Double.NaN)
+                            if (!c.isNaN()) {
+                                sum += c
+                                count++
+                            }
+                        }
+                    }
+                    if (count > 0) confidence = (sum / count).toFloat()
+                }
+            }
+            // If still unknown, assume high confidence due to grammar constraints
+            val finalConfidence = if (confidence.isNaN()) 1.0f else confidence
+            Pair(text.lowercase(Locale.getDefault()), finalConfidence)
+        } catch (_: Exception) {
+            null
         }
     }
 
