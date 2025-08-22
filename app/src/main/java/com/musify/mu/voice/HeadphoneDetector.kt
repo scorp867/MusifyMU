@@ -163,10 +163,29 @@ class HeadphoneDetector(private val context: Context) {
         }
     }
 
+    private fun hasBluetoothHeadsetMic(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val devices = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            devices.any { device -> device.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+        } else {
+            audioManager.isBluetoothScoOn
+        }
+    }
+
+    private fun hasUsbHeadsetMic(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val devices = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            devices.any { device -> device.type == AudioDeviceInfo.TYPE_USB_HEADSET }
+        } else {
+            false
+        }
+    }
+
     fun getPreferredAudioSource(): Int {
         return when {
-            hasBluetoothHeadphones() -> AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            hasBluetoothHeadsetMic() -> AudioDeviceInfo.TYPE_BLUETOOTH_SCO
             hasWiredHeadphones() -> AudioDeviceInfo.TYPE_WIRED_HEADSET
+            hasUsbHeadsetMic() -> AudioDeviceInfo.TYPE_USB_HEADSET
             else -> AudioDeviceInfo.TYPE_BUILTIN_MIC
         }
     }
