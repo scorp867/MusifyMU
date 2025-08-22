@@ -371,10 +371,23 @@ class WakeWordService : Service() {
 	private fun processCommand(text: String) {
 		try {
 			val vcm = VoiceControlManager.getInstance(this)
+			val cmd = commandController.interpretCommand(text)
+			if (cmd == null) {
+				showToast("Unrecognized: $text")
+				android.util.Log.d("WakeWordService", "Unrecognized command: $text")
+				return
+			}
 			if (vcm != null) {
-				try { vcm.processVoiceCommand(text) } catch (_: Exception) { }
-				showToast("Executing: $text")
-				android.util.Log.d("WakeWordService", "Executing: $text")
+				serviceScope.launch(Dispatchers.Main) {
+					try {
+						vcm.processVoiceCommand(text)
+						showToast("Executed: ${cmd.name}")
+						android.util.Log.d("WakeWordService", "VCM executed: ${cmd.name}")
+					} catch (e: Exception) {
+						android.util.Log.e("WakeWordService", "VCM execution failed: ${e.message}")
+						showToast("VCM failed: ${e.message}")
+					}
+				}
 			} else {
 				// Direct fallback
 				serviceScope.launch(Dispatchers.Main) {
@@ -382,11 +395,6 @@ class WakeWordService : Service() {
 					if (controller == null) {
 						android.util.Log.w("WakeWordService", "Controller unavailable for direct execution")
 						showToast("Controller unavailable")
-						return@launch
-					}
-					val cmd = commandController.interpretCommand(text)
-					if (cmd == null) {
-						showToast("Unrecognized: $text")
 						return@launch
 					}
 					when (cmd) {
@@ -412,6 +420,7 @@ class WakeWordService : Service() {
 						CommandController.Command.TOGGLE_GYM_MODE -> { /* no-op here */ }
 					}
 					showToast("Executed: ${cmd.name}")
+					android.util.Log.d("WakeWordService", "Direct executed: ${cmd.name}")
 				}
 			}
 		} catch (e: Exception) {
