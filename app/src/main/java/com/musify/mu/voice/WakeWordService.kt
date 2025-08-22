@@ -31,6 +31,9 @@ import java.io.FileOutputStream
 import kotlin.math.max
 import org.vosk.Model
 import org.vosk.Recognizer
+import android.os.Handler
+import android.os.Looper
+import android.widget.Toast
 
 class WakeWordService : Service() {
 
@@ -175,18 +178,28 @@ class WakeWordService : Service() {
 
 			audioLoopJob = serviceScope.launch(Dispatchers.Default) {
 				val frame = ShortArray(frameLength)
+				showToast("Wakeword listening started")
+				android.util.Log.d("WakeWordService", "Audio loop running: sampleRate=$sampleRate frameLength=$frameLength")
 				while (isActive) {
 					val n = audioRecord?.read(frame, 0, frameLength) ?: -1
 					if (n <= 0) continue
 
 					if (!isInCommandWindow) {
-						val keywordIndex = try { porcupine?.process(frame) ?: -1 } catch (e: Exception) { -1 }
-						if (keywordIndex >= 0) {
+						val detected = try { porcupine?.process(frame) == true } catch (e: Exception) { false }
+						if (detected) {
+							android.util.Log.d("WakeWordService", "Wakeword detected")
+							showToast("Wakeword detected")
 							openCommandWindow()
 						}
 					} else {
+						if (voskRecognizer == null) {
+							// First frames may arrive before recognizer ready
+							android.util.Log.d("WakeWordService", "Dropping frame: recognizer not ready yet")
+						}
 						processCommandFrame(frame, n)
 						if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
+							android.util.Log.d("WakeWordService", "Command window timeout reached")
+							showToast("Command window ended")
 							finalizeCommandWindow()
 						}
 					}
@@ -195,6 +208,7 @@ class WakeWordService : Service() {
 			android.util.Log.d("WakeWordService", "Listening started (single AudioRecord)")
 		} catch (e: Exception) {
 			android.util.Log.e("WakeWordService", "Failed to start listening", e)
+			showToast("Failed to start listening: ${e.message}")
 			stopListening()
 		}
 	}
@@ -228,8 +242,17 @@ class WakeWordService : Service() {
 	private fun openCommandWindow() {
 		isInCommandWindow = true
 		commandWindowEndAt = SystemClock.elapsedRealtime() + COMMAND_WINDOW_MS
+		showToast("Listening for command…")
+		android.util.Log.d("WakeWordService", "Opening command window for ${COMMAND_WINDOW_MS}ms")
 		serviceScope.launch(Dispatchers.Main) {
 			ensureVoskRecognizer()
+			if (voskRecognizer != null) {
+				showToast("Vosk ready")
+				android.util.Log.d("WakeWordService", "Vosk recognizer ready")
+			} else {
+				showToast("Vosk init failed")
+				android.util.Log.w("WakeWordService", "Vosk recognizer failed to init")
+			}
 		}
 	}
 
@@ -237,11 +260,18 @@ class WakeWordService : Service() {
 		try {
 			val json = voskRecognizer?.finalResult
 			val text = parseText(json)
-			if (!text.isNullOrBlank()) processCommand(text)
+			if (!text.isNullOrBlank()) {
+				showToast("Heard: $text")
+				android.util.Log.d("WakeWordService", "Final command: $text")
+				processCommand(text)
+			} else {
+				android.util.Log.d("WakeWordService", "No final command recognized")
+			}
 		} catch (_: Exception) { }
 		try { voskRecognizer?.close() } catch (_: Exception) {}
 		voskRecognizer = null
 		isInCommandWindow = false
+		showToast("Wakeword listening…")
 	}
 
 	private fun processCommandFrame(frame: ShortArray, n: Int) {
@@ -253,10 +283,13 @@ class WakeWordService : Service() {
 				val json = rec.result
 				val text = parseText(json)
 				if (!text.isNullOrBlank()) {
+					showToast("Heard: $text")
+					android.util.Log.d("WakeWordService", "Command recognized: $text")
 					processCommand(text)
 					// Close early and return to wakeword
 					try { rec.reset() } catch (_: Exception) {}
 					isInCommandWindow = false
+					showToast("Wakeword listening…")
 				}
 			}
 		} catch (e: Exception) {
@@ -269,11 +302,15 @@ class WakeWordService : Service() {
 			val vcm = VoiceControlManager.getInstance(this)
 			if (vcm != null) {
 				try { vcm.processVoiceCommand(text) } catch (_: Exception) { }
+				showToast("Executing: $text")
+				android.util.Log.d("WakeWordService", "Executing: $text")
 			} else {
 				android.util.Log.w("WakeWordService", "VoiceControlManager not available")
+				showToast("VCM unavailable")
 			}
 		} catch (e: Exception) {
 			android.util.Log.e("WakeWordService", "Failed to process command: ${e.message}")
+			showToast("Command error: ${e.message}")
 		}
 	}
 
@@ -323,6 +360,12 @@ class WakeWordService : Service() {
 			outFile.absolutePath
 		} catch (e: Exception) {
 			throw PorcupineException("Failed to prepare keyword file: ${e.message}")
+		}
+	}
+
+	private fun showToast(message: String) {
+		Handler(Looper.getMainLooper()).post {
+			Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 		}
 	}
 }
