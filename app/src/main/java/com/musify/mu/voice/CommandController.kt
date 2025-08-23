@@ -264,6 +264,8 @@ class CommandController(
         // Ensure model via assets first, then download fallback
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
+                // Reduce Vosk logs
+                try { org.vosk.LibVosk.setLogLevel(org.vosk.LogLevel.INFO) } catch (_: Exception) {}
                 val model = VoskModelProvider.ensureModel(context)
                 voskModel = model
                 startVoskListening(model)
@@ -310,6 +312,8 @@ class CommandController(
 
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             try {
+                // Reduce Vosk logs
+                try { org.vosk.LibVosk.setLogLevel(org.vosk.LogLevel.INFO) } catch (_: Exception) {}
                 val model = voskModel ?: VoskModelProvider.ensureModel(context).also { voskModel = it }
                 // Restricted grammar to known commands
                 val grammar: String = Command.values().flatMap { it.phrases }.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
@@ -412,6 +416,7 @@ class CommandController(
             cleanText.contains("repeat") && (cleanText.contains("off") || cleanText.contains("disable")) -> Command.REPEAT_OFF
             cleanText.contains("volume") && (cleanText.contains("up") || cleanText.contains("increase")) -> Command.VOLUME_UP
             cleanText.contains("volume") && (cleanText.contains("down") || cleanText.contains("decrease")) -> Command.VOLUME_DOWN
+            cleanText.contains("") -> Command.NULL
             cleanText.contains("mute") -> Command.MUTE
             cleanText.contains("gym") && cleanText.contains("mode") -> Command.TOGGLE_GYM_MODE
             else -> null
@@ -419,6 +424,8 @@ class CommandController(
     }
 
     enum class Command(val phrases: List<String>) {
+
+        NULL(listOf("")),
         PLAY(listOf("play","resume","start","go")),
         PAUSE(listOf("pause","stop","halt","freeze")),
         NEXT(listOf("next","skip","forward","advance")),
