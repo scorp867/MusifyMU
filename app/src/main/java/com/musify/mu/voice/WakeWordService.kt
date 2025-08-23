@@ -83,6 +83,7 @@ class WakeWordService : Service() {
     private var rnnoise: Denoiser? = null
 
     @Volatile private var confidenceThreshold: Float = 0.7f
+    @Volatile private var wakeConfidenceThreshold: Float = 0.8f
 
     // Direct control fallback when VCM is unavailable
     @Volatile private var mediaController: MediaController? = null
@@ -269,12 +270,15 @@ class WakeWordService : Service() {
                             val accepted = wake.acceptWaveForm(bytes, bytes.size)
                             if (accepted) {
                                 val pair = parseVoskResult(wake.result)
-                                val text = pair?.first ?: ""
-                                if (isWakePhrase(text)) {
-                                    android.util.Log.d("WakeWordService", "Wakeword detected by Vosk")
-                                    showToast("Wakeword detected")
-                                    openCommandWindow()
-                                    try { wake.reset() } catch (_: Exception) {}
+                                if (pair != null) {
+                                    val text = pair.first
+                                    val conf = pair.second
+                                    if (isWakePhrase(text) && conf >= wakeConfidenceThreshold) {
+                                        android.util.Log.d("WakeWordService", "Wakeword detected by Vosk (conf=${"%.2f".format(conf)})")
+                                        showToast("Wakeword detected")
+                                        openCommandWindow()
+                                        try { wake.reset() } catch (_: Exception) {}
+                                    }
                                 }
                             } else {
                                 // Also check partials for responsiveness
