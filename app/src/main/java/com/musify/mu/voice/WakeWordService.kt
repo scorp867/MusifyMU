@@ -41,6 +41,8 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.flow.collect
+import com.musify.mu.voice.RNNoiseProcessor
+import com.musify.mu.voice.AudioFrameProcessor
 
 class WakeWordService : Service() {
     companion object {
@@ -79,6 +81,9 @@ class WakeWordService : Service() {
     private var isInCommandWindow = false
     private var commandWindowEndAt = 0L
     private var headphoneMonitorJob: Job? = null
+    
+    // RNNoise for real-time noise suppression
+    private var rnnoiseProcessor: RNNoiseProcessor? = null
 
     @Volatile private var confidenceThreshold: Float = 0.7f
 
@@ -99,6 +104,21 @@ class WakeWordService : Service() {
             try { org.vosk.LibVosk.setLogLevel(org.vosk.LogLevel.INFO) } catch (_: Exception) { }
             try { voskModel = VoskModelProvider.ensureModel(this@WakeWordService) } catch (e: Exception) {
                 android.util.Log.w("WakeWordService", "Failed to ensure VOSK model early: ${e.message}")
+            }
+        }
+
+        // Initialize RNNoise processor in background
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                rnnoiseProcessor = RNNoiseProcessor()
+                val success = rnnoiseProcessor?.initialize() ?: false
+                if (success) {
+                    android.util.Log.d("WakeWordService", "RNNoise initialized successfully")
+                } else {
+                    android.util.Log.w("WakeWordService", "Failed to initialize RNNoise")
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("WakeWordService", "Error initializing RNNoise", e)
             }
         }
 
@@ -128,6 +148,12 @@ class WakeWordService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stopListening()
+        
+        // Clean up RNNoise processor
+        serviceScope.launch(Dispatchers.IO) {
+            try { rnnoiseProcessor?.cleanup() } catch (_: Exception) {}
+        }
+        
         serviceScope.cancel()
     }
 
@@ -233,7 +259,7 @@ class WakeWordService : Service() {
             audioLoopJob = serviceScope.launch(Dispatchers.Default) {
                 val frame = ShortArray(frameLength)
                 showToast("Wakeword listening started")
-                android.util.Log.d("WakeWordService", "Audio loop running: sampleRate=$sampleRate frameLength=$frameLength")
+                android.util.Log.d("WakeWordService", "Audio loop running: sampleRate=$sampleRate frameLength=$frameLength, RNNoise: ${rnnoiseProcessor?.isReady()}")
                 while (isActive) {
                     val n = audioRecord?.read(frame, 0, frameLength) ?: -1
                     if (n <= 0) continue
@@ -241,7 +267,9 @@ class WakeWordService : Service() {
                     if (!isInCommandWindow) {
                         val wake = voskWakeRecognizer
                         if (wake != null) {
-                            val bytes = shortsToBytesLE(frame, n)
+                            // Process frame through RNNoise for wake word detection
+                            val cleanedFrame = AudioFrameProcessor.processAudioFrame(frame, n, rnnoiseProcessor)
+                            val bytes = AudioFrameProcessor.shortsToBytesLE(cleanedFrame, cleanedFrame.size)
                             val accepted = wake.acceptWaveForm(bytes, bytes.size)
                             if (accepted) {
                                 val pair = parseVoskResult(wake.result)
@@ -251,6 +279,8 @@ class WakeWordService : Service() {
                                     showToast("Wakeword detected")
                                     openCommandWindow()
                                     try { wake.reset() } catch (_: Exception) {}
+                                    // Reset RNNoise state for clean command processing
+                                    rnnoiseProcessor?.reset()
                                 }
                             } else {
                                 // Also check partials for responsiveness
@@ -261,6 +291,8 @@ class WakeWordService : Service() {
                                     showToast("Wakeword detected")
                                     openCommandWindow()
                                     try { wake.reset() } catch (_: Exception) {}
+                                    // Reset RNNoise state for clean command processing
+                                    rnnoiseProcessor?.reset()
                                 }
                             }
                         }
@@ -269,7 +301,9 @@ class WakeWordService : Service() {
                             // First frames may arrive before recognizer ready
                             android.util.Log.d("WakeWordService", "Dropping frame: recognizer not ready yet")
                         }
-                        processCommandFrame(frame, n)
+                        // Process command frame through RNNoise for noise suppression
+                        val cleanedFrame = AudioFrameProcessor.processAudioFrame(frame, n, rnnoiseProcessor)
+                        processCommandFrame(cleanedFrame, cleanedFrame.size)
                         if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
                             android.util.Log.d("WakeWordService", "Command window timeout reached")
                             showToast("Command window ended")
@@ -297,6 +331,12 @@ class WakeWordService : Service() {
         voskRecognizer = null
         try { voskWakeRecognizer?.close() } catch (_: Exception) {}
         voskWakeRecognizer = null
+        
+        // Clean up RNNoise processor
+        serviceScope.launch(Dispatchers.IO) {
+            try { rnnoiseProcessor?.cleanup() } catch (_: Exception) {}
+            rnnoiseProcessor = null
+        }
     }
 
     private suspend fun ensureVoskRecognizer(): Recognizer? {
@@ -393,6 +433,12 @@ class WakeWordService : Service() {
         voskRecognizer = null
         isInCommandWindow = false
         showToast("Wakeword listening…")
+        
+        // Reset RNNoise state for next wake word detection cycle
+        serviceScope.launch(Dispatchers.IO) {
+            try { rnnoiseProcessor?.reset() } catch (_: Exception) {}
+        }
+        
         // Ensure wake recognizer is available for the next cycle
         serviceScope.launch(Dispatchers.Main) { ensureWakeRecognizer() }
     }
@@ -526,6 +572,14 @@ class WakeWordService : Service() {
         } catch (_: Exception) { null }
     }
 
+
+
+    private fun buildGrammar(): String {
+        return CommandController.Command.values()
+            .flatMap { it.phrases }
+            .joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
+    }
+
     private fun shortsToBytesLE(src: ShortArray, len: Int): ByteArray {
         val out = ByteArray(len * 2)
         var i = 0
@@ -537,12 +591,6 @@ class WakeWordService : Service() {
             i++
         }
         return out
-    }
-
-    private fun buildGrammar(): String {
-        return CommandController.Command.values()
-            .flatMap { it.phrases }
-            .joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
     }
 
     private fun ensureKeywordFile(resId: Int, outName: String): String {
