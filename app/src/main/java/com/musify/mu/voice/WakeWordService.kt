@@ -246,8 +246,18 @@ class WakeWordService : Service() {
 							if (accepted) {
 								val pair = parseVoskResult(wake.result)
 								val text = pair?.first ?: ""
-								if (text.contains("hey musify")) {
+								if (isWakePhrase(text)) {
 									android.util.Log.d("WakeWordService", "Wakeword detected by Vosk")
+									showToast("Wakeword detected")
+									openCommandWindow()
+									try { wake.reset() } catch (_: Exception) {}
+								}
+							} else {
+								// Also check partials for responsiveness
+								val partialJson = wake.partialResult
+								val partialText = parseText(partialJson) ?: ""
+								if (isWakePhrase(partialText)) {
+									android.util.Log.d("WakeWordService", "Wakeword partial detected by Vosk")
 									showToast("Wakeword detected")
 									openCommandWindow()
 									try { wake.reset() } catch (_: Exception) {}
@@ -320,7 +330,14 @@ class WakeWordService : Service() {
 	}
 
 	private fun buildWakeGrammar(): String {
-		val wakePhrases = listOf("hey musify", "hey musify")
+		val wakePhrases = listOf(
+			"hey musify",
+			"hey music fy",
+			"hey music fi",
+			"hey music five",
+			"hey muzify",
+			"hey musefy"
+		)
 		return wakePhrases.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
 	}
 
@@ -536,5 +553,10 @@ class WakeWordService : Service() {
 		Handler(Looper.getMainLooper()).post {
 			Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
 		}
+	}
+
+	private fun isWakePhrase(text: String): Boolean {
+		val norm = text.trim().lowercase().replace(" ", "")
+		return norm.contains("heymusify") || norm.contains("heymusicfy") || norm.contains("heymusicfi") || norm.contains("heymusicfive") || norm.contains("heymuzify") || norm.contains("heymusefy")
 	}
 }
