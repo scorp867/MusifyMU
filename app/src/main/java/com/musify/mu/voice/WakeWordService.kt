@@ -41,7 +41,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.flow.collect
-import de.maxhenkel.rnnoise4j.Denoiser
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
+import android.media.audiofx.AutomaticGainControl
 
 class WakeWordService : Service() {
     companion object {
@@ -80,7 +82,6 @@ class WakeWordService : Service() {
     private var isInCommandWindow = false
     private var commandWindowEndAt = 0L
     private var headphoneMonitorJob: Job? = null
-    private var rnnoise: Denoiser? = null
 
     @Volatile private var confidenceThreshold: Float = 0.7f
     @Volatile private var wakeConfidenceThreshold: Float = 0.8f
@@ -97,12 +98,6 @@ class WakeWordService : Service() {
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createNotificationChannel()
 
-        // Initialize RNNoise denoiser
-        try {
-            rnnoise = Denoiser()
-        } catch (e: Exception) {
-            android.util.Log.w("WakeWordService", "RNNoise init failed: ${e.message}")
-        }
 
         // Prepare Vosk model in background early
         serviceScope.launch(Dispatchers.IO) {
@@ -138,8 +133,6 @@ class WakeWordService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stopListening()
-        try { rnnoise?.close() } catch (_: Exception) {}
-        rnnoise = null
         serviceScope.cancel()
     }
 
@@ -225,6 +218,22 @@ class WakeWordService : Service() {
                 return
             }
 
+            // Enable WebRTC-like audio effects if supported: AEC, NS, AGC
+            try {
+                val sessionId = audioRecord?.audioSessionId ?: 0
+                if (sessionId != 0) {
+                    if (AcousticEchoCanceler.isAvailable()) {
+                        try { AcousticEchoCanceler.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
+                    }
+                    if (NoiseSuppressor.isAvailable()) {
+                        try { NoiseSuppressor.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
+                    }
+                    if (AutomaticGainControl.isAvailable()) {
+                        try { AutomaticGainControl.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
+                    }
+                }
+            } catch (_: Exception) { }
+
             // Monitor headphone connectivity and stop if disconnected
             headphoneMonitorJob?.cancel()
             headphoneMonitorJob = serviceScope.launch(Dispatchers.Main) {
@@ -253,19 +262,8 @@ class WakeWordService : Service() {
                     if (!isInCommandWindow) {
                         val wake = voskWakeRecognizer
                         if (wake != null) {
-                            val processedShorts = try {
-                                val dn = rnnoise
-                                if (dn != null) {
-                                    // Copy only the read portion for processing
-                                    val src = if (n == frame.size) frame else frame.copyOf(n)
-                                    dn.denoise(src)
-                                } else {
-                                    if (n == frame.size) frame else frame.copyOf(n)
-                                }
-                            } catch (_: Exception) {
-                                if (n == frame.size) frame else frame.copyOf(n)
-                            }
-                            val bytes = shortsToBytesLE(processedShorts, processedShorts.size)
+                            val src = if (n == frame.size) frame else frame.copyOf(n)
+                            val bytes = shortsToBytesLE(src, src.size)
                             val accepted = wake.acceptWaveForm(bytes, bytes.size)
                             if (accepted) {
                                 val pair = parseVoskResult(wake.result)
@@ -296,7 +294,7 @@ class WakeWordService : Service() {
                             // First frames may arrive before recognizer ready
                             android.util.Log.d("WakeWordService", "Dropping frame: recognizer not ready yet")
                         }
-                        processCommandFrameWithDenoise(frame, n)
+                        processCommandFrame(frame, n)
                         if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
                             android.util.Log.d("WakeWordService", "Command window timeout reached")
                             showToast("Command window ended")
@@ -324,8 +322,7 @@ class WakeWordService : Service() {
         voskRecognizer = null
         try { voskWakeRecognizer?.close() } catch (_: Exception) {}
         voskWakeRecognizer = null
-        try { rnnoise?.close() } catch (_: Exception) {}
-        rnnoise = null
+        // Audio effects are tied to session; they are released with AudioRecord. Nothing further needed.
     }
 
     private suspend fun ensureVoskRecognizer(): Recognizer? {
@@ -450,40 +447,6 @@ class WakeWordService : Service() {
         }
     }
 
-    private fun processCommandFrameWithDenoise(frame: ShortArray, n: Int) {
-        val rec = voskRecognizer ?: return
-        try {
-            val processedShorts = try {
-                val dn = rnnoise
-                if (dn != null) {
-                    val src = if (n == frame.size) frame else frame.copyOf(n)
-                    dn.denoise(src)
-                } else {
-                    if (n == frame.size) frame else frame.copyOf(n)
-                }
-            } catch (_: Exception) {
-                if (n == frame.size) frame else frame.copyOf(n)
-            }
-            val bytes = shortsToBytesLE(processedShorts, processedShorts.size)
-            val accepted = rec.acceptWaveForm(bytes, bytes.size)
-            if (accepted) {
-                val json = rec.result
-                val pair = parseVoskResult(json)
-                if (pair != null) {
-                    val (text, conf) = pair
-                    android.util.Log.d("WakeWordService", "Interim Vosk result: conf=$conf text=$text")
-                    if (conf >= confidenceThreshold) {
-                        showToast("Heard: $text")
-                        processCommand(text)
-                        // Prepare for next utterance but keep command window active until timeout
-                        try { rec.reset() } catch (_: Exception) {}
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            android.util.Log.w("WakeWordService", "Vosk accept frame failed: ${e.message}")
-        }
-    }
 
     private fun processCommand(text: String) {
         try {

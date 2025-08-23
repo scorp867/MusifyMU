@@ -109,10 +109,6 @@ dependencies {
     // Picovoice Porcupine for wake word detection
     implementation("ai.picovoice:porcupine-android:3.0.3")
 
-    // RNNoise noise suppression for real-time denoising
-    implementation("de.maxhenkel.rnnoise4j:rnnoise4j:2.1.2")
-
-
 }
 
 // Room KSP options
