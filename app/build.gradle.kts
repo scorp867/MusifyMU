@@ -107,8 +107,9 @@ dependencies {
     implementation("com.alphacephei:vosk-android:0.3.47")
     // Picovoice Porcupine for wake word detection
     implementation("ai.picovoice:porcupine-android:3.0.3")
-    // RNNoise for real-time audio noise suppression
-    implementation("de.maxhenkel.rnnoise4j:rnnoise4j:2.1.2")
+    // Audio processing for noise suppression
+    // Using Android's built-in audio processing capabilities
+    // implementation("de.maxhenkel.rnnoise4j:rnnoise4j:2.1.2")
 
 
 }

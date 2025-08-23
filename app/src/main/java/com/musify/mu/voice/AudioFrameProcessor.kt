@@ -12,7 +12,7 @@ object AudioFrameProcessor {
     private const val TAG = "AudioFrameProcessor"
     
     // Frame buffer for efficient processing
-    private val frameBuffer = ShortArray(480) // RNNoise frame size
+    private val frameBuffer = ShortArray(480) // Optimal frame size for audio processing
     private val mutex = Mutex()
     
     /**
@@ -55,23 +55,23 @@ object AudioFrameProcessor {
     suspend fun processAudioFrame(
         rawFrame: ShortArray,
         frameLength: Int,
-        rnnoiseProcessor: RNNoiseProcessor?
+        audioNoiseProcessor: AudioNoiseProcessor?
     ): ShortArray {
         return mutex.withLock {
             try {
-                if (rnnoiseProcessor?.isReady() == true) {
-                    // Apply RNNoise noise suppression
-                    val cleanedFrame = rnnoiseProcessor.processFrame(rawFrame, frameLength)
+                if (audioNoiseProcessor?.isReady() == true) {
+                    // Apply audio noise suppression
+                    val cleanedFrame = audioNoiseProcessor.processFrame(rawFrame, frameLength)
                     if (cleanedFrame != null) {
-                        Log.v(TAG, "Frame processed with RNNoise: ${rawFrame.size} -> ${cleanedFrame.size}")
+                        Log.v(TAG, "Frame processed with audio noise suppression: ${rawFrame.size} -> ${cleanedFrame.size}")
                         return cleanedFrame
                     } else {
-                        Log.w(TAG, "RNNoise processing failed, using raw frame")
+                        Log.w(TAG, "Audio noise processing failed, using raw frame")
                         return rawFrame
                     }
                 } else {
-                    // RNNoise not ready, use raw frame
-                    Log.v(TAG, "RNNoise not ready, using raw frame")
+                    // Audio noise processor not ready, use raw frame
+                    Log.v(TAG, "Audio noise processor not ready, using raw frame")
                     return rawFrame
                 }
             } catch (e: Exception) {
@@ -82,16 +82,16 @@ object AudioFrameProcessor {
     }
     
     /**
-     * Check if frame size is optimal for RNNoise processing
+     * Check if frame size is optimal for audio processing
      */
     fun isOptimalFrameSize(frameSize: Int): Boolean {
-        // RNNoise works best with 480 samples (10ms at 48kHz)
-        // For 16kHz, that's 160 samples
+        // Audio processing works best with standard frame sizes
+        // For 16kHz, that's 160 samples (10ms), 320 samples (20ms), or 480 samples (30ms)
         return frameSize == 160 || frameSize == 320 || frameSize == 480
     }
     
     /**
-     * Get recommended frame size for optimal RNNoise performance
+     * Get recommended frame size for optimal audio processing performance
      */
     fun getRecommendedFrameSize(sampleRate: Int): Int {
         return when (sampleRate) {
