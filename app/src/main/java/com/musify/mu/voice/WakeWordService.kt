@@ -15,8 +15,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import androidx.core.app.NotificationCompat
-import ai.picovoice.porcupine.Porcupine
-import ai.picovoice.porcupine.PorcupineException
+// Porcupine removed in Vosk-only mode
 import com.musify.mu.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -72,24 +71,21 @@ class WakeWordService : Service() {
     private lateinit var audioManager: AudioManager
 
     // Engines and audio
-    private var porcupine: Porcupine? = null
     private var audioRecord: AudioRecord? = null
     private var audioLoopJob: Job? = null
     private var voskModel: Model? = null
     private var voskRecognizer: Recognizer? = null
+    private var voskWakeRecognizer: Recognizer? = null
     private var isInCommandWindow = false
     private var commandWindowEndAt = 0L
     private var headphoneMonitorJob: Job? = null
 
-    @Volatile private var confidenceThreshold: Float = 1.0f
+    @Volatile private var confidenceThreshold: Float = 0.7f
 
     // Direct control fallback when VCM is unavailable
     @Volatile private var mediaController: MediaController? = null
 
-    // Injected via runtime; do not persist secrets
-    private val accessKey: String by lazy {
-        "qcLu6oLmNq9fkqv5tbWqoIt23/qhJFFUerWZGsg0fim99/npnxhxdg=="
-    }
+    // No AccessKey needed for Vosk-only mode
 
     override fun onCreate() {
         super.onCreate()
@@ -189,19 +185,9 @@ class WakeWordService : Service() {
         }
 
         try {
-            // Prepare Porcupine engine
-            val resName = "hey_musify"
-            val resId = resources.getIdentifier(resName, "raw", packageName)
-            if (resId == 0) throw PorcupineException("Wake word resource not found: $resName")
-            val keywordFilePath = ensureKeywordFile(resId, "$resName.ppn")
-            porcupine = Porcupine.Builder()
-                .setAccessKey(accessKey)
-                .setKeywordPath(keywordFilePath)
-                .setSensitivity(0.75f)
-                .build(applicationContext)
-
-            val sampleRate = porcupine!!.sampleRate
-            val frameLength = porcupine!!.frameLength
+            // Use Vosk sample rate (typically 16k) and a reasonable frame size (e.g., 320 samples = 20ms)
+            val sampleRate = 16000
+            val frameLength = 320
             val minBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val bufferSize = max(minBuf, frameLength * 2 * 4)
             try {
@@ -241,6 +227,9 @@ class WakeWordService : Service() {
                 }
             }
 
+            // Prepare wake recognizer upfront
+            serviceScope.launch(Dispatchers.Main) { ensureWakeRecognizer() }
+
             audioLoopJob = serviceScope.launch(Dispatchers.Default) {
                 val frame = ShortArray(frameLength)
                 showToast("Wakeword listening started")
@@ -250,11 +239,30 @@ class WakeWordService : Service() {
                     if (n <= 0) continue
 
                     if (!isInCommandWindow) {
-                        val keywordIndex = try { porcupine?.process(frame) ?: -1 } catch (e: Exception) { -1 }
-                        if (keywordIndex >= 0) {
-                            android.util.Log.d("WakeWordService", "Wakeword detected")
-                            showToast("Wakeword detected")
-                            openCommandWindow()
+                        val wake = voskWakeRecognizer
+                        if (wake != null) {
+                            val bytes = shortsToBytesLE(frame, n)
+                            val accepted = wake.acceptWaveForm(bytes, bytes.size)
+                            if (accepted) {
+                                val pair = parseVoskResult(wake.result)
+                                val text = pair?.first ?: ""
+                                if (isWakePhrase(text)) {
+                                    android.util.Log.d("WakeWordService", "Wakeword detected by Vosk")
+                                    showToast("Wakeword detected")
+                                    openCommandWindow()
+                                    try { wake.reset() } catch (_: Exception) {}
+                                }
+                            } else {
+                                // Also check partials for responsiveness
+                                val partialJson = wake.partialResult
+                                val partialText = parseText(partialJson) ?: ""
+                                if (isWakePhrase(partialText)) {
+                                    android.util.Log.d("WakeWordService", "Wakeword partial detected by Vosk")
+                                    showToast("Wakeword detected")
+                                    openCommandWindow()
+                                    try { wake.reset() } catch (_: Exception) {}
+                                }
+                            }
                         }
                     } else {
                         if (voskRecognizer == null) {
@@ -285,10 +293,10 @@ class WakeWordService : Service() {
         headphoneMonitorJob = null
         try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
         audioRecord = null
-        try { porcupine?.delete() } catch (_: Exception) {}
-        porcupine = null
         try { voskRecognizer?.close() } catch (_: Exception) {}
         voskRecognizer = null
+        try { voskWakeRecognizer?.close() } catch (_: Exception) {}
+        voskWakeRecognizer = null
     }
 
     private suspend fun ensureVoskRecognizer(): Recognizer? {
@@ -304,6 +312,33 @@ class WakeWordService : Service() {
                 null
             }
         }
+    }
+
+    private suspend fun ensureWakeRecognizer(): Recognizer? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val model = voskModel ?: VoskModelProvider.ensureModel(this@WakeWordService).also { voskModel = it }
+                val wakeGrammar = buildWakeGrammar()
+                val rec = Recognizer(model, 16000.0f, wakeGrammar)
+                voskWakeRecognizer = rec
+                rec
+            } catch (e: Exception) {
+                android.util.Log.w("WakeWordService", "Failed to create wake recognizer: ${e.message}")
+                null
+            }
+        }
+    }
+
+    private fun buildWakeGrammar(): String {
+        val wakePhrases = listOf(
+            "hey musify",
+            "hey music fy",
+            "hey music fi",
+            "hey music five",
+            "hey muzify",
+            "hey musefy"
+        )
+        return wakePhrases.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
     }
 
     private suspend fun ensureController(): MediaController? {
@@ -358,6 +393,8 @@ class WakeWordService : Service() {
         voskRecognizer = null
         isInCommandWindow = false
         showToast("Wakeword listening…")
+        // Ensure wake recognizer is available for the next cycle
+        serviceScope.launch(Dispatchers.Main) { ensureWakeRecognizer() }
     }
 
     private fun processCommandFrame(frame: ShortArray, n: Int) {
@@ -434,7 +471,7 @@ class WakeWordService : Service() {
                         }
                         CommandController.Command.MUTE -> audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
                         CommandController.Command.TOGGLE_GYM_MODE -> { /* no-op here */ }
-                        else -> {/* nothing does*/}
+                        else -> {}
                     }
                     showToast("Executed: ${cmd.name}")
                     android.util.Log.d("WakeWordService", "Direct executed: ${cmd.name}")
@@ -509,30 +546,18 @@ class WakeWordService : Service() {
     }
 
     private fun ensureKeywordFile(resId: Int, outName: String): String {
-        val outFile = File(filesDir, outName)
-        return try {
-            if (!outFile.exists()) {
-                resources.openRawResource(resId).use { input ->
-                    FileOutputStream(outFile).use { output ->
-                        val buffer = ByteArray(8 * 1024)
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read <= 0) break
-                            output.write(buffer, 0, read)
-                        }
-                        output.flush()
-                    }
-                }
-            }
-            outFile.absolutePath
-        } catch (e: Exception) {
-            throw PorcupineException("Failed to prepare keyword file: ${e.message}")
-        }
+        // Unused in Vosk-only mode; keep for compatibility
+        return ""
     }
 
     private fun showToast(message: String) {
         Handler(Looper.getMainLooper()).post {
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun isWakePhrase(text: String): Boolean {
+        val norm = text.trim().lowercase().replace(" ", "")
+        return norm.contains("heymusify") || norm.contains("heymusicfy") || norm.contains("heymusicfi") || norm.contains("heymusicfive") || norm.contains("heymuzify") || norm.contains("heymusefy")
     }
 }

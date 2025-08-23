@@ -201,7 +201,7 @@ class VoiceControlManager(
                 CommandController.Command.TOGGLE_GYM_MODE -> {
                     android.util.Log.d("VoiceControlManager", "Voice command: Toggle Gym Mode")
                 }
-                else -> {/*does nothing*/}
+                else -> {}
             }
         } ?: run {
             // Show toast for unrecognized command
