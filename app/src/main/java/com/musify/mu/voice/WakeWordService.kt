@@ -244,7 +244,6 @@ class WakeWordService : Service() {
 
             audioLoopJob = serviceScope.launch(Dispatchers.Default) {
                 val frame = ShortArray(frameLength)
-                val denoiseBuffer = ShortArray(frameLength)
                 showToast("Wakeword listening started")
                 android.util.Log.d("WakeWordService", "Audio loop running: sampleRate=$sampleRate frameLength=$frameLength")
                 while (isActive) {
