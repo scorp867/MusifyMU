@@ -233,9 +233,6 @@ class HeadphoneDetector(private val context: Context) {
                     audioManager.stopBluetoothSco()
                     audioManager.isBluetoothScoOn = false
 
-                    // Set communication mode for exclusive headset usage
-                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-
                     // Force Bluetooth SCO audio for headset microphone ONLY
                     audioManager.startBluetoothSco()
                     audioManager.isBluetoothScoOn = true
@@ -243,21 +240,21 @@ class HeadphoneDetector(private val context: Context) {
                     // Disable speakerphone to prevent built-in mic
                     audioManager.isSpeakerphoneOn = false
 
-                    android.util.Log.d("HeadphoneDetector", "Successfully forced EXCLUSIVE Bluetooth SCO audio routing - headset mic only")
+                    android.util.Log.d("HeadphoneDetector", "Successfully forced EXCLUSIVE Bluetooth SCO audio routing - headset mic only (no COMM mode)")
 
                     // Show toast for audio routing change
                     android.widget.Toast.makeText(
                         context,
-                        "Using headset microphone exclusively",
+                        "Using headset microphone",
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                 } catch (e: Exception) {
-                    android.util.Log.w("HeadphoneDetector", "Failed to force exclusive Bluetooth SCO audio routing", e)
+                    android.util.Log.w("HeadphoneDetector", "Failed to force Bluetooth SCO audio routing", e)
 
                     // Show error toast
                     android.widget.Toast.makeText(
                         context,
-                        "Failed to use headset microphone exclusively",
+                        "Failed to use headset microphone",
                         android.widget.Toast.LENGTH_SHORT
                     ).show()
                 }
