@@ -17,6 +17,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven {
+            name = "henkelmax.public"
+            url = uri("https://maven.maxhenkel.de/repository/public")
+        }
     }
 }
 
