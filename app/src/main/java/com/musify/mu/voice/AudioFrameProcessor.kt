@@ -55,23 +55,23 @@ object AudioFrameProcessor {
     suspend fun processAudioFrame(
         rawFrame: ShortArray,
         frameLength: Int,
-        audioNoiseProcessor: AudioNoiseProcessor?
+        rnnoiseProcessor: RNNoiseProcessor?
     ): ShortArray {
         return mutex.withLock {
             try {
-                if (audioNoiseProcessor?.isReady() == true) {
-                    // Apply audio noise suppression
-                    val cleanedFrame = audioNoiseProcessor.processFrame(rawFrame, frameLength)
+                if (rnnoiseProcessor?.isReady() == true) {
+                    // Apply RNNoise noise suppression
+                    val cleanedFrame = rnnoiseProcessor.processFrame(rawFrame, frameLength)
                     if (cleanedFrame != null) {
-                        Log.v(TAG, "Frame processed with audio noise suppression: ${rawFrame.size} -> ${cleanedFrame.size}")
+                        Log.v(TAG, "Frame processed with RNNoise: ${rawFrame.size} -> ${cleanedFrame.size}")
                         return cleanedFrame
                     } else {
-                        Log.w(TAG, "Audio noise processing failed, using raw frame")
+                        Log.w(TAG, "RNNoise processing failed, using raw frame")
                         return rawFrame
                     }
                 } else {
-                    // Audio noise processor not ready, use raw frame
-                    Log.v(TAG, "Audio noise processor not ready, using raw frame")
+                    // RNNoise not ready, use raw frame
+                    Log.v(TAG, "RNNoise not ready, using raw frame")
                     return rawFrame
                 }
             } catch (e: Exception) {
