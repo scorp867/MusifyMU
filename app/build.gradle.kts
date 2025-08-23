@@ -39,6 +39,7 @@ android {
     packagingOptions {
         resources {
             excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
+            excludes += "NATIVE_UTILS_LICENSE"
         }
     }
 }
