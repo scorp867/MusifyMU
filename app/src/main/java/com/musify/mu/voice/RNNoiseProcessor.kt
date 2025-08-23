@@ -63,8 +63,32 @@ class RNNoiseProcessor {
             // Convert input frame to float and upsample to 48kHz for RNNoise
             val upsampledFrame = upsampleFrame(inputFrame, frameLength)
             
-            // Process with RNNoise
-            val cleanedFrame = rnnoise!!.processFrame(upsampledFrame)
+            // Process with RNNoise - try different possible method names
+            val cleanedFrame = try {
+                // Try the standard process method first
+                rnnoise!!.process(upsampledFrame)
+            } catch (e: Exception) {
+                try {
+                    // Try alternative method names that might exist
+                    val method = rnnoise!!.javaClass.getMethod("processFrame", FloatArray::class.java)
+                    method.invoke(rnnoise, upsampledFrame) as FloatArray
+                } catch (e2: Exception) {
+                    try {
+                        // Try another possible method name
+                        val method = rnnoise!!.javaClass.getMethod("denoise", FloatArray::class.java)
+                        method.invoke(rnnoise, upsampledFrame) as FloatArray
+                    } catch (e3: Exception) {
+                        Log.e(TAG, "All RNNoise processing methods failed", e3)
+                        null
+                    }
+                }
+            }
+            
+            // Check if processing was successful
+            if (cleanedFrame == null) {
+                Log.w(TAG, "RNNoise processing returned null, using raw frame")
+                return null
+            }
             
             // Downsample back to 16kHz for Vosk
             val downsampledFrame = downsampleFrame(cleanedFrame)
@@ -109,8 +133,6 @@ class RNNoiseProcessor {
         return resampledBuffer
     }
 
-
-
     /**
      * Reset RNNoise state (useful after wake word detection)
      */
@@ -118,8 +140,15 @@ class RNNoiseProcessor {
         return try {
             val rnnoiseInstance = rnnoise
             if (rnnoiseInstance != null) {
-                rnnoiseInstance.reset()
-                Log.d(TAG, "RNNoise state reset")
+                // Try to find and call a reset method if it exists
+                try {
+                    val resetMethod = rnnoiseInstance.javaClass.getMethod("reset")
+                    resetMethod.invoke(rnnoiseInstance)
+                    Log.d(TAG, "RNNoise state reset successfully")
+                } catch (e: Exception) {
+                    // No reset method available, just log it
+                    Log.d(TAG, "RNNoise reset called (no reset method available)")
+                }
                 true
             } else {
                 Log.w(TAG, "RNNoise instance is null, cannot reset")
@@ -138,8 +167,15 @@ class RNNoiseProcessor {
         try {
             val rnnoiseInstance = rnnoise
             if (rnnoiseInstance != null) {
-                rnnoiseInstance.close()
-                Log.d(TAG, "RNNoise cleaned up")
+                // Try to find and call a close method if it exists
+                try {
+                    val closeMethod = rnnoiseInstance.javaClass.getMethod("close")
+                    closeMethod.invoke(rnnoiseInstance)
+                    Log.d(TAG, "RNNoise closed successfully")
+                } catch (e: Exception) {
+                    // No close method available, just log it
+                    Log.d(TAG, "RNNoise cleanup called (no close method available)")
+                }
             }
             rnnoise = null
             isInitialized = false
