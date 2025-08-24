@@ -41,6 +41,9 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.flow.collect
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
+import android.media.audiofx.AutomaticGainControl
 
 class WakeWordService : Service() {
     companion object {
@@ -81,6 +84,7 @@ class WakeWordService : Service() {
     private var headphoneMonitorJob: Job? = null
 
     @Volatile private var confidenceThreshold: Float = 0.7f
+    @Volatile private var wakeConfidenceThreshold: Float = 0.8f
 
     // Direct control fallback when VCM is unavailable
     @Volatile private var mediaController: MediaController? = null
@@ -93,6 +97,7 @@ class WakeWordService : Service() {
         commandController = CommandController(this, headphoneDetector)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createNotificationChannel()
+
 
         // Prepare Vosk model in background early
         serviceScope.launch(Dispatchers.IO) {
@@ -213,6 +218,22 @@ class WakeWordService : Service() {
                 return
             }
 
+            // Enable WebRTC-like audio effects if supported: AEC, NS, AGC
+            try {
+                val sessionId = audioRecord?.audioSessionId ?: 0
+                if (sessionId != 0) {
+                    if (AcousticEchoCanceler.isAvailable()) {
+                        try { AcousticEchoCanceler.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
+                    }
+                    if (NoiseSuppressor.isAvailable()) {
+                        try { NoiseSuppressor.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
+                    }
+                    if (AutomaticGainControl.isAvailable()) {
+                        try { AutomaticGainControl.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
+                    }
+                }
+            } catch (_: Exception) { }
+
             // Monitor headphone connectivity and stop if disconnected
             headphoneMonitorJob?.cancel()
             headphoneMonitorJob = serviceScope.launch(Dispatchers.Main) {
@@ -241,16 +262,20 @@ class WakeWordService : Service() {
                     if (!isInCommandWindow) {
                         val wake = voskWakeRecognizer
                         if (wake != null) {
-                            val bytes = shortsToBytesLE(frame, n)
+                            val src = if (n == frame.size) frame else frame.copyOf(n)
+                            val bytes = shortsToBytesLE(src, src.size)
                             val accepted = wake.acceptWaveForm(bytes, bytes.size)
                             if (accepted) {
                                 val pair = parseVoskResult(wake.result)
-                                val text = pair?.first ?: ""
-                                if (isWakePhrase(text)) {
-                                    android.util.Log.d("WakeWordService", "Wakeword detected by Vosk")
-                                    showToast("Wakeword detected")
-                                    openCommandWindow()
-                                    try { wake.reset() } catch (_: Exception) {}
+                                if (pair != null) {
+                                    val text = pair.first
+                                    val conf = pair.second
+                                    if (isWakePhrase(text) && conf >= wakeConfidenceThreshold) {
+                                        android.util.Log.d("WakeWordService", "Wakeword detected by Vosk (conf=${"%.2f".format(conf)})")
+                                        showToast("Wakeword detected")
+                                        openCommandWindow()
+                                        try { wake.reset() } catch (_: Exception) {}
+                                    }
                                 }
                             } else {
                                 // Also check partials for responsiveness
@@ -297,6 +322,7 @@ class WakeWordService : Service() {
         voskRecognizer = null
         try { voskWakeRecognizer?.close() } catch (_: Exception) {}
         voskWakeRecognizer = null
+        // Audio effects are tied to session; they are released with AudioRecord. Nothing further needed.
     }
 
     private suspend fun ensureVoskRecognizer(): Recognizer? {
@@ -420,6 +446,7 @@ class WakeWordService : Service() {
             android.util.Log.w("WakeWordService", "Vosk accept frame failed: ${e.message}")
         }
     }
+
 
     private fun processCommand(text: String) {
         try {
