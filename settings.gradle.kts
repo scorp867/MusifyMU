@@ -3,6 +3,8 @@ pluginManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
+        maven { url = uri("https://maven.maxhenkel.de/repository/public") }
+        maven { url = uri("https://jcenter.bintray.com") }
     }
     plugins {
         id("com.android.application") version "8.3.2"
@@ -17,6 +19,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://maven.maxhenkel.de/repository/public") }
+        maven { url = uri("https://jcenter.bintray.com") }
     }
 }
 
