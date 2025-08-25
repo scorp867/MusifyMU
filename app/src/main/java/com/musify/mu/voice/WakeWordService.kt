@@ -196,8 +196,17 @@ class WakeWordService : Service() {
             val minBuf = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
             val bufferSize = max(minBuf, frameLength * 2 * 4)
             try {
+                // Prefer unprocessed audio to avoid Android's built-in preprocessing (AEC/NS/AGC)
+                val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                val supportsUnprocessed = try {
+                    am.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED) != null
+                } catch (_: Exception) { false }
+                val audioSource = when {
+                    supportsUnprocessed -> MediaRecorder.AudioSource.UNPROCESSED
+                    else -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+                }
                 audioRecord = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                    audioSource,
                     sampleRate,
                     AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT,
@@ -218,19 +227,25 @@ class WakeWordService : Service() {
                 return
             }
 
-            // Enable WebRTC-like audio effects if supported: AEC, NS, AGC
+            // Explicitly disable Android built-in audio effects (AEC/NS/AGC) to avoid conflicts with external processing
             try {
                 val sessionId = audioRecord?.audioSessionId ?: 0
                 if (sessionId != 0) {
-                    if (AcousticEchoCanceler.isAvailable()) {
-                        try { AcousticEchoCanceler.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
-                    }
-                    if (NoiseSuppressor.isAvailable()) {
-                        try { NoiseSuppressor.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
-                    }
-                    if (AutomaticGainControl.isAvailable()) {
-                        try { AutomaticGainControl.create(sessionId)?.apply { enabled = true } } catch (_: Throwable) {}
-                    }
+                    try {
+                        if (AcousticEchoCanceler.isAvailable()) {
+                            AcousticEchoCanceler.create(sessionId)?.apply { enabled = false }
+                        }
+                    } catch (_: Throwable) {}
+                    try {
+                        if (NoiseSuppressor.isAvailable()) {
+                            NoiseSuppressor.create(sessionId)?.apply { enabled = false }
+                        }
+                    } catch (_: Throwable) {}
+                    try {
+                        if (AutomaticGainControl.isAvailable()) {
+                            AutomaticGainControl.create(sessionId)?.apply { enabled = false }
+                        }
+                    } catch (_: Throwable) {}
                 }
             } catch (_: Exception) { }
 
