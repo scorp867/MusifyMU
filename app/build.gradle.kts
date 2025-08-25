@@ -110,6 +110,7 @@ dependencies {
     implementation("ai.picovoice:porcupine-android:3.0.3")
     // RNNoise for real-time audio noise suppression
     implementation("de.maxhenkel.rnnoise4j:rnnoise4j:2.1.2")
+    // WebRTC Android (Threema prebuilt) for access to org.webrtc audio processing
     implementation("ch.threema:webrtc-android:100.0.0")
 
 
