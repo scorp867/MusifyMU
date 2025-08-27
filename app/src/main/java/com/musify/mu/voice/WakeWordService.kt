@@ -72,8 +72,8 @@ class WakeWordService : Service() {
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private lateinit var headphoneDetector: HeadphoneDetector
-    private lateinit var commandController: CommandController
+    private var headphoneDetector: HeadphoneDetector? = null
+    private var commandController: CommandController? = null
     private lateinit var audioManager: AudioManager
 
     // Engines and audio
@@ -98,8 +98,6 @@ class WakeWordService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        headphoneDetector = HeadphoneDetector(this)
-        commandController = CommandController(this, headphoneDetector)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createNotificationChannel()
 
@@ -113,9 +111,7 @@ class WakeWordService : Service() {
         }
 
         // Warm up media controller fallback in background
-        serviceScope.launch(Dispatchers.Main) {
-            ensureController()
-        }
+        serviceScope.launch(Dispatchers.Main) { ensureController() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -218,15 +214,19 @@ class WakeWordService : Service() {
             return
         }
 
-        if (!headphoneDetector.hasHeadsetMicrophone()) {
+        // Lazily create headphone detector and command controller
+        val detector = headphoneDetector ?: HeadphoneDetector(this).also { headphoneDetector = it }
+        val controller = commandController ?: CommandController(this, detector).also { commandController = it }
+
+        if (!detector.hasHeadsetMicrophone()) {
             android.widget.Toast.makeText(this, "Headset with microphone required", android.widget.Toast.LENGTH_LONG).show()
             return
         }
         // Ensure exclusive routing once (guard Bluetooth permission on S+)
         try {
-            val isBt = headphoneDetector.getPreferredAudioSource() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            val isBt = detector.getPreferredAudioSource() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !isBt || hasPermission(android.Manifest.permission.BLUETOOTH_CONNECT)) {
-                headphoneDetector.forceAudioRoutingToHeadset()
+                detector.forceAudioRoutingToHeadset()
             } else {
                 android.util.Log.w("WakeWordService", "BLUETOOTH_CONNECT not granted - skipping forced BT routing")
                 showToast("Bluetooth permission missing - default mic routing")
@@ -291,11 +291,11 @@ class WakeWordService : Service() {
             // Monitor headphone connectivity and stop if disconnected
             headphoneMonitorJob?.cancel()
             headphoneMonitorJob = serviceScope.launch(Dispatchers.Main) {
-                headphoneDetector.isHeadphonesConnected.collect { connected ->
+                detector.isHeadphonesConnected.collect { connected ->
                     if (!connected) {
                         android.util.Log.w("WakeWordService", "Headphones disconnected - stopping wakeword listening")
                         showToast("Headphones disconnected - stopping")
-                        try { headphoneDetector.restoreDefaultAudioRouting() } catch (_: Exception) {}
+                        try { detector.restoreDefaultAudioRouting() } catch (_: Exception) {}
                         stopListening()
                         stopSelf()
                     }
@@ -326,6 +326,10 @@ class WakeWordService : Service() {
         voskRecognizer = null
         try { voskWakeRecognizer?.close() } catch (_: Exception) {}
         voskWakeRecognizer = null
+        try { headphoneDetector?.restoreDefaultAudioRouting() } catch (_: Exception) {}
+        try { headphoneDetector?.cleanup() } catch (_: Exception) {}
+        headphoneDetector = null
+        commandController = null
         // Audio effects are tied to session; they are released with AudioRecord. Nothing further needed.
     }
 
@@ -455,7 +459,7 @@ class WakeWordService : Service() {
     private fun processCommand(text: String) {
         try {
             val vcm = VoiceControlManager.getInstance(this)
-            val cmd = commandController.interpretCommand(text)
+            val cmd = commandController?.interpretCommand(text)
             if (cmd == null) {
                 showToast("Unrecognized: $text")
                 android.util.Log.d("WakeWordService", "Unrecognized command: $text")
