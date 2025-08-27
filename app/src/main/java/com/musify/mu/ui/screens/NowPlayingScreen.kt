@@ -59,6 +59,9 @@ import com.musify.mu.playback.QueueManager
 import com.musify.mu.voice.VoiceControlManager
 import com.musify.mu.ui.components.MoreOptionsMenu
 import com.musify.mu.ui.components.GymModeIndicator
+import com.musify.mu.util.PermissionHelper
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.ExperimentalMaterialApi
@@ -74,6 +77,14 @@ fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
+    // Runtime mic permission launcher
+    val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            voiceControlManager?.toggleGymMode()
+        } else {
+            android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
 
     // Get or create VoiceControlManager singleton
     val voiceControlManager = remember {
@@ -412,8 +423,13 @@ fun NowPlayingScreen(navController: NavController) {
                         isGymModeEnabled = isGymModeEnabled,
                         canEnableGymMode = canEnableGymMode,
                         onGymModeToggle = {
-                            isGymModeEnabled = !isGymModeEnabled
-                            voiceControlManager?.toggleGymMode()
+                            val activity = context as? android.app.Activity
+                            if (activity != null && !PermissionHelper.hasMicPermission(activity)) {
+                                micPermissionLauncher.launch(PermissionHelper.MIC_PERMISSION)
+                            } else {
+                                isGymModeEnabled = !isGymModeEnabled
+                                voiceControlManager?.toggleGymMode()
+                            }
                         }
                     )
                 }

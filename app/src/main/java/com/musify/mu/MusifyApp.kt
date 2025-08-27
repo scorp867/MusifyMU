@@ -1,6 +1,8 @@
 package com.musify.mu
 
 import android.app.Application
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ProcessLifecycleOwner
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +26,19 @@ class MusifyApp : Application(), ImageLoaderFactory {
         android.util.Log.d("MusifyApp", "Musify app initialized - data manager will be initialized by LibraryScreen")
 
         android.util.Log.d("MusifyApp", "Simple Musify app initialized successfully")
+
+        // Track app foreground/background state
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+                AppForegroundState.isInForeground = true
+                android.util.Log.d("MusifyApp", "App moved to foreground")
+            }
+
+            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
+                AppForegroundState.isInForeground = false
+                android.util.Log.d("MusifyApp", "App moved to background")
+            }
+        })
     }
 
     /**
@@ -38,4 +53,9 @@ class MusifyApp : Application(), ImageLoaderFactory {
             CoilImageLoaderConfig.createOptimizedImageLoader(this)
         }
     }
+}
+
+object AppForegroundState {
+    @Volatile
+    var isInForeground: Boolean = false
 }

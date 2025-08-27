@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -44,6 +45,8 @@ import kotlinx.coroutines.flow.collect
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.media.audiofx.AutomaticGainControl
+import android.Manifest
+import com.musify.mu.AppForegroundState
 
 class WakeWordService : Service() {
     companion object {
@@ -83,6 +86,7 @@ class WakeWordService : Service() {
     private var isInCommandWindow = false
     private var commandWindowEndAt = 0L
     private var headphoneMonitorJob: Job? = null
+    private var isForegroundStarted: Boolean = false
 
     @Volatile private var confidenceThreshold: Float = 0.7f
     @Volatile private var wakeConfidenceThreshold: Float = 0.8f
@@ -118,11 +122,49 @@ class WakeWordService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 stopListening()
+                if (isForegroundStarted) {
+                    try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Throwable) {}
+                    isForegroundStarted = false
+                }
                 stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
-                startForeground(NOTIF_ID, buildNotification())
+                // Android 14: Do not start a microphone FGS unless RECORD_AUDIO is granted
+                if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                    showToast("Microphone permission required for wakeword")
+                    android.util.Log.w("WakeWordService", "Aborting start: RECORD_AUDIO not granted")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
+                // On Android 14+, microphone FGS can only start while app is in foreground (or with exemptions)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !AppForegroundState.isInForeground) {
+                    android.util.Log.w("WakeWordService", "Aborting start: App not in foreground for microphone FGS on Android 14+")
+                    showToast("Open Musify to start wakeword listening")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
+                if (!isForegroundStarted) {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            startForeground(
+                                NOTIF_ID,
+                                buildNotification(),
+                                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                            )
+                        } else {
+                            startForeground(NOTIF_ID, buildNotification())
+                        }
+                        isForegroundStarted = true
+                    } catch (t: Throwable) {
+                        android.util.Log.e("WakeWordService", "startForeground failed: ${t.message}")
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                }
+
                 startListening()
                 return START_STICKY
             }
@@ -134,6 +176,10 @@ class WakeWordService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stopListening()
+        if (isForegroundStarted) {
+            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Throwable) {}
+            isForegroundStarted = false
+        }
         serviceScope.cancel()
     }
 
