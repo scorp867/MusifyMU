@@ -77,19 +77,20 @@ fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
+
+    // Get or create VoiceControlManager singleton
+    val voiceControlManager = remember {
+        controller?.let { mediaController ->
+            VoiceControlManager.createInstance(context, mediaController)
+        }
+    }
+
     // Runtime mic permission launcher
     val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) {
             voiceControlManager?.toggleGymMode()
         } else {
             android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
-
-    // Get or create VoiceControlManager singleton
-    val voiceControlManager = remember {
-        controller?.let { mediaController ->
-            VoiceControlManager.createInstance(context, mediaController)
         }
     }
 
