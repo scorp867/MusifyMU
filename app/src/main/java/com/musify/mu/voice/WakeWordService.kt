@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -44,6 +45,9 @@ import kotlinx.coroutines.flow.collect
 import android.media.audiofx.AcousticEchoCanceler
 import android.media.audiofx.NoiseSuppressor
 import android.media.audiofx.AutomaticGainControl
+import android.Manifest
+import com.musify.mu.AppForegroundState
+import com.google.common.util.concurrent.ListenableFuture
 
 class WakeWordService : Service() {
     companion object {
@@ -69,8 +73,8 @@ class WakeWordService : Service() {
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private lateinit var headphoneDetector: HeadphoneDetector
-    private lateinit var commandController: CommandController
+    private var headphoneDetector: HeadphoneDetector? = null
+    private var commandController: CommandController? = null
     private lateinit var audioManager: AudioManager
 
     // Engines and audio
@@ -83,19 +87,19 @@ class WakeWordService : Service() {
     private var isInCommandWindow = false
     private var commandWindowEndAt = 0L
     private var headphoneMonitorJob: Job? = null
+    private var isForegroundStarted: Boolean = false
 
     @Volatile private var confidenceThreshold: Float = 0.7f
     @Volatile private var wakeConfidenceThreshold: Float = 0.8f
 
     // Direct control fallback when VCM is unavailable
     @Volatile private var mediaController: MediaController? = null
+    @Volatile private var mediaControllerFuture: ListenableFuture<MediaController>? = null
 
     // No AccessKey needed for Vosk-only mode
 
     override fun onCreate() {
         super.onCreate()
-        headphoneDetector = HeadphoneDetector(this)
-        commandController = CommandController(this, headphoneDetector)
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         createNotificationChannel()
 
@@ -108,21 +112,56 @@ class WakeWordService : Service() {
             }
         }
 
-        // Warm up media controller fallback in background
-        serviceScope.launch(Dispatchers.Main) {
-            ensureController()
-        }
+        // Do not warm up media controller here; create on demand to avoid leaks
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
                 stopListening()
+                if (isForegroundStarted) {
+                    try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Throwable) {}
+                    isForegroundStarted = false
+                }
                 stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
-                startForeground(NOTIF_ID, buildNotification())
+                // Android 14: Do not start a microphone FGS unless RECORD_AUDIO is granted
+                if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
+                    showToast("Microphone permission required for wakeword")
+                    android.util.Log.w("WakeWordService", "Aborting start: RECORD_AUDIO not granted")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
+                // On Android 14+, microphone FGS can only start while app is in foreground (or with exemptions)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !AppForegroundState.isInForeground) {
+                    android.util.Log.w("WakeWordService", "Aborting start: App not in foreground for microphone FGS on Android 14+")
+                    showToast("Open Musify to start wakeword listening")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
+                if (!isForegroundStarted) {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            startForeground(
+                                NOTIF_ID,
+                                buildNotification(),
+                                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                            )
+                        } else {
+                            startForeground(NOTIF_ID, buildNotification())
+                        }
+                        isForegroundStarted = true
+                    } catch (t: Throwable) {
+                        android.util.Log.e("WakeWordService", "startForeground failed: ${t.message}")
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                }
+
                 startListening()
                 return START_STICKY
             }
@@ -134,6 +173,14 @@ class WakeWordService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stopListening()
+        if (isForegroundStarted) {
+            try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Throwable) {}
+            isForegroundStarted = false
+        }
+        try { mediaController?.release() } catch (_: Exception) {}
+        mediaController = null
+        try { mediaControllerFuture?.cancel(true) } catch (_: Exception) {}
+        mediaControllerFuture = null
         serviceScope.cancel()
     }
 
@@ -172,15 +219,19 @@ class WakeWordService : Service() {
             return
         }
 
-        if (!headphoneDetector.hasHeadsetMicrophone()) {
-            android.widget.Toast.makeText(this, "Headset with microphone required", android.widget.Toast.LENGTH_LONG).show()
-            return
+        // Lazily create headphone detector and command controller
+        val detector = headphoneDetector ?: HeadphoneDetector(this).also { headphoneDetector = it }
+        val controller = commandController ?: CommandController(this, detector).also { commandController = it }
+
+        // Allow fallback to device mic if no headset mic detected
+        if (!detector.hasHeadsetMicrophone()) {
+            android.util.Log.w("WakeWordService", "No headset microphone detected - falling back to device mic")
         }
         // Ensure exclusive routing once (guard Bluetooth permission on S+)
         try {
-            val isBt = headphoneDetector.getPreferredAudioSource() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            val isBt = detector.getPreferredAudioSource() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !isBt || hasPermission(android.Manifest.permission.BLUETOOTH_CONNECT)) {
-                headphoneDetector.forceAudioRoutingToHeadset()
+                detector.forceAudioRoutingToHeadset()
             } else {
                 android.util.Log.w("WakeWordService", "BLUETOOTH_CONNECT not granted - skipping forced BT routing")
                 showToast("Bluetooth permission missing - default mic routing")
@@ -191,73 +242,122 @@ class WakeWordService : Service() {
         }
 
         try {
-            // Start WebRTC capture with software AEC/NS/AGC. It emits processed 16k mono frames.
-            webRtcCapture = WebRtcCapture(
-                context = this,
-                onFrame = { frame ->
-                    serviceScope.launch(Dispatchers.Default) {
-                        try {
-                            if (!isInCommandWindow) {
-                                val wake = voskWakeRecognizer
-                                if (wake != null) {
-                                    val bytes = shortsToBytesLE(frame, frame.size)
-                                    val accepted = wake.acceptWaveForm(bytes, bytes.size)
-                                    if (accepted) {
-                                        val pair = parseVoskResult(wake.result)
-                                        if (pair != null) {
-                                            val text = pair.first
-                                            val conf = pair.second
-                                            if (isWakePhrase(text) && conf >= wakeConfidenceThreshold) {
-                                                android.util.Log.d("WakeWordService", "Wakeword detected by Vosk (conf=${"%.2f".format(conf)})")
+            // Start direct AudioRecord capture at 16 kHz mono and feed Vosk
+            val sampleRate = 16000
+            val channelConfig = AudioFormat.CHANNEL_IN_MONO
+            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+            val minBuf = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+            val bufferSize = kotlin.math.max(minBuf, 320 * 8)
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSize
+            )
+
+            // Enable platform effects if available
+            try {
+                if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(audioRecord!!.audioSessionId)?.enabled = true
+                if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(audioRecord!!.audioSessionId)?.enabled = true
+                if (AutomaticGainControl.isAvailable()) AutomaticGainControl.create(audioRecord!!.audioSessionId)?.enabled = true
+                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            } catch (_: Exception) {}
+
+            audioRecord?.startRecording()
+
+            val frameSize = 320 // 20 ms @ 16 kHz
+            val frameAccumulator = ShortArray(frameSize * 4)
+            var accLenLocal = 0
+
+            audioLoopJob = serviceScope.launch(Dispatchers.Default) {
+                val ioBuffer = ShortArray(2048)
+                while (isActive && audioRecord != null) {
+                    val n = try { audioRecord?.read(ioBuffer, 0, ioBuffer.size) ?: -1 } catch (_: Exception) { -1 }
+                    if (n == null || n <= 0) {
+                        kotlinx.coroutines.delay(5)
+                        continue
+                    }
+                    var offset = 0
+                    while (offset < n) {
+                        val copy = kotlin.math.min(n - offset, frameAccumulator.size - accLenLocal)
+                        System.arraycopy(ioBuffer, offset, frameAccumulator, accLenLocal, copy)
+                        accLenLocal += copy
+                        offset += copy
+                        while (accLenLocal >= frameSize) {
+                            val out = ShortArray(frameSize)
+                            System.arraycopy(frameAccumulator, 0, out, 0, frameSize)
+                            try {
+                                if (!isInCommandWindow) {
+                                    val wake = voskWakeRecognizer
+                                    if (wake != null) {
+                                        val bytes = shortsToBytesLE(out, out.size)
+                                        val accepted = wake.acceptWaveForm(bytes, bytes.size)
+                                        if (accepted) {
+                                            val pair = parseVoskResult(wake.result)
+                                            if (pair != null) {
+                                                val text = pair.first
+                                                val conf = pair.second
+                                                if (isWakePhrase(text) && conf >= wakeConfidenceThreshold) {
+                                                    android.util.Log.d("WakeWordService", "Wakeword detected by Vosk (conf=${"%.2f".format(conf)})")
+                                                    showToast("Wakeword detected")
+                                                    openCommandWindow()
+                                                    try { wake.reset() } catch (_: Exception) {}
+                                                }
+                                            }
+                                        } else {
+                                            val partialJson = wake.partialResult
+                                            val partialText = parseText(partialJson) ?: ""
+                                            if (isWakePhrase(partialText)) {
+                                                android.util.Log.d("WakeWordService", "Wakeword partial detected by Vosk")
                                                 showToast("Wakeword detected")
                                                 openCommandWindow()
                                                 try { wake.reset() } catch (_: Exception) {}
                                             }
                                         }
-                                    } else {
-                                        val partialJson = wake.partialResult
-                                        val partialText = parseText(partialJson) ?: ""
-                                        if (isWakePhrase(partialText)) {
-                                            android.util.Log.d("WakeWordService", "Wakeword partial detected by Vosk")
-                                            showToast("Wakeword detected")
-                                            openCommandWindow()
-                                            try { wake.reset() } catch (_: Exception) {}
-                                        }
+                                    }
+                                } else {
+                                    processCommandFrame(out, out.size)
+                                    if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
+                                        android.util.Log.d("WakeWordService", "Command window timeout reached")
+                                        showToast("Command window ended")
+                                        finalizeCommandWindow()
                                     }
                                 }
-                            } else {
-                                processCommandFrame(frame, frame.size)
-                                if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
-                                    android.util.Log.d("WakeWordService", "Command window timeout reached")
-                                    showToast("Command window ended")
-                                    finalizeCommandWindow()
-                                }
+                            } catch (t: Throwable) {
+                                android.util.Log.w("WakeWordService", "Frame handling failed: ${t.message}")
                             }
-                        } catch (t: Throwable) {
-                            android.util.Log.w("WakeWordService", "Frame handling failed: ${t.message}")
+                            // shift leftover
+                            val remain = accLenLocal - frameSize
+                            if (remain > 0) {
+                                System.arraycopy(frameAccumulator, frameSize, frameAccumulator, 0, remain)
+                            }
+                            accLenLocal = remain
                         }
                     }
-                },
-                onError = { msg -> android.util.Log.e("WakeWordService", msg) }
-            )
-            webRtcCapture?.start()
+                }
+            }
 
             // Monitor headphone connectivity and stop if disconnected
             headphoneMonitorJob?.cancel()
+            // Optional: Keep monitoring but don't stop when disconnected; just log
             headphoneMonitorJob = serviceScope.launch(Dispatchers.Main) {
-                headphoneDetector.isHeadphonesConnected.collect { connected ->
+                detector.isHeadphonesConnected.collect { connected ->
                     if (!connected) {
-                        android.util.Log.w("WakeWordService", "Headphones disconnected - stopping wakeword listening")
-                        showToast("Headphones disconnected - stopping")
-                        try { headphoneDetector.restoreDefaultAudioRouting() } catch (_: Exception) {}
-                        stopListening()
-                        stopSelf()
+                        android.util.Log.w("WakeWordService", "Headphones disconnected - continuing with device mic")
+                        try { detector.restoreDefaultAudioRouting() } catch (_: Exception) {}
                     }
                 }
             }
 
             // Prepare wake recognizer upfront
-            serviceScope.launch(Dispatchers.Main) { ensureWakeRecognizer() }
+            serviceScope.launch(Dispatchers.Main) {
+                val wake = ensureWakeRecognizer()
+                if (wake == null) {
+                    showToast("Wake model unavailable")
+                    android.util.Log.w("WakeWordService", "Wake recognizer not initialized")
+                }
+            }
             showToast("Wakeword listening started")
             android.util.Log.d("WakeWordService", "Listening started (WebRTC AudioProcessing)")
         } catch (e: Exception) {
@@ -280,6 +380,14 @@ class WakeWordService : Service() {
         voskRecognizer = null
         try { voskWakeRecognizer?.close() } catch (_: Exception) {}
         voskWakeRecognizer = null
+        try { mediaController?.release() } catch (_: Exception) {}
+        mediaController = null
+        try { mediaControllerFuture?.cancel(true) } catch (_: Exception) {}
+        mediaControllerFuture = null
+        try { headphoneDetector?.restoreDefaultAudioRouting() } catch (_: Exception) {}
+        try { headphoneDetector?.cleanup() } catch (_: Exception) {}
+        headphoneDetector = null
+        commandController = null
         // Audio effects are tied to session; they are released with AudioRecord. Nothing further needed.
     }
 
@@ -330,8 +438,10 @@ class WakeWordService : Service() {
         return try {
             val token = SessionToken(this, ComponentName(this, com.musify.mu.playback.PlayerService::class.java))
             val future = MediaController.Builder(this, token).buildAsync()
+            mediaControllerFuture = future
             val controller = future.await()
             mediaController = controller
+            mediaControllerFuture = null
             controller
         } catch (e: Exception) {
             android.util.Log.w("WakeWordService", "Failed to create MediaController: ${e.message}")
@@ -378,7 +488,12 @@ class WakeWordService : Service() {
         isInCommandWindow = false
         showToast("Wakeword listening…")
         // Ensure wake recognizer is available for the next cycle
-        serviceScope.launch(Dispatchers.Main) { ensureWakeRecognizer() }
+        serviceScope.launch(Dispatchers.Main) {
+            val wake = ensureWakeRecognizer()
+            if (wake == null) {
+                android.util.Log.w("WakeWordService", "Wake recognizer re-init failed")
+            }
+        }
     }
 
     private fun processCommandFrame(frame: ShortArray, n: Int) {
@@ -409,7 +524,7 @@ class WakeWordService : Service() {
     private fun processCommand(text: String) {
         try {
             val vcm = VoiceControlManager.getInstance(this)
-            val cmd = commandController.interpretCommand(text)
+            val cmd = commandController?.interpretCommand(text)
             if (cmd == null) {
                 showToast("Unrecognized: $text")
                 android.util.Log.d("WakeWordService", "Unrecognized command: $text")
