@@ -2,8 +2,7 @@ package com.musify.mu.voice
 
 import android.content.Context
 import android.media.MediaRecorder
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+ 
 import java.util.concurrent.atomic.AtomicBoolean
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -149,11 +148,16 @@ class WebRtcCapture(
     private fun handleSamples(samples: JavaAudioDeviceModule.AudioSamples) {
         val sampleRate = samples.sampleRate
         val channels = samples.channelCount
-        val buffer = samples.data
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
-        val numShorts = samples.numSamples * channels
+        val bytes = samples.data
+        val numShorts = bytes.size / 2
         val tmp = ShortArray(numShorts)
-        buffer.asShortBuffer().get(tmp)
+        var bIndex = 0
+        for (i in 0 until numShorts) {
+            val lo = bytes[bIndex].toInt() and 0xFF
+            val hi = bytes[bIndex + 1].toInt()
+            tmp[i] = ((hi shl 8) or lo).toShort()
+            bIndex += 2
+        }
 
         // Downmix to mono if needed
         val mono = if (channels == 1) tmp else downmixToMono(tmp, channels)
