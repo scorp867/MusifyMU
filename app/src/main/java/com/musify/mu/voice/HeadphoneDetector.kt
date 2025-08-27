@@ -47,22 +47,64 @@ class HeadphoneDetector(private val context: Context) {
                     }
                 }
                 AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED -> {
-                    // Use unified detection to avoid false disconnects during SCO transitions
-                    val hasHeadphones = hasAnyHeadphonesConnected()
-                    val previousState = _isHeadphonesConnected.value
-                    _isHeadphonesConnected.value = hasHeadphones
+                    val scoState = intent?.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_ERROR)
+                    android.util.Log.d("HeadphoneDetector", "SCO state updated: $scoState")
+                    
+                    // Handle SCO disconnection specifically
+                    when (scoState) {
+                        AudioManager.SCO_AUDIO_STATE_DISCONNECTED -> {
+                            android.util.Log.d("HeadphoneDetector", "Bluetooth SCO disconnected - ending communication mode")
+                            
+                            // Restore normal audio mode immediately when SCO is manually disconnected
+                            try {
+                                audioManager.mode = AudioManager.MODE_NORMAL
+                                audioManager.isBluetoothScoOn = false
+                                android.util.Log.d("HeadphoneDetector", "Restored normal audio mode after SCO disconnect")
+                            } catch (e: Exception) {
+                                android.util.Log.w("HeadphoneDetector", "Failed to restore normal audio mode", e)
+                            }
+                            
+                            // Update connectivity state
+                            val hasHeadphones = hasAnyHeadphonesConnected()
+                            val previousState = _isHeadphonesConnected.value
+                            _isHeadphonesConnected.value = hasHeadphones
 
-                    android.util.Log.d("HeadphoneDetector", "SCO state updated, total connected: $hasHeadphones")
+                            // Show toast for disconnection
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastToastTime > toastDebounceMs) {
+                                lastToastTime = currentTime
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Bluetooth communication ended",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
+                        AudioManager.SCO_AUDIO_STATE_CONNECTED -> {
+                            android.util.Log.d("HeadphoneDetector", "Bluetooth SCO connected")
+                            // Update connectivity state
+                            val hasHeadphones = hasAnyHeadphonesConnected()
+                            _isHeadphonesConnected.value = hasHeadphones
+                        }
+                        else -> {
+                            // For other states, use unified detection to avoid false disconnects during SCO transitions
+                            val hasHeadphones = hasAnyHeadphonesConnected()
+                            val previousState = _isHeadphonesConnected.value
+                            _isHeadphonesConnected.value = hasHeadphones
 
-                    // Only show toast if state actually changed and not too frequent
-                    val currentTime = System.currentTimeMillis()
-                    if (previousState != hasHeadphones && currentTime - lastToastTime > toastDebounceMs) {
-                        lastToastTime = currentTime
-                        android.widget.Toast.makeText(
-                            context,
-                            "Headphones ${if (hasHeadphones) "connected" else "disconnected"}",
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
+                            android.util.Log.d("HeadphoneDetector", "SCO state $scoState, total connected: $hasHeadphones")
+
+                            // Only show toast if state actually changed and not too frequent
+                            val currentTime = System.currentTimeMillis()
+                            if (previousState != hasHeadphones && currentTime - lastToastTime > toastDebounceMs) {
+                                lastToastTime = currentTime
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Headphones ${if (hasHeadphones) "connected" else "disconnected"}",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        }
                     }
                 }
                 // Note: ACTION_DEVICE_CONNECTION_CHANGED is not available in current API level
@@ -299,28 +341,25 @@ class HeadphoneDetector(private val context: Context) {
      * Restore default audio routing when Gym Mode is deactivated
      */
     fun restoreDefaultAudioRouting() {
-        val preferredSource = getPreferredAudioSource()
-        android.util.Log.d("HeadphoneDetector", "Restoring default audio routing from: $preferredSource")
+        android.util.Log.d("HeadphoneDetector", "Restoring default audio routing")
 
-        when (preferredSource) {
-            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
-                try {
-                    // Stop Bluetooth SCO audio and restore default routing
-                    audioManager.stopBluetoothSco()
-                    audioManager.isBluetoothScoOn = false
-
-                    // Restore normal audio mode
-                    audioManager.mode = AudioManager.MODE_NORMAL
-
-                    android.util.Log.d("HeadphoneDetector", "Successfully restored default audio routing - headset exclusive mode ended")
-                } catch (e: Exception) {
-                    android.util.Log.w("HeadphoneDetector", "Failed to restore default audio routing", e)
-                }
+        try {
+            // Always restore normal audio mode regardless of preferred source
+            audioManager.mode = AudioManager.MODE_NORMAL
+            
+            // If Bluetooth SCO is currently active, stop it
+            if (audioManager.isBluetoothScoOn) {
+                audioManager.stopBluetoothSco()
+                audioManager.isBluetoothScoOn = false
+                android.util.Log.d("HeadphoneDetector", "Stopped active Bluetooth SCO")
             }
-            else -> {
-                // For wired/USB headsets, no special cleanup needed
-                android.util.Log.d("HeadphoneDetector", "Default audio routing restored")
-            }
+
+            // Ensure speakerphone is turned off
+            audioManager.isSpeakerphoneOn = false
+
+            android.util.Log.d("HeadphoneDetector", "Successfully restored default audio routing - communication mode ended")
+        } catch (e: Exception) {
+            android.util.Log.w("HeadphoneDetector", "Failed to restore default audio routing", e)
         }
     }
 

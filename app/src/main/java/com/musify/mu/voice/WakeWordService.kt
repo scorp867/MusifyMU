@@ -126,6 +126,40 @@ class WakeWordService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
+            "NOTIFICATION_DELETE_REQUEST" -> {
+                // Handle notification dismissal request - check if playback is active
+                val isPlaying = try {
+                    mediaController?.isPlaying ?: false
+                } catch (e: Exception) {
+                    false
+                }
+                
+                if (isPlaying) {
+                    // Playback is active - show warning and recreate notification
+                    showToast("Cannot dismiss notification while music is playing")
+                    android.util.Log.d("WakeWordService", "Prevented notification dismissal during playback")
+                    
+                    // Update notification to reflect current state
+                    if (isForegroundStarted) {
+                        try {
+                            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                            notificationManager.notify(NOTIF_ID, buildNotification())
+                        } catch (e: Exception) {
+                            android.util.Log.w("WakeWordService", "Failed to update notification", e)
+                        }
+                    }
+                } else {
+                    // No playback - allow dismissal by stopping the service
+                    android.util.Log.d("WakeWordService", "Allowing notification dismissal - no active playback")
+                    stopListening()
+                    if (isForegroundStarted) {
+                        try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Throwable) {}
+                        isForegroundStarted = false
+                    }
+                    stopSelf()
+                }
+                return START_NOT_STICKY
+            }
             else -> {
                 // Android 14: Do not start a microphone FGS unless RECORD_AUDIO is granted
                 if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
@@ -170,6 +204,31 @@ class WakeWordService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // App was swiped away from recents - stop service immediately
+        android.util.Log.d("WakeWordService", "App swiped away from recents - stopping wake word service immediately")
+        
+        // Stop listening and clear notification immediately
+        stopListening()
+        if (isForegroundStarted) {
+            try { 
+                stopForeground(STOP_FOREGROUND_REMOVE) 
+                // Also clear notification manually to ensure instant dismissal
+                val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                notificationManager.cancel(NOTIF_ID)
+                android.util.Log.d("WakeWordService", "Notification cleared immediately on task removal")
+            } catch (e: Throwable) {
+                android.util.Log.w("WakeWordService", "Error clearing notification on task removal", e)
+            }
+            isForegroundStarted = false
+        }
+        
+        // Stop service immediately
+        serviceScope.cancel()
+        stopSelf()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         stopListening()
@@ -189,19 +248,43 @@ class WakeWordService : Service() {
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        
+        // Check if music is currently playing to determine if notification should be dismissible
+        val isPlaying = try {
+            mediaController?.isPlaying ?: false
+        } catch (e: Exception) {
+            false
+        }
+        
+        // Create a delete intent that checks if playback is active before allowing dismissal
+        val deleteIntent = Intent(this, WakeWordService::class.java).apply {
+            action = "NOTIFICATION_DELETE_REQUEST"
+        }
+        val deletePendingIntent = PendingIntent.getService(
+            this, 1, deleteIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        
         return NotificationCompat.Builder(this, NOTIF_CHANNEL_ID)
             .setContentTitle("Gym Mode Wake Word")
-            .setContentText("Listening for wake word…")
+            .setContentText(if (isPlaying) "Listening (Music playing - cannot dismiss)" else "Listening for wake word…")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
+            .setDeleteIntent(if (isPlaying) deletePendingIntent else null) // Custom delete handler when playing
             .setOngoing(true)
+            .setAutoCancel(false) // Prevent dismissal by swipe
             .build()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val ch = NotificationChannel(NOTIF_CHANNEL_ID, "Wake Word", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(NOTIF_CHANNEL_ID, "Wake Word", NotificationManager.IMPORTANCE_LOW).apply {
+                // Make channel non-dismissible during important operations
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            }
             nm.createNotificationChannel(ch)
         }
     }
