@@ -2,9 +2,10 @@ package com.musify.mu.voice
 
 import android.content.Context
 import android.media.MediaRecorder
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+
 import java.util.concurrent.atomic.AtomicBoolean
+import android.os.Handler
+import android.os.Looper
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.DefaultVideoDecoderFactory
@@ -17,6 +18,8 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpSender
 import org.webrtc.RtpTransceiver
+import org.webrtc.SdpObserver
+import org.webrtc.SessionDescription
 import org.webrtc.audio.JavaAudioDeviceModule
 
 /**
@@ -39,7 +42,10 @@ class WebRtcCapture(
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
     private var peerConnection: PeerConnection? = null
+    private var loopbackPeerConnection: PeerConnection? = null
     private var audioSender: RtpSender? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var receivedSamples = false
 
     private val started = AtomicBoolean(false)
 
@@ -63,6 +69,7 @@ class WebRtcCapture(
             val samplesCallback = object : JavaAudioDeviceModule.SamplesReadyCallback {
                 override fun onWebRtcAudioRecordSamplesReady(samples: JavaAudioDeviceModule.AudioSamples) {
                     try {
+                        receivedSamples = true
                         handleSamples(samples)
                     } catch (t: Throwable) {
                         onError("APM sample handling failed: ${t.message}")
@@ -102,7 +109,9 @@ class WebRtcCapture(
                     override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {}
                     override fun onIceConnectionReceivingChange(receiving: Boolean) {}
                     override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {}
-                    override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {}
+                    override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {
+                        try { loopbackPeerConnection?.addIceCandidate(candidate) } catch (_: Throwable) {}
+                    }
                     override fun onIceCandidatesRemoved(candidates: Array<out org.webrtc.IceCandidate>) {}
                     override fun onAddStream(stream: MediaStream) {}
                     override fun onRemoveStream(stream: MediaStream) {}
@@ -112,15 +121,91 @@ class WebRtcCapture(
                 }
             )
 
-            // Create a local media stream and add the audio track so that capture starts.
-            val localStream = peerConnectionFactory!!.createLocalMediaStream("ARDAMS")
-            localStream.addTrack(audioTrack)
-            peerConnection!!.addStream(localStream)
+            // Create a loopback peer connection to complete SDP handshake locally
+            loopbackPeerConnection = peerConnectionFactory!!.createPeerConnection(
+                rtcConfig,
+                object : PeerConnection.Observer {
+                    override fun onSignalingChange(newState: PeerConnection.SignalingState) {}
+                    override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {}
+                    override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+                    override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {}
+                    override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {
+                        try { peerConnection?.addIceCandidate(candidate) } catch (_: Throwable) {}
+                    }
+                    override fun onIceCandidatesRemoved(candidates: Array<out org.webrtc.IceCandidate>) {}
+                    override fun onAddStream(stream: MediaStream) {}
+                    override fun onRemoveStream(stream: MediaStream) {}
+                    override fun onDataChannel(dc: org.webrtc.DataChannel) {}
+                    override fun onRenegotiationNeeded() {}
+                    override fun onAddTrack(receiver: org.webrtc.RtpReceiver, streams: Array<out MediaStream>) {}
+                }
+            )
 
-            // Ensure a sender exists (not strictly necessary, but keeps API consistent)
-            audioSender = peerConnection!!.senders.find { it.track() == audioTrack } ?: run {
-                peerConnection!!.addTrack(audioTrack, listOf("ARDAMS"))
+            try { loopbackPeerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO) } catch (_: Throwable) {}
+
+            // Unified Plan: addTrack directly
+            audioSender = peerConnection!!.addTrack(audioTrack, listOf("ARDAMS"))
+
+            // Perform local loopback SDP handshake to ensure audio capture starts
+            val offerConstraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
             }
+            peerConnection!!.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(offer: SessionDescription) {
+                    try {
+                        peerConnection?.setLocalDescription(object : SdpObserver {
+                            override fun onSetSuccess() {
+                                try {
+                                    loopbackPeerConnection?.setRemoteDescription(object : SdpObserver {
+                                        override fun onSetSuccess() {
+                                            loopbackPeerConnection?.createAnswer(object : SdpObserver {
+                                                override fun onCreateSuccess(answer: SessionDescription) {
+                                                    try {
+                                                        loopbackPeerConnection?.setLocalDescription(object : SdpObserver {
+                                                            override fun onSetSuccess() {
+                                                                peerConnection?.setRemoteDescription(object : SdpObserver {
+                                                                    override fun onSetSuccess() {}
+                                                                    override fun onSetFailure(p0: String?) {}
+                                                                    override fun onCreateSuccess(p0: SessionDescription?) {}
+                                                                    override fun onCreateFailure(p0: String?) {}
+                                                                }, answer)
+                                                            }
+                                                            override fun onSetFailure(p0: String?) {}
+                                                            override fun onCreateSuccess(p0: SessionDescription?) {}
+                                                            override fun onCreateFailure(p0: String?) {}
+                                                        }, answer)
+                                                    } catch (_: Throwable) {}
+                                                }
+                                                override fun onCreateFailure(p0: String?) {}
+                                                override fun onSetSuccess() {}
+                                                override fun onSetFailure(p0: String?) {}
+                                            }, MediaConstraints())
+                                        }
+                                        override fun onSetFailure(p0: String?) {}
+                                        override fun onCreateSuccess(p0: SessionDescription?) {}
+                                        override fun onCreateFailure(p0: String?) {}
+                                    }, offer)
+                                } catch (_: Throwable) {}
+                            }
+                            override fun onSetFailure(p0: String?) {}
+                            override fun onCreateSuccess(p0: SessionDescription?) {}
+                            override fun onCreateFailure(p0: String?) {}
+                        }, offer)
+                    } catch (_: Throwable) {}
+                }
+                override fun onCreateFailure(error: String?) {}
+                override fun onSetSuccess() {}
+                override fun onSetFailure(p0: String?) {}
+            }, offerConstraints)
+
+            // If no samples arrive shortly after starting, notify via onError so caller can fallback
+            receivedSamples = false
+            mainHandler.postDelayed({
+                if (started.get() && !receivedSamples) {
+                    onError("WebRTC audio processing produced no samples (timeout)")
+                }
+            }, 2000)
         } catch (t: Throwable) {
             onError("WebRTC init failed: ${t.message}")
             stop()
@@ -129,8 +214,10 @@ class WebRtcCapture(
 
     fun stop() {
         if (!started.getAndSet(false)) return
+        try { mainHandler.removeCallbacksAndMessages(null) } catch (_: Throwable) {}
         try { audioSender?.setTrack(null, false) } catch (_: Throwable) {}
         try { peerConnection?.close() } catch (_: Throwable) {}
+        try { loopbackPeerConnection?.close() } catch (_: Throwable) {}
         try { audioTrack?.dispose() } catch (_: Throwable) {}
         try { audioSource?.dispose() } catch (_: Throwable) {}
         try { peerConnectionFactory?.dispose() } catch (_: Throwable) {}
@@ -138,6 +225,7 @@ class WebRtcCapture(
         try { eglBase?.release() } catch (_: Throwable) {}
         audioSender = null
         peerConnection = null
+        loopbackPeerConnection = null
         audioTrack = null
         audioSource = null
         peerConnectionFactory = null
@@ -149,11 +237,16 @@ class WebRtcCapture(
     private fun handleSamples(samples: JavaAudioDeviceModule.AudioSamples) {
         val sampleRate = samples.sampleRate
         val channels = samples.channelCount
-        val buffer = samples.data
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
-        val numShorts = samples.numSamples * channels
+        val bytes = samples.data
+        val numShorts = bytes.size / 2
         val tmp = ShortArray(numShorts)
-        buffer.asShortBuffer().get(tmp)
+        var bIndex = 0
+        for (i in 0 until numShorts) {
+            val lo = bytes[bIndex].toInt() and 0xFF
+            val hi = bytes[bIndex + 1].toInt() and 0xFF
+            tmp[i] = (((hi shl 8) or lo) and 0xFFFF).toShort()
+            bIndex += 2
+        }
 
         // Downmix to mono if needed
         val mono = if (channels == 1) tmp else downmixToMono(tmp, channels)

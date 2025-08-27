@@ -93,6 +93,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.3")
     implementation("androidx.compose.runtime:runtime-livedata")
+    implementation("androidx.lifecycle:lifecycle-process:2.8.3")
 
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
@@ -107,9 +108,9 @@ dependencies {
     // Speech Module For Voice Commands (GYM MODE)
     implementation("com.alphacephei:vosk-android:0.3.47")
     // Picovoice Porcupine for wake word detection
-    implementation("ai.picovoice:porcupine-android:3.0.3")
+
     // RNNoise for real-time audio noise suppression
-    implementation("de.maxhenkel.rnnoise4j:rnnoise4j:2.1.2")
+
     // WebRTC Android (Threema prebuilt) for access to org.webrtc audio processing
     implementation("ch.threema:webrtc-android:100.0.0")
 
