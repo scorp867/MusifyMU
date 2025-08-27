@@ -40,6 +40,7 @@ class WebRtcCapture(
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
     private var peerConnection: PeerConnection? = null
+    private var loopbackPeerConnection: PeerConnection? = null
     private var audioSender: RtpSender? = null
 
     private val started = AtomicBoolean(false)
@@ -113,23 +114,73 @@ class WebRtcCapture(
                 }
             )
 
+            // Create a loopback peer connection to complete SDP handshake locally
+            loopbackPeerConnection = peerConnectionFactory!!.createPeerConnection(
+                rtcConfig,
+                object : PeerConnection.Observer {
+                    override fun onSignalingChange(newState: PeerConnection.SignalingState) {}
+                    override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {}
+                    override fun onIceConnectionReceivingChange(receiving: Boolean) {}
+                    override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {}
+                    override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {}
+                    override fun onIceCandidatesRemoved(candidates: Array<out org.webrtc.IceCandidate>) {}
+                    override fun onAddStream(stream: MediaStream) {}
+                    override fun onRemoveStream(stream: MediaStream) {}
+                    override fun onDataChannel(dc: org.webrtc.DataChannel) {}
+                    override fun onRenegotiationNeeded() {}
+                    override fun onAddTrack(receiver: org.webrtc.RtpReceiver, streams: Array<out MediaStream>) {}
+                }
+            )
+
             // Unified Plan: addTrack directly
             audioSender = peerConnection!!.addTrack(audioTrack, listOf("ARDAMS"))
 
-            // Create a local offer and set as local description to trigger audio capture
+            // Perform local loopback SDP handshake to ensure audio capture starts
             val offerConstraints = MediaConstraints().apply {
                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
                 mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
             }
             peerConnection!!.createOffer(object : SdpObserver {
-                override fun onCreateSuccess(desc: SessionDescription) {
+                override fun onCreateSuccess(offer: SessionDescription) {
                     try {
                         peerConnection?.setLocalDescription(object : SdpObserver {
-                            override fun onSetSuccess() {}
+                            override fun onSetSuccess() {
+                                try {
+                                    loopbackPeerConnection?.setRemoteDescription(object : SdpObserver {
+                                        override fun onSetSuccess() {
+                                            loopbackPeerConnection?.createAnswer(object : SdpObserver {
+                                                override fun onCreateSuccess(answer: SessionDescription) {
+                                                    try {
+                                                        loopbackPeerConnection?.setLocalDescription(object : SdpObserver {
+                                                            override fun onSetSuccess() {
+                                                                peerConnection?.setRemoteDescription(object : SdpObserver {
+                                                                    override fun onSetSuccess() {}
+                                                                    override fun onSetFailure(p0: String?) {}
+                                                                    override fun onCreateSuccess(p0: SessionDescription?) {}
+                                                                    override fun onCreateFailure(p0: String?) {}
+                                                                }, answer)
+                                                            }
+                                                            override fun onSetFailure(p0: String?) {}
+                                                            override fun onCreateSuccess(p0: SessionDescription?) {}
+                                                            override fun onCreateFailure(p0: String?) {}
+                                                        }, answer)
+                                                    } catch (_: Throwable) {}
+                                                }
+                                                override fun onCreateFailure(p0: String?) {}
+                                                override fun onSetSuccess() {}
+                                                override fun onSetFailure(p0: String?) {}
+                                            }, MediaConstraints())
+                                        }
+                                        override fun onSetFailure(p0: String?) {}
+                                        override fun onCreateSuccess(p0: SessionDescription?) {}
+                                        override fun onCreateFailure(p0: String?) {}
+                                    }, offer)
+                                } catch (_: Throwable) {}
+                            }
                             override fun onSetFailure(p0: String?) {}
                             override fun onCreateSuccess(p0: SessionDescription?) {}
                             override fun onCreateFailure(p0: String?) {}
-                        }, desc)
+                        }, offer)
                     } catch (_: Throwable) {}
                 }
                 override fun onCreateFailure(error: String?) {}
