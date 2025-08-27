@@ -104,7 +104,9 @@ class WebRtcCapture(
                     override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {}
                     override fun onIceConnectionReceivingChange(receiving: Boolean) {}
                     override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {}
-                    override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {}
+                    override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {
+                        try { loopbackPeerConnection?.addIceCandidate(candidate) } catch (_: Throwable) {}
+                    }
                     override fun onIceCandidatesRemoved(candidates: Array<out org.webrtc.IceCandidate>) {}
                     override fun onAddStream(stream: MediaStream) {}
                     override fun onRemoveStream(stream: MediaStream) {}
@@ -122,7 +124,9 @@ class WebRtcCapture(
                     override fun onIceConnectionChange(newState: PeerConnection.IceConnectionState) {}
                     override fun onIceConnectionReceivingChange(receiving: Boolean) {}
                     override fun onIceGatheringChange(newState: PeerConnection.IceGatheringState) {}
-                    override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {}
+                    override fun onIceCandidate(candidate: org.webrtc.IceCandidate) {
+                        try { peerConnection?.addIceCandidate(candidate) } catch (_: Throwable) {}
+                    }
                     override fun onIceCandidatesRemoved(candidates: Array<out org.webrtc.IceCandidate>) {}
                     override fun onAddStream(stream: MediaStream) {}
                     override fun onRemoveStream(stream: MediaStream) {}
@@ -131,6 +135,8 @@ class WebRtcCapture(
                     override fun onAddTrack(receiver: org.webrtc.RtpReceiver, streams: Array<out MediaStream>) {}
                 }
             )
+
+            try { loopbackPeerConnection?.addTransceiver(MediaStreamTrack.MediaType.AUDIO) } catch (_: Throwable) {}
 
             // Unified Plan: addTrack directly
             audioSender = peerConnection!!.addTrack(audioTrack, listOf("ARDAMS"))
