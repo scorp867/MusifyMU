@@ -242,11 +242,17 @@ class PlayerService : MediaLibraryService() {
         // Build session with a placeholder player that will be replaced on first playback
         val placeholderPlayer = ExoPlayer.Builder(this).build()
 
+        // Create custom notification provider
+        val notificationProvider = MusifyMediaNotificationProvider(this)
+        
         mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(this, placeholderPlayer, callback)
             .setId("MusifyMU_Session")
             .setShowPlayButtonIfPlaybackIsSuppressed(false)
             .setSessionActivity(createPlayerActivityIntent())
             .build()
+            
+        // Set the custom notification provider
+        setMediaNotificationProvider(notificationProvider)
 
         // Player and QueueManager will be created in ensurePlayerInitialized() when needed
         // This prevents duplicate creation and ensures proper initialization order
@@ -264,9 +270,26 @@ class PlayerService : MediaLibraryService() {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
         android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
+        
+        // Stop playback immediately
+        try {
+            _player?.stop()
+            _player?.clearMediaItems()
+        } catch (_: Exception) {}
+        
+        // Release the media session immediately to clear notification
+        try {
+            mediaLibrarySession?.release()
+            mediaLibrarySession = null
+        } catch (_: Exception) {}
 
-        // Stop foreground service and clear notifications
+        // Stop foreground service and clear notifications immediately
         stopForeground(STOP_FOREGROUND_REMOVE)
+        
+        // Clear any remaining notifications
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancelAll()
+        
         // Stop the service completely
         serviceScope.cancel()
         stopSelf()
