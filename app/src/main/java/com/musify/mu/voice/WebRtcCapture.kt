@@ -111,15 +111,8 @@ class WebRtcCapture(
                 }
             )
 
-            // Create a local media stream and add the audio track so that capture starts.
-            val localStream = peerConnectionFactory!!.createLocalMediaStream("ARDAMS")
-            localStream.addTrack(audioTrack)
-            peerConnection!!.addStream(localStream)
-
-            // Ensure a sender exists (not strictly necessary, but keeps API consistent)
-            audioSender = peerConnection!!.senders.find { it.track() == audioTrack } ?: run {
-                peerConnection!!.addTrack(audioTrack, listOf("ARDAMS"))
-            }
+            // Unified Plan: addTrack directly to start audio capture path
+            audioSender = peerConnection!!.addTrack(audioTrack, listOf("ARDAMS"))
         } catch (t: Throwable) {
             onError("WebRTC init failed: ${t.message}")
             stop()
