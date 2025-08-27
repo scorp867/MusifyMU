@@ -287,16 +287,31 @@ class CommandController(
                     try {
                         val originalVolume = audioManager.getStreamVolume(AudioManager.STREAM_SYSTEM)
                         audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, 0, 0)
+                        
+                        // Properly end communication mode to prevent music playing on phone speaker
                         audioManager.stopBluetoothSco()
                         audioManager.isBluetoothScoOn = false
                         audioManager.mode = AudioManager.MODE_NORMAL
+                        
+                        android.util.Log.d("CommandController", "Cleaned up Bluetooth SCO audio routing - restored normal mode")
+                        
                         kotlinx.coroutines.GlobalScope.launch {
                             kotlinx.coroutines.delay(300)
                             audioManager.setStreamVolume(AudioManager.STREAM_SYSTEM, originalVolume, 0)
                         }
-                    } catch (_: Exception) { }
+                    } catch (e: Exception) { 
+                        android.util.Log.w("CommandController", "Failed to clean up Bluetooth SCO routing", e)
+                    }
                 }
-                else -> { }
+                else -> {
+                    // Ensure normal mode is restored even for other audio sources
+                    try {
+                        audioManager.mode = AudioManager.MODE_NORMAL
+                        android.util.Log.d("CommandController", "Restored normal audio mode")
+                    } catch (e: Exception) {
+                        android.util.Log.w("CommandController", "Failed to restore normal audio mode", e)
+                    }
+                }
             }
         }
     }

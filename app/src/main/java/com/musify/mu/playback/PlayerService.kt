@@ -19,6 +19,7 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.musify.mu.ui.MainActivity
 import com.musify.mu.data.repo.LibraryRepository
+import com.musify.mu.voice.WakeWordService
 import com.musify.mu.data.repo.LyricsStateStore
 import com.musify.mu.data.repo.PlaybackStateStore
 import com.musify.mu.data.repo.QueueStateStore
@@ -263,11 +264,23 @@ class PlayerService : MediaLibraryService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
-        android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
+        android.util.Log.d("PlayerService", "App swiped away from recents - stopping service immediately")
 
-        // Stop foreground service and clear notifications
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        // Stop the service completely
+        // Immediately stop foreground service and clear all notifications
+        try {
+            stopForegroundService()
+        } catch (e: Exception) {
+            android.util.Log.w("PlayerService", "Error in stopForegroundService", e)
+        }
+        
+        // Also notify WakeWordService to stop immediately
+        try {
+            WakeWordService.stop(this)
+        } catch (e: Exception) {
+            android.util.Log.w("PlayerService", "Error stopping WakeWordService", e)
+        }
+        
+        // Stop the service completely without delay
         serviceScope.cancel()
         stopSelf()
     }
@@ -339,13 +352,13 @@ class PlayerService : MediaLibraryService() {
     }
 
     private fun stopForegroundService() {
-        // Stop foreground service and remove notifications
+        // Stop foreground service and remove notifications immediately
         try {
             stopForeground(Service.STOP_FOREGROUND_REMOVE)
-            // Also clear any system media notifications
+            // Also clear any system media notifications immediately
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.cancelAll()
-            android.util.Log.d("PlayerService", "Stopped foreground service and cleared notifications")
+            android.util.Log.d("PlayerService", "Stopped foreground service and cleared all notifications immediately")
         } catch (e: Exception) {
             android.util.Log.e("PlayerService", "Error stopping foreground service", e)
         }
