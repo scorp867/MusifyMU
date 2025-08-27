@@ -47,6 +47,7 @@ import android.media.audiofx.NoiseSuppressor
 import android.media.audiofx.AutomaticGainControl
 import android.Manifest
 import com.musify.mu.AppForegroundState
+import com.google.common.util.concurrent.ListenableFuture
 
 class WakeWordService : Service() {
     companion object {
@@ -93,6 +94,7 @@ class WakeWordService : Service() {
 
     // Direct control fallback when VCM is unavailable
     @Volatile private var mediaController: MediaController? = null
+    @Volatile private var mediaControllerFuture: ListenableFuture<MediaController>? = null
 
     // No AccessKey needed for Vosk-only mode
 
@@ -110,8 +112,7 @@ class WakeWordService : Service() {
             }
         }
 
-        // Warm up media controller fallback in background
-        serviceScope.launch(Dispatchers.Main) { ensureController() }
+        // Do not warm up media controller here; create on demand to avoid leaks
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -176,6 +177,10 @@ class WakeWordService : Service() {
             try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Throwable) {}
             isForegroundStarted = false
         }
+        try { mediaController?.release() } catch (_: Exception) {}
+        mediaController = null
+        try { mediaControllerFuture?.cancel(true) } catch (_: Exception) {}
+        mediaControllerFuture = null
         serviceScope.cancel()
     }
 
@@ -303,7 +308,13 @@ class WakeWordService : Service() {
             }
 
             // Prepare wake recognizer upfront
-            serviceScope.launch(Dispatchers.Main) { ensureWakeRecognizer() }
+            serviceScope.launch(Dispatchers.Main) {
+                val wake = ensureWakeRecognizer()
+                if (wake == null) {
+                    showToast("Wake model unavailable")
+                    android.util.Log.w("WakeWordService", "Wake recognizer not initialized")
+                }
+            }
             showToast("Wakeword listening started")
             android.util.Log.d("WakeWordService", "Listening started (WebRTC AudioProcessing)")
         } catch (e: Exception) {
@@ -326,6 +337,10 @@ class WakeWordService : Service() {
         voskRecognizer = null
         try { voskWakeRecognizer?.close() } catch (_: Exception) {}
         voskWakeRecognizer = null
+        try { mediaController?.release() } catch (_: Exception) {}
+        mediaController = null
+        try { mediaControllerFuture?.cancel(true) } catch (_: Exception) {}
+        mediaControllerFuture = null
         try { headphoneDetector?.restoreDefaultAudioRouting() } catch (_: Exception) {}
         try { headphoneDetector?.cleanup() } catch (_: Exception) {}
         headphoneDetector = null
@@ -380,8 +395,10 @@ class WakeWordService : Service() {
         return try {
             val token = SessionToken(this, ComponentName(this, com.musify.mu.playback.PlayerService::class.java))
             val future = MediaController.Builder(this, token).buildAsync()
+            mediaControllerFuture = future
             val controller = future.await()
             mediaController = controller
+            mediaControllerFuture = null
             controller
         } catch (e: Exception) {
             android.util.Log.w("WakeWordService", "Failed to create MediaController: ${e.message}")
@@ -428,7 +445,12 @@ class WakeWordService : Service() {
         isInCommandWindow = false
         showToast("Wakeword listening…")
         // Ensure wake recognizer is available for the next cycle
-        serviceScope.launch(Dispatchers.Main) { ensureWakeRecognizer() }
+        serviceScope.launch(Dispatchers.Main) {
+            val wake = ensureWakeRecognizer()
+            if (wake == null) {
+                android.util.Log.w("WakeWordService", "Wake recognizer re-init failed")
+            }
+        }
     }
 
     private fun processCommandFrame(frame: ShortArray, n: Int) {

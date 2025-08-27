@@ -147,8 +147,8 @@ class WebRtcCapture(
         var bIndex = 0
         for (i in 0 until numShorts) {
             val lo = bytes[bIndex].toInt() and 0xFF
-            val hi = bytes[bIndex + 1].toInt()
-            tmp[i] = ((hi shl 8) or lo).toShort()
+            val hi = bytes[bIndex + 1].toInt() and 0xFF
+            tmp[i] = (((hi shl 8) or lo) and 0xFFFF).toShort()
             bIndex += 2
         }
 

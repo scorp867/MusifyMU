@@ -27,10 +27,13 @@ object VoskModelProvider {
         val filesRoot = context.filesDir
         val modelDir = File(filesRoot, MODEL_DIR_NAME)
 
-        // If already present and looks valid, load directly
+        // If already present and looks valid, load directly; otherwise wipe and recopy
         if (isValidModelDir(modelDir)) {
             android.util.Log.d("VoskModelProvider", "Using existing model at: ${modelDir.absolutePath}")
             return@withContext Model(modelDir.absolutePath)
+        } else if (modelDir.exists()) {
+            android.util.Log.w("VoskModelProvider", "Invalid model directory found, reinitializing: ${modelDir.absolutePath}")
+            deleteRecursively(modelDir)
         }
 
         // Try to copy from bundled assets (supports nested model directories)
@@ -53,7 +56,25 @@ object VoskModelProvider {
     }
 
     private fun isValidModelDir(dir: File): Boolean {
-        return dir.exists() && dir.isDirectory && File(dir, "conf").exists()
+        if (!dir.exists() || !dir.isDirectory) return false
+        val confDir = File(dir, "conf")
+        val ivectorDir = File(dir, "ivector")
+        val extractorCandidates = listOf(
+            File(ivectorDir, "final.ie"),
+            File(ivectorDir, "final.dubm"),
+            File(ivectorDir, "online_cmvn.conf"),
+            File(ivectorDir, "ivector_online.conf")
+        )
+        val hasIvector = ivectorDir.exists() && ivectorDir.isDirectory && extractorCandidates.any { it.exists() }
+        return confDir.exists() && hasIvector
+    }
+
+    private fun deleteRecursively(target: File) {
+        if (!target.exists()) return
+        if (target.isDirectory) {
+            target.listFiles()?.forEach { deleteRecursively(it) }
+        }
+        try { target.delete() } catch (_: Exception) {}
     }
 
     private suspend fun copyFromAssets(context: Context, outDir: File): Model {
