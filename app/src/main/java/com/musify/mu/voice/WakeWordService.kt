@@ -223,9 +223,9 @@ class WakeWordService : Service() {
         val detector = headphoneDetector ?: HeadphoneDetector(this).also { headphoneDetector = it }
         val controller = commandController ?: CommandController(this, detector).also { commandController = it }
 
+        // Allow fallback to device mic if no headset mic detected
         if (!detector.hasHeadsetMicrophone()) {
-            android.widget.Toast.makeText(this, "Headset with microphone required", android.widget.Toast.LENGTH_LONG).show()
-            return
+            android.util.Log.w("WakeWordService", "No headset microphone detected - falling back to device mic")
         }
         // Ensure exclusive routing once (guard Bluetooth permission on S+)
         try {
@@ -295,14 +295,12 @@ class WakeWordService : Service() {
 
             // Monitor headphone connectivity and stop if disconnected
             headphoneMonitorJob?.cancel()
+            // Optional: Keep monitoring but don't stop when disconnected; just log
             headphoneMonitorJob = serviceScope.launch(Dispatchers.Main) {
                 detector.isHeadphonesConnected.collect { connected ->
                     if (!connected) {
-                        android.util.Log.w("WakeWordService", "Headphones disconnected - stopping wakeword listening")
-                        showToast("Headphones disconnected - stopping")
+                        android.util.Log.w("WakeWordService", "Headphones disconnected - continuing with device mic")
                         try { detector.restoreDefaultAudioRouting() } catch (_: Exception) {}
-                        stopListening()
-                        stopSelf()
                     }
                 }
             }

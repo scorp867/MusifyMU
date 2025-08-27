@@ -16,6 +16,8 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpSender
 import org.webrtc.RtpTransceiver
+import org.webrtc.SdpObserver
+import org.webrtc.SessionDescription
 import org.webrtc.audio.JavaAudioDeviceModule
 
 /**
@@ -111,8 +113,29 @@ class WebRtcCapture(
                 }
             )
 
-            // Unified Plan: addTrack directly to start audio capture path
+            // Unified Plan: addTrack directly
             audioSender = peerConnection!!.addTrack(audioTrack, listOf("ARDAMS"))
+
+            // Create a local offer and set as local description to trigger audio capture
+            val offerConstraints = MediaConstraints().apply {
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "false"))
+                mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "false"))
+            }
+            peerConnection!!.createOffer(object : SdpObserver {
+                override fun onCreateSuccess(desc: SessionDescription) {
+                    try {
+                        peerConnection?.setLocalDescription(object : SdpObserver {
+                            override fun onSetSuccess() {}
+                            override fun onSetFailure(p0: String?) {}
+                            override fun onCreateSuccess(p0: SessionDescription?) {}
+                            override fun onCreateFailure(p0: String?) {}
+                        }, desc)
+                    } catch (_: Throwable) {}
+                }
+                override fun onCreateFailure(error: String?) {}
+                override fun onSetSuccess() {}
+                override fun onSetFailure(p0: String?) {}
+            }, offerConstraints)
         } catch (t: Throwable) {
             onError("WebRTC init failed: ${t.message}")
             stop()
