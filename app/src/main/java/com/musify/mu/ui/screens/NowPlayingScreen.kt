@@ -166,6 +166,7 @@ fun NowPlayingScreen(navController: NavController) {
     var duration by remember { mutableStateOf(0L) }
     var isLiked by remember { mutableStateOf(false) }
     var userSeeking by remember { mutableStateOf(false) }
+    var resolvedArtUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
@@ -209,21 +210,34 @@ fun NowPlayingScreen(navController: NavController) {
 
                     val sourceBitmap = if (!artworkUri.isNullOrBlank()) {
                         try {
-                            // Convert file URI to file path and load bitmap
-                            val artworkPath = if (artworkUri.startsWith("file://")) {
-                                artworkUri.substring(7) // Remove "file://" prefix
-                            } else {
-                                artworkUri
-                            }
-                            android.graphics.BitmapFactory.decodeFile(artworkPath)?.also {
-                                android.util.Log.d("NowPlayingScreen", "Loaded pre-cached artwork for color extraction: $artworkPath")
+                            when {
+                                artworkUri.startsWith("content://") -> {
+                                    context.contentResolver.openInputStream(android.net.Uri.parse(artworkUri)).use { input ->
+                                        if (input != null) {
+                                            android.graphics.BitmapFactory.decodeStream(input)?.also {
+                                                android.util.Log.d("NowPlayingScreen", "Loaded content artwork for color extraction")
+                                            }
+                                        } else null
+                                    }
+                                }
+                                artworkUri.startsWith("file://") -> {
+                                    val path = artworkUri.substring(7)
+                                    android.graphics.BitmapFactory.decodeFile(path)?.also {
+                                        android.util.Log.d("NowPlayingScreen", "Loaded file artwork for color extraction: $path")
+                                    }
+                                }
+                                else -> {
+                                    android.graphics.BitmapFactory.decodeFile(artworkUri)?.also {
+                                        android.util.Log.d("NowPlayingScreen", "Loaded path artwork for color extraction: $artworkUri")
+                                    }
+                                }
                             }
                         } catch (e: Exception) {
-                            android.util.Log.w("NowPlayingScreen", "Failed to load pre-cached artwork file: $artworkUri", e)
+                            android.util.Log.w("NowPlayingScreen", "Failed to load artwork for palette: $artworkUri", e)
                             null
                         }
                     } else {
-                        android.util.Log.d("NowPlayingScreen", "No pre-cached artwork available for ${track.title}")
+                        android.util.Log.d("NowPlayingScreen", "No artwork available for ${track.title}")
                         null
                     }
 
