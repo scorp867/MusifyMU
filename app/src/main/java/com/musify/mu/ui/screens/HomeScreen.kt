@@ -10,8 +10,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -85,9 +87,12 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var showSearchSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val cachedTracks by repo.dataManager.cachedTracks.collectAsState(initial = repo.getAllTracks())
+    val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = repo.getAllTracks())
 
     val listState = rememberLazyListState()
+    val pagedSongs = remember(repo, searchQuery) { repo.pagedTracks(query = if (searchQuery.isBlank()) null else searchQuery) }.collectAsLazyPagingItems()
+    val pagedArtists = remember(repo) { repo.pagedArtists() }.collectAsLazyPagingItems()
+    val pagedAlbums = remember(repo) { repo.pagedAlbums() }.collectAsLazyPagingItems()
 
     // Function to refresh data
     val refreshData = {
@@ -289,9 +294,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     }
                 }
                 1 -> {
-                    // SONGS section (Library-like list)
-                    items(tracksFiltered.size, key = { i -> "songs_${tracksFiltered[i].mediaId}" }) { idx ->
-                        val t = tracksFiltered[idx]
+                    // SONGS section (Paging 3)
+                    items(pagedSongs.itemCount, key = { i -> "songs_${pagedSongs.peek(i)?.mediaId ?: i}" }) { idx ->
+                        val t = pagedSongs[idx] ?: return@items
                         val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
                         
                         // Add queue operations for swipe gestures
@@ -319,15 +324,21 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                 contentDescription = t.title,
                                 isPlaying = isPlaying,
                                 showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                                onClick = { onPlay(tracksFiltered, idx) }
+                                onClick = {
+                                    // Play from the current paged snapshot: gather around index
+                                    val snapshot = (0 until pagedSongs.itemCount).mapNotNull { pagedSongs[it] }
+                                    val playIndex = snapshot.indexOfFirst { it.mediaId == t.mediaId }.coerceAtLeast(0)
+                                    onPlay(snapshot, playIndex)
+                                }
                             )
                         }
                     }
                 }
                 2 -> {
-                    // ARTISTS section
-                    items(artistsFiltered.size, key = { i -> "artist_${artistsFiltered[i].first}" }) { idx ->
-                        val (name, count) = artistsFiltered[idx]
+                    // ARTISTS section (Paging)
+                    items(pagedArtists.itemCount, key = { i -> "artist_${pagedArtists.peek(i)?.first ?: i}" }) { idx ->
+                        val pair = pagedArtists[idx] ?: return@items
+                        val (name, count) = pair
                         Card(
                             modifier = Modifier.clickable {
                                 val encoded = java.net.URLEncoder.encode(name, "UTF-8")
@@ -342,9 +353,12 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     }
                 }
                 3 -> {
-                    // ALBUMS section
-                    items(albumsFiltered.size, key = { i -> "album_${albumsFiltered[i].albumId}_${albumsFiltered[i].albumName}" }) { idx ->
-                        val a = albumsFiltered[idx]
+                    // ALBUMS section (Paging)
+                    items(pagedAlbums.itemCount, key = { i ->
+                        val a = pagedAlbums.peek(i)
+                        "album_${a?.albumId ?: i}_${a?.albumName ?: i}"
+                    }) { idx ->
+                        val a = pagedAlbums[idx] ?: return@items
                         Card(
                             modifier = Modifier.clickable {
                                 val albumEnc = java.net.URLEncoder.encode(a.albumName, "UTF-8")

@@ -2,6 +2,7 @@ package com.musify.mu.data.db
 
 import androidx.room.*
 import com.musify.mu.data.db.entities.*
+import androidx.paging.PagingSource
 
 @Dao
 @JvmSuppressWildcards
@@ -13,6 +14,13 @@ interface AppDao {
 
     @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
     suspend fun getAllTracks(): List<Track>
+
+    // Paging sources
+    @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
+    fun pagingTracks(): PagingSource<Int, Track>
+
+    @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
+    fun pagingTracksSearch(q: String): PagingSource<Int, Track>
 
     @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
     suspend fun searchTracks(q: String): List<Track>

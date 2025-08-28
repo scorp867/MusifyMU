@@ -9,9 +9,9 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.CachePolicy
-import coil.size.Size
 import coil.size.Scale
 import com.musify.mu.R
+import android.net.Uri
 
 /**
  * Cache-only artwork component that reads from pre-extracted artwork stored in database
@@ -22,40 +22,53 @@ fun SmartArtwork(
     artworkUri: String?, // Pre-extracted artwork URI from Track entity
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
-    shape: Shape? = null
+    shape: Shape? = null,
+    albumId: Long? = null, // Fallback source
+    trackUri: String? = null, // Fallback source
+    sessionArtworkUri: Uri? = null, // Highest-priority: what the session/notification uses
+    onResolved: (Uri?) -> Unit = {}
 ) {
     val context = LocalContext.current
     
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
     
-    // Determine what to display - either pre-extracted artwork or placeholder
-    val imageData = remember(artworkUri) {
-        when {
-            !artworkUri.isNullOrBlank() -> {
-                // Use pre-extracted artwork from startup scan
-                android.util.Log.d("SmartArtwork", "Using pre-extracted artwork: $artworkUri")
-                android.net.Uri.parse(artworkUri)
+    // Candidate chain: pre-extracted -> MediaStore album art -> embedded from track -> vector placeholder
+    val candidates = remember(artworkUri, albumId, trackUri, sessionArtworkUri) {
+        buildList<Any> {
+            if (sessionArtworkUri != null) add(sessionArtworkUri)
+            if (!artworkUri.isNullOrBlank()) add(android.net.Uri.parse(artworkUri))
+            if (!trackUri.isNullOrBlank()) add(android.net.Uri.parse(trackUri))
+            if (albumId != null) {
+                try { add(android.net.Uri.parse("content://media/external/audio/albumart/$albumId")) } catch (_: Exception) {}
             }
-            else -> {
-                // Show placeholder - no artwork was found during startup scan
-                android.util.Log.d("SmartArtwork", "Showing placeholder - no artwork extracted during startup for contentDescription: $contentDescription")
-                R.drawable.ic_music_note
-            }
+            add(R.drawable.ic_music_note)
         }
     }
-    
-    // Simple Coil image request - no complex caching needed since artwork is pre-extracted
-    val imageRequest = remember(artworkUri, imageData) {
+    var candidateIndex by remember(candidates) { mutableStateOf(0) }
+    val currentData = remember(candidates, candidateIndex) { candidates.getOrNull(candidateIndex) ?: R.drawable.ic_music_note }
+
+    // Coil request with graceful fallback stepping
+    val imageRequest = remember(currentData) {
         ImageRequest.Builder(context)
-            .data(imageData)
+            .data(currentData)
             .memoryCachePolicy(CachePolicy.ENABLED)
             .diskCachePolicy(CachePolicy.ENABLED)
-            .crossfade(200) // Quick transition
+            .crossfade(250)
             .error(R.drawable.ic_music_note)
             .placeholder(R.drawable.ic_music_note)
             .fallback(R.drawable.ic_music_note)
-            .size(Size.ORIGINAL)
             .scale(Scale.FIT)
+            .listener(
+                onStart = { android.util.Log.d("SmartArtwork", "Loading artwork [${candidateIndex + 1}/${candidates.size}] for ${contentDescription ?: "unknown"}") },
+                onError = { _, result ->
+                    android.util.Log.w("SmartArtwork", "Artwork load failed on candidate $candidateIndex", result.throwable)
+                    if (candidateIndex < candidates.lastIndex) candidateIndex++
+                },
+                onSuccess = { _, _ ->
+                    val resolved = currentData
+                    onResolved(resolved as? Uri)
+                }
+            )
             .build()
     }
     

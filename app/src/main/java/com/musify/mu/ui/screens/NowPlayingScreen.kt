@@ -37,6 +37,7 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.util.toMediaItem
 import com.musify.mu.util.toTrack
+import com.musify.mu.util.resolveTrack
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -165,6 +166,7 @@ fun NowPlayingScreen(navController: NavController) {
     var duration by remember { mutableStateOf(0L) }
     var isLiked by remember { mutableStateOf(false) }
     var userSeeking by remember { mutableStateOf(false) }
+    var resolvedArtUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
@@ -196,33 +198,46 @@ fun NowPlayingScreen(navController: NavController) {
 
     val coroutineScope = rememberCoroutineScope()
 
-    // Extract colors from pre-cached album artwork on track change
-    LaunchedEffect(currentTrack?.mediaId) {
+    // Extract colors from resolved artwork (includes fallbacks/session art)
+    LaunchedEffect(currentTrack?.mediaId, resolvedArtUri) {
         currentTrack?.let { track ->
             coroutineScope.launch(Dispatchers.IO) {
                 try {
                     android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
 
-                    // Use pre-extracted artwork URI from Track entity
-                    val artworkUri = track.artUri
+                    // Prefer resolved (session/fallback) art; otherwise pre-extracted
+                    val artworkUri = resolvedArtUri?.toString() ?: track.artUri
 
                     val sourceBitmap = if (!artworkUri.isNullOrBlank()) {
                         try {
-                            // Convert file URI to file path and load bitmap
-                            val artworkPath = if (artworkUri.startsWith("file://")) {
-                                artworkUri.substring(7) // Remove "file://" prefix
-                            } else {
-                                artworkUri
-                            }
-                            android.graphics.BitmapFactory.decodeFile(artworkPath)?.also {
-                                android.util.Log.d("NowPlayingScreen", "Loaded pre-cached artwork for color extraction: $artworkPath")
+                            when {
+                                artworkUri.startsWith("content://") -> {
+                                    context.contentResolver.openInputStream(android.net.Uri.parse(artworkUri)).use { input ->
+                                        if (input != null) {
+                                            android.graphics.BitmapFactory.decodeStream(input)?.also {
+                                                android.util.Log.d("NowPlayingScreen", "Loaded content artwork for color extraction")
+                                            }
+                                        } else null
+                                    }
+                                }
+                                artworkUri.startsWith("file://") -> {
+                                    val path = artworkUri.substring(7)
+                                    android.graphics.BitmapFactory.decodeFile(path)?.also {
+                                        android.util.Log.d("NowPlayingScreen", "Loaded file artwork for color extraction: $path")
+                                    }
+                                }
+                                else -> {
+                                    android.graphics.BitmapFactory.decodeFile(artworkUri)?.also {
+                                        android.util.Log.d("NowPlayingScreen", "Loaded path artwork for color extraction: $artworkUri")
+                                    }
+                                }
                             }
                         } catch (e: Exception) {
-                            android.util.Log.w("NowPlayingScreen", "Failed to load pre-cached artwork file: $artworkUri", e)
+                            android.util.Log.w("NowPlayingScreen", "Failed to load artwork for palette: $artworkUri", e)
                             null
                         }
                     } else {
-                        android.util.Log.d("NowPlayingScreen", "No pre-cached artwork available for ${track.title}")
+                        android.util.Log.d("NowPlayingScreen", "No artwork available for ${track.title}")
                         null
                     }
 
@@ -266,12 +281,14 @@ fun NowPlayingScreen(navController: NavController) {
         }
     }
 
-    // Listen for player state changes
-    LaunchedEffect(controller) {
-        controller?.let { mediaController ->
+    // Listen for player state changes; ensure listener is removed when controller changes
+    DisposableEffect(controller) {
+        val mediaController = controller
+        var listenerRef: Player.Listener? = null
+        if (mediaController != null) {
             // Initial state
             currentTrack = mediaController.currentMediaItem?.let { item ->
-                repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
+                resolveTrack(repo, item)
             }
             isPlaying = mediaController.isPlaying
             shuffleOn = mediaController.shuffleModeEnabled
@@ -286,18 +303,22 @@ fun NowPlayingScreen(navController: NavController) {
             duration = mediaController.duration
             // Load like state
             currentTrack?.let { t ->
-                isLiked = repo.isLiked(t.mediaId)
+                coroutineScope.launch(Dispatchers.IO) {
+                    val liked = try { repo.isLiked(t.mediaId) } catch (_: Exception) { false }
+                    withContext(Dispatchers.Main) { isLiked = liked }
+                }
             }
 
             // Add listener for real-time updates
             val listener = object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                    currentTrack = mediaItem?.let { item ->
-                        repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
-                    }
+                    currentTrack = mediaItem?.let { item -> resolveTrack(repo, item) }
                     currentTrack?.let { t ->
                         // refresh like state on track change
-                        coroutineScope.launch { isLiked = repo.isLiked(t.mediaId) }
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val liked = try { repo.isLiked(t.mediaId) } catch (_: Exception) { false }
+                            withContext(Dispatchers.Main) { isLiked = liked }
+                        }
                     }
                 }
 
@@ -325,9 +346,10 @@ fun NowPlayingScreen(navController: NavController) {
             }
 
             mediaController.addListener(listener)
+            listenerRef = listener
 
             // Continuous progress updates - pause updates while user is seeking
-            launch {
+            coroutineScope.launch {
                 while (true) {
                     try {
                         val currentPos = mediaController.currentPosition
@@ -344,6 +366,12 @@ fun NowPlayingScreen(navController: NavController) {
                         delay(500)
                     }
                 }
+            }
+        }
+        onDispose {
+            val l = listenerRef
+            if (l != null) {
+                try { mediaController?.removeListener(l) } catch (_: Exception) {}
             }
         }
     }
@@ -444,6 +472,7 @@ fun NowPlayingScreen(navController: NavController) {
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Album artwork - large and prominent with animations
+                var resolvedArtUri by remember { mutableStateOf<android.net.Uri?>(null) }
                 currentTrack?.let { track ->
                     Box(
                         modifier = Modifier
@@ -472,12 +501,18 @@ fun NowPlayingScreen(navController: NavController) {
                                 shape = RoundedCornerShape(20.dp)
                             )
                     ) {
+                        val sessionArt = controller?.currentMediaItem?.mediaMetadata?.artworkUri
                         com.musify.mu.ui.components.Artwork(
                             data = track.artUri,
                             audioUri = track.mediaId,
                             albumId = track.albumId,
                             contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            sessionArtworkUri = sessionArt,
+                            onResolved = { uri ->
+                                resolvedArtUri = uri
+                            },
+                            overlay = null
                         )
 
                         // Subtle overlay for depth

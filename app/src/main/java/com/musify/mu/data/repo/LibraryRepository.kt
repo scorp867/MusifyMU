@@ -14,6 +14,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
+import kotlinx.coroutines.flow.Flow
+import com.musify.mu.data.media.AlbumInfo
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
@@ -163,4 +170,90 @@ class LibraryRepository private constructor(private val context: Context, privat
         list.forEach { arr.put(it) }
         searchPrefs.edit().putString(searchKey, arr.toString()).apply()
     }
+
+    // ----- Paging 3: Tracks PagingSource over cached data -----
+    fun pagedTracks(query: String? = null, pageSize: Int = 30): Flow<PagingData<Track>> {
+        return Pager(
+            config = PagingConfig(
+                pageSize = pageSize,
+                prefetchDistance = pageSize / 2,
+                enablePlaceholders = true
+            ),
+            pagingSourceFactory = {
+                if (query.isNullOrBlank()) db.dao().pagingTracks()
+                else db.dao().pagingTracksSearch("%${query.trim()}%")
+            }
+        ).flow
+    }
+
+    private class AlbumsPagingSource(
+        private val repo: LibraryRepository
+    ) : PagingSource<Int, AlbumInfo>() {
+        override suspend fun load(params: LoadParams<Int>): LoadResult<Int, AlbumInfo> {
+            return try {
+                val page = params.key ?: 0
+                val pageSize = params.loadSize
+                val all = repo.dataManager.getUniqueAlbums()
+                val from = (page * pageSize).coerceAtLeast(0)
+                val to = (from + pageSize).coerceAtMost(all.size)
+                val slice = if (from < to) all.subList(from, to) else emptyList()
+                LoadResult.Page(
+                    data = slice,
+                    prevKey = if (page == 0) null else page - 1,
+                    nextKey = if (to < all.size) page + 1 else null
+                )
+            } catch (e: Exception) {
+                LoadResult.Error(e)
+            }
+        }
+
+        override fun getRefreshKey(state: PagingState<Int, AlbumInfo>): Int? {
+            val anchor = state.anchorPosition ?: return null
+            val page = anchor / (state.config.pageSize.takeIf { it > 0 } ?: 30)
+            return page
+        }
+    }
+
+    private class ArtistsPagingSource(
+        private val repo: LibraryRepository
+    ) : PagingSource<Int, Pair<String, Int>>() {
+        override suspend fun load(params: LoadParams<Int>): LoadResult<Int, Pair<String, Int>> {
+            return try {
+                val page = params.key ?: 0
+                val pageSize = params.loadSize
+                val groups = repo.dataManager.getAllTracks()
+                    .groupBy { it.artist.ifBlank { "Unknown Artist" } }
+                    .map { (name, tracks) -> name to tracks.size }
+                    .sortedBy { it.first.lowercase() }
+                val from = (page * pageSize).coerceAtLeast(0)
+                val to = (from + pageSize).coerceAtMost(groups.size)
+                val slice = if (from < to) groups.subList(from, to) else emptyList()
+                LoadResult.Page(
+                    data = slice,
+                    prevKey = if (page == 0) null else page - 1,
+                    nextKey = if (to < groups.size) page + 1 else null
+                )
+            } catch (e: Exception) {
+                LoadResult.Error(e)
+            }
+        }
+
+        override fun getRefreshKey(state: PagingState<Int, Pair<String, Int>>): Int? {
+            val anchor = state.anchorPosition ?: return null
+            val page = anchor / (state.config.pageSize.takeIf { it > 0 } ?: 30)
+            return page
+        }
+    }
+
+    fun pagedAlbums(pageSize: Int = 30): Flow<PagingData<AlbumInfo>> =
+        Pager(
+            config = PagingConfig(pageSize = pageSize, prefetchDistance = pageSize / 2, enablePlaceholders = true),
+            pagingSourceFactory = { AlbumsPagingSource(this) }
+        ).flow
+
+    fun pagedArtists(pageSize: Int = 40): Flow<PagingData<Pair<String, Int>>> =
+        Pager(
+            config = PagingConfig(pageSize = pageSize, prefetchDistance = pageSize / 2, enablePlaceholders = true),
+            pagingSourceFactory = { ArtistsPagingSource(this) }
+        ).flow
 }

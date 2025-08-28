@@ -63,12 +63,13 @@ class SimpleBackgroundDataManager private constructor(
         }
         
         try {
-            _loadingState.value = LoadingState.Loading("Scanning music library and extracting artwork...")
-            Log.d(TAG, "Starting ONE-TIME app launch initialization with artwork extraction...")
+            _loadingState.value = LoadingState.Loading("Loading your library…")
+            Log.d(TAG, "Starting initialization with batched scan (deferred artwork extraction)")
             
             // Stream results as they scan so UI can show progressively
             val tracks = mutableListOf<com.musify.mu.data.db.entities.Track>()
             val final = scanner.scanTracksStreaming { partial ->
+                // Emit partial batches to keep UI responsive
                 _cachedTracks.value = partial
             }
             tracks.addAll(final)
@@ -83,8 +84,8 @@ class SimpleBackgroundDataManager private constructor(
                 val sampleTrack = tracks.first()
                 Log.d(TAG, "Sample track - Title: ${sampleTrack.title}, Artist: ${sampleTrack.artist}, Album: ${sampleTrack.album}, AlbumID: ${sampleTrack.albumId}, ArtworkURI: ${sampleTrack.artUri}")
                 
-                // Cache to database for persistence (including artwork URIs)
-                Log.d(TAG, "Caching ${tracks.size} tracks with artwork to database for persistence...")
+                // Persist basic metadata first; artwork may be missing and filled later
+                Log.d(TAG, "Caching ${tracks.size} tracks (metadata-first)…")
                 db.dao().upsertTracks(tracks)
                 
                 _loadingState.value = LoadingState.Completed(tracks.size)

@@ -448,7 +448,8 @@ class SimpleMediaStoreScanner(
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
                         if (duration >= 0) {
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                            // Defer heavy embedded art extraction to on-demand paths; use null here
+                            val artworkUri: String? = null
                             tracks.add(
                                 Track(
                                     mediaId = contentUri.toString(),
@@ -496,7 +497,8 @@ class SimpleMediaStoreScanner(
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
                             if (duration >= 0) {
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                // Defer extraction; keep artUri null for now
+                                val artworkUri: String? = null
                                 tracks.add(
                                     Track(
                                         mediaId = contentUri.toString(),

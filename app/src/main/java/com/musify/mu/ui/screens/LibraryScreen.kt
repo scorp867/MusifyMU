@@ -43,6 +43,7 @@ import com.musify.mu.playback.QueueContextHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.snapshotFlow
@@ -128,17 +129,20 @@ fun LibraryScreen(
                     android.util.Log.e("LibraryScreen", "Failed to initialize data manager", e)
                 }
             }
-
-            // Observe the cached tracks flow for real-time updates (this is the single source of truth)
-            repo.dataManager.cachedTracks.collect { cachedTracks ->
-                android.util.Log.d("LibraryScreen", "Cache updated: ${cachedTracks.size} tracks")
-                allTracks = cachedTracks
-                isLoading = false
-            }
         } else {
             android.util.Log.d("LibraryScreen", "No permissions granted, clearing tracks")
             isLoading = false
             allTracks = emptyList()
+        }
+    }
+
+    // Lifecycle-aware collection of cached tracks
+    val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = emptyList())
+    LaunchedEffect(cachedTracks, hasPermissions) {
+        if (hasPermissions) {
+            android.util.Log.d("LibraryScreen", "Cache updated: ${cachedTracks.size} tracks")
+            allTracks = cachedTracks
+            isLoading = false
         }
     }
 

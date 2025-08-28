@@ -81,7 +81,8 @@ fun CompactTrackRow(
             audioUri = null,
             albumId = null,
             contentDescription = contentDescription,
-            modifier = Modifier.size(52.dp)
+            modifier = Modifier.size(52.dp),
+            sessionArtworkUri = com.musify.mu.playback.LocalMediaController.current?.currentMediaItem?.mediaMetadata?.artworkUri
         ) {
             Box(modifier = Modifier.matchParentSize()) {
                 if (showIndicator) {
