@@ -22,13 +22,32 @@ import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.data.repo.LyricsStateStore
 import com.musify.mu.data.repo.PlaybackStateStore
 import com.musify.mu.data.repo.QueueStateStore
-import com.musify.mu.util.toMediaItem
 import com.musify.mu.data.db.entities.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+
+// Temporary workaround - define extension function here
+fun Track.toMediaItem(): MediaItem {
+    return MediaItem.Builder()
+        .setMediaId(mediaId)
+        .setUri(mediaId)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .setAlbumTitle(album)
+                .setArtworkUri(artUri?.let { android.net.Uri.parse(it) })
+                .setGenre(genre)
+                .setReleaseYear(year)
+                .setTrackNumber(track)
+                .setAlbumArtist(albumArtist)
+                .build()
+        )
+        .build()
+}
 
 class PlayerService : MediaLibraryService() {
 
@@ -322,10 +341,10 @@ class PlayerService : MediaLibraryService() {
     fun playMediaIds(ids: List<String>, startIndex: Int = 0, startPos: Long = 0L) {
         serviceScope.launch {
             try {
-                val tracks = repo.getAllTracks().filter { ids.contains(it.mediaId) }
+                val tracks = repo.getAllTracks().filter { track: Track -> ids.contains(track.mediaId) }
 
                 // Validate that media files exist
-                val validTracks = tracks.filter { track ->
+                val validTracks = tracks.filter { track: Track ->
                     try {
                         val uri = Uri.parse(track.mediaId)
                         val inputStream = this@PlayerService.contentResolver.openInputStream(uri)
