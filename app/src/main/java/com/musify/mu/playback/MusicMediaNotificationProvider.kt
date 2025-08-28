@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.Player
@@ -14,11 +15,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaStyleNotificationHelper
+import com.google.common.collect.ImmutableList
 import com.musify.mu.ui.MainActivity
-import com.musify.mu.R
+import androidx.media3.session.CommandButton
 
 @OptIn(UnstableApi::class)
-class MusifyMediaNotificationProvider(
+class MusicMediaNotificationProvider(
     private val context: Context
 ) : MediaNotification.Provider {
     
@@ -50,7 +52,7 @@ class MusifyMediaNotificationProvider(
     
     override fun createNotification(
         session: MediaSession,
-        customLayout: com.google.common.collect.ImmutableList<androidx.media3.session.CommandButton>,
+        customLayout: ImmutableList<CommandButton>,
         actionFactory: MediaNotification.ActionFactory,
         onNotificationChangedCallback: MediaNotification.Provider.Callback
     ): MediaNotification {
@@ -93,74 +95,85 @@ class MusifyMediaNotificationProvider(
             builder.setDeleteIntent(deleteIntent)
         }
         
-        // Add media style
-        val mediaStyle = androidx.media3.session.MediaStyleNotificationHelper.MediaStyle(session)
-            .setShowActionsInCompactView(0, 1, 2) // Show prev, play/pause, next in compact view
+        // Add media style with session token
+        val mediaStyle = MediaStyleNotificationHelper.MediaStyle(session)
+        
+        // Create a list to track which actions to show in compact view
+        val compactViewIndices = mutableListOf<Int>()
+        var actionIndex = 0
+        
+        // Add previous action if available
+        if (player.hasPreviousMediaItem()) {
+            val prevAction = NotificationCompat.Action.Builder(
+                android.R.drawable.ic_media_previous,
+                "Previous",
+                actionFactory.createMediaAction(
+                    session,
+                    MediaNotification.ActionFactory.COMMAND_SKIP_TO_PREVIOUS
+                )
+            ).build()
+            builder.addAction(prevAction)
+            actionIndex++
+        }
+        
+        // Add play/pause action (always show in compact view)
+        val playPauseAction = if (player.isPlaying) {
+            NotificationCompat.Action.Builder(
+                android.R.drawable.ic_media_pause,
+                "Pause",
+                actionFactory.createMediaAction(
+                    session,
+                    MediaNotification.ActionFactory.COMMAND_PAUSE
+                )
+            ).build()
+        } else {
+            NotificationCompat.Action.Builder(
+                android.R.drawable.ic_media_play,
+                "Play",
+                actionFactory.createMediaAction(
+                    session,
+                    MediaNotification.ActionFactory.COMMAND_PLAY
+                )
+            ).build()
+        }
+        builder.addAction(playPauseAction)
+        compactViewIndices.add(actionIndex)
+        actionIndex++
+        
+        // Add next action if available
+        if (player.hasNextMediaItem()) {
+            val nextAction = NotificationCompat.Action.Builder(
+                android.R.drawable.ic_media_next,
+                "Next",
+                actionFactory.createMediaAction(
+                    session,
+                    MediaNotification.ActionFactory.COMMAND_SKIP_TO_NEXT
+                )
+            ).build()
+            builder.addAction(nextAction)
+            compactViewIndices.add(actionIndex)
+            actionIndex++
+        }
+        
+        // Set compact view indices
+        if (compactViewIndices.isNotEmpty()) {
+            mediaStyle.setShowActionsInCompactView(*compactViewIndices.toIntArray())
+        }
         
         builder.setStyle(mediaStyle)
-        
-        // Add playback actions
-        if (player.hasPreviousMediaItem()) {
-            builder.addAction(
-                NotificationCompat.Action.Builder(
-                    android.R.drawable.ic_media_previous,
-                    "Previous",
-                    actionFactory.createMediaAction(
-                        session,
-                        androidx.media3.session.MediaNotification.ActionFactory.COMMAND_SKIP_TO_PREVIOUS
-                    )
-                ).build()
-            )
-        }
-        
-        if (player.isPlaying) {
-            builder.addAction(
-                NotificationCompat.Action.Builder(
-                    android.R.drawable.ic_media_pause,
-                    "Pause",
-                    actionFactory.createMediaAction(
-                        session,
-                        androidx.media3.session.MediaNotification.ActionFactory.COMMAND_PAUSE
-                    )
-                ).build()
-            )
-        } else {
-            builder.addAction(
-                NotificationCompat.Action.Builder(
-                    android.R.drawable.ic_media_play,
-                    "Play",
-                    actionFactory.createMediaAction(
-                        session,
-                        androidx.media3.session.MediaNotification.ActionFactory.COMMAND_PLAY
-                    )
-                ).build()
-            )
-        }
-        
-        if (player.hasNextMediaItem()) {
-            builder.addAction(
-                NotificationCompat.Action.Builder(
-                    android.R.drawable.ic_media_next,
-                    "Next",
-                    actionFactory.createMediaAction(
-                        session,
-                        androidx.media3.session.MediaNotification.ActionFactory.COMMAND_SKIP_TO_NEXT
-                    )
-                ).build()
-            )
-        }
         
         val notification = builder.build()
         
         return MediaNotification(NOTIFICATION_ID, notification)
     }
     
-    override fun handleCustomAction(
+    override fun handleCustomCommand(
         session: MediaSession,
         action: String,
-        extras: android.os.Bundle
-    ) {
-        // Handle custom actions if needed
+        extras: Bundle
+    ): Boolean {
+        // Handle custom commands if needed
+        return false
     }
 }
 

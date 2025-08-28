@@ -243,7 +243,7 @@ class PlayerService : MediaLibraryService() {
         val placeholderPlayer = ExoPlayer.Builder(this).build()
 
         // Create custom notification provider
-        val notificationProvider = MusifyMediaNotificationProvider(this)
+        val notificationProvider = MusicMediaNotificationProvider(this)
         
         mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(this, placeholderPlayer, callback)
             .setId("MusifyMU_Session")
