@@ -197,15 +197,15 @@ fun NowPlayingScreen(navController: NavController) {
 
     val coroutineScope = rememberCoroutineScope()
 
-    // Extract colors from pre-cached album artwork on track change
-    LaunchedEffect(currentTrack?.mediaId) {
+    // Extract colors from resolved artwork (includes fallbacks/session art)
+    LaunchedEffect(currentTrack?.mediaId, resolvedArtUri) {
         currentTrack?.let { track ->
             coroutineScope.launch(Dispatchers.IO) {
                 try {
                     android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
 
-                    // Use pre-extracted artwork URI from Track entity
-                    val artworkUri = track.artUri
+                    // Prefer resolved (session/fallback) art; otherwise pre-extracted
+                    val artworkUri = resolvedArtUri?.toString() ?: track.artUri
 
                     val sourceBitmap = if (!artworkUri.isNullOrBlank()) {
                         try {
@@ -458,6 +458,7 @@ fun NowPlayingScreen(navController: NavController) {
                 Spacer(modifier = Modifier.height(20.dp))
 
                 // Album artwork - large and prominent with animations
+                var resolvedArtUri by remember { mutableStateOf<android.net.Uri?>(null) }
                 currentTrack?.let { track ->
                     Box(
                         modifier = Modifier
@@ -486,12 +487,18 @@ fun NowPlayingScreen(navController: NavController) {
                                 shape = RoundedCornerShape(20.dp)
                             )
                     ) {
+                        val sessionArt = controller?.currentMediaItem?.mediaMetadata?.artworkUri
                         com.musify.mu.ui.components.Artwork(
                             data = track.artUri,
                             audioUri = track.mediaId,
                             albumId = track.albumId,
                             contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            sessionArtworkUri = sessionArt,
+                            onResolved = { uri ->
+                                resolvedArtUri = uri
+                            },
+                            overlay = null
                         )
 
                         // Subtle overlay for depth

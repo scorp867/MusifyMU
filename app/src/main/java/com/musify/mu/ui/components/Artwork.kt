@@ -20,6 +20,8 @@ fun Artwork(
     audioUri: String? = null, // Track media ID (not used for artwork anymore)
     cacheKey: String? = null, // Not needed with new approach
     albumId: Long? = null, // For fallback chain
+    sessionArtworkUri: android.net.Uri? = null,
+    onResolved: (android.net.Uri?) -> Unit = {},
     overlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
     // data should be the pre-extracted artwork URI from Track.artUri
@@ -32,7 +34,9 @@ fun Artwork(
             modifier = Modifier.matchParentSize(),
             shape = shape,
             albumId = albumId,
-            trackUri = audioUri
+            trackUri = audioUri,
+            sessionArtworkUri = sessionArtworkUri,
+            onResolved = onResolved
         )
         if (overlay != null) {
             overlay()

@@ -186,7 +186,8 @@ fun NowPlayingBar(
                     contentDescription = currentTrack.title,
                     modifier = Modifier
                         .size(48.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(10.dp)),
+                    sessionArtworkUri = LocalMediaController.current?.currentMediaItem?.mediaMetadata?.artworkUri
                 ) {
                     if (isPlaying) {
                         Box(modifier = Modifier.matchParentSize()) {

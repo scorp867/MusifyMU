@@ -9,9 +9,9 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.CachePolicy
-import coil.size.Size
 import coil.size.Scale
 import com.musify.mu.R
+import android.net.Uri
 
 /**
  * Cache-only artwork component that reads from pre-extracted artwork stored in database
@@ -24,20 +24,23 @@ fun SmartArtwork(
     modifier: Modifier = Modifier,
     shape: Shape? = null,
     albumId: Long? = null, // Fallback source
-    trackUri: String? = null // Fallback source
+    trackUri: String? = null, // Fallback source
+    sessionArtworkUri: Uri? = null, // Highest-priority: what the session/notification uses
+    onResolved: (Uri?) -> Unit = {}
 ) {
     val context = LocalContext.current
     
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
     
     // Candidate chain: pre-extracted -> MediaStore album art -> embedded from track -> vector placeholder
-    val candidates = remember(artworkUri, albumId, trackUri) {
+    val candidates = remember(artworkUri, albumId, trackUri, sessionArtworkUri) {
         buildList<Any> {
+            if (sessionArtworkUri != null) add(sessionArtworkUri)
             if (!artworkUri.isNullOrBlank()) add(android.net.Uri.parse(artworkUri))
+            if (!trackUri.isNullOrBlank()) add(android.net.Uri.parse(trackUri))
             if (albumId != null) {
                 try { add(android.net.Uri.parse("content://media/external/audio/albumart/$albumId")) } catch (_: Exception) {}
             }
-            if (!trackUri.isNullOrBlank()) add(android.net.Uri.parse(trackUri))
             add(R.drawable.ic_music_note)
         }
     }
@@ -54,13 +57,16 @@ fun SmartArtwork(
             .error(R.drawable.ic_music_note)
             .placeholder(R.drawable.ic_music_note)
             .fallback(R.drawable.ic_music_note)
-            .size(Size.ORIGINAL)
             .scale(Scale.FIT)
             .listener(
                 onStart = { android.util.Log.d("SmartArtwork", "Loading artwork [${candidateIndex + 1}/${candidates.size}] for ${contentDescription ?: "unknown"}") },
                 onError = { _, result ->
                     android.util.Log.w("SmartArtwork", "Artwork load failed on candidate $candidateIndex", result.throwable)
                     if (candidateIndex < candidates.lastIndex) candidateIndex++
+                },
+                onSuccess = { _, _ ->
+                    val resolved = currentData
+                    onResolved(resolved as? Uri)
                 }
             )
             .build()
