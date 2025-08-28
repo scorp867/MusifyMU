@@ -14,6 +14,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaNotification
 import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -248,6 +249,14 @@ class PlayerService : MediaLibraryService() {
             .setSessionActivity(createPlayerActivityIntent())
             .build()
 
+        // Provide a persistent notification while playing
+        try {
+            val provider: MediaNotification.Provider = MusicMediaNotificationProvider(this)
+            setMediaNotificationProvider(provider)
+        } catch (_: Throwable) {
+            // API could differ on some devices; ignore if unavailable
+        }
+
         // Player and QueueManager will be created in ensurePlayerInitialized() when needed
         // This prevents duplicate creation and ensures proper initialization order
 
@@ -267,6 +276,11 @@ class PlayerService : MediaLibraryService() {
 
         // Stop foreground service and clear notifications
         stopForeground(STOP_FOREGROUND_REMOVE)
+        // Cancel our playback notification instantly
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(MusicMediaNotificationProvider.NOTIFICATION_ID)
+        } catch (_: Exception) {}
         // Stop the service completely
         serviceScope.cancel()
         stopSelf()
