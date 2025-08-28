@@ -101,10 +101,31 @@ class SimpleMediaStoreScanner(
     }
 
     /**
+     * Get album art URI from MediaStore
+     */
+    private fun getAlbumArtFromMediaStore(albumId: Long?): String? {
+        if (albumId == null || albumId == 0L) return null
+        
+        return try {
+            val albumArtUri = ContentUris.withAppendedId(
+                Uri.parse("content://media/external/audio/albumart"),
+                albumId
+            )
+            // Check if the URI actually has content
+            context.contentResolver.openInputStream(albumArtUri)?.use {
+                // If we can open the stream, the album art exists
+                albumArtUri.toString()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+    
+    /**
      * Extract and cache artwork for a track during startup scan
      * Enhanced to match Media3 notification player's accuracy
      */
-    private suspend fun extractAndCacheArtwork(trackUri: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun extractAndCacheArtwork(trackUri: String, albumId: Long? = null): String? = withContext(Dispatchers.IO) {
         try {
             val cacheKey = generateCacheKey(trackUri)
             val cacheFile = File(artworkCacheDir, "$cacheKey.jpg")
@@ -112,6 +133,13 @@ class SimpleMediaStoreScanner(
             // Check if already cached
             if (cacheFile.exists()) {
                 return@withContext "file://${cacheFile.absolutePath}"
+            }
+            
+            // First try MediaStore album art (most accurate for many files)
+            val mediaStoreArt = getAlbumArtFromMediaStore(albumId)
+            if (mediaStoreArt != null) {
+                Log.d(TAG, "Found album art from MediaStore for albumId: $albumId")
+                return@withContext mediaStoreArt
             }
             
             val retriever = MediaMetadataRetriever()
@@ -305,7 +333,7 @@ class SimpleMediaStoreScanner(
                         // Validate essential fields - be less restrictive
                         if (duration >= 0) {  // Allow 0 duration for now
                             // Extract artwork during startup scan
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                            val artworkUri = extractAndCacheArtwork(contentUri.toString(), albumId)
                             
                             val track = Track(
                                 mediaId = contentUri.toString(),
@@ -377,7 +405,7 @@ class SimpleMediaStoreScanner(
                             // Basic validation
                             if (duration >= 0) {
                                 // Extract artwork during startup scan (broad query)
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                val artworkUri = extractAndCacheArtwork(contentUri.toString(), albumId)
                                 
                                 val track = Track(
                                     mediaId = contentUri.toString(),
@@ -472,7 +500,7 @@ class SimpleMediaStoreScanner(
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
                         if (duration >= 0) {
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                            val artworkUri = extractAndCacheArtwork(contentUri.toString(), albumId)
                             tracks.add(
                                 Track(
                                     mediaId = contentUri.toString(),
@@ -520,7 +548,7 @@ class SimpleMediaStoreScanner(
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
                             if (duration >= 0) {
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                val artworkUri = extractAndCacheArtwork(contentUri.toString(), albumId)
                                 tracks.add(
                                     Track(
                                         mediaId = contentUri.toString(),

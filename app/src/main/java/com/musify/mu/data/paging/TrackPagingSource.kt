@@ -24,18 +24,24 @@ class TrackPagingSource(
             val page = params.key ?: 0
             val pageSize = params.loadSize
 
+            android.util.Log.d("TrackPagingSource", "Loading page $page with size $pageSize")
+
             val tracks = withContext(Dispatchers.IO) {
                 if (query.isNullOrBlank()) {
-                    db.dao().getTracksPaged(
+                    val result = db.dao().getTracksPaged(
                         limit = pageSize,
                         offset = page * pageSize
                     )
+                    android.util.Log.d("TrackPagingSource", "Loaded ${result.size} tracks for page $page")
+                    result
                 } else {
-                    db.dao().searchTracksPaged(
+                    val result = db.dao().searchTracksPaged(
                         query = "%$query%",
                         limit = pageSize,
                         offset = page * pageSize
                     )
+                    android.util.Log.d("TrackPagingSource", "Loaded ${result.size} tracks for search query '$query' page $page")
+                    result
                 }
             }
 
@@ -45,6 +51,7 @@ class TrackPagingSource(
                 nextKey = if (tracks.isEmpty()) null else page + 1
             )
         } catch (e: Exception) {
+            android.util.Log.e("TrackPagingSource", "Error loading page", e)
             LoadResult.Error(e)
         }
     }
