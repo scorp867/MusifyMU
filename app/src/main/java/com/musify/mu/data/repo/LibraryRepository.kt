@@ -14,6 +14,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
+import kotlinx.coroutines.flow.Flow
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
@@ -162,5 +168,50 @@ class LibraryRepository private constructor(private val context: Context, privat
         val arr = JSONArray()
         list.forEach { arr.put(it) }
         searchPrefs.edit().putString(searchKey, arr.toString()).apply()
+    }
+
+    // ----- Paging 3: Tracks PagingSource over cached data -----
+    private class TracksPagingSource(
+        private val repo: LibraryRepository,
+        private val query: String?
+    ) : PagingSource<Int, Track>() {
+        override suspend fun load(params: LoadParams<Int>): LoadResult<Int, Track> {
+            return try {
+                val page = params.key ?: 0
+                val pageSize = params.loadSize
+                val all = if (query.isNullOrBlank()) {
+                    repo.dataManager.getAllTracks()
+                } else {
+                    repo.dataManager.searchTracks(query)
+                }
+                val from = (page * pageSize).coerceAtLeast(0)
+                val to = (from + pageSize).coerceAtMost(all.size)
+                val slice = if (from < to) all.subList(from, to) else emptyList()
+                LoadResult.Page(
+                    data = slice,
+                    prevKey = if (page == 0) null else page - 1,
+                    nextKey = if (to < all.size) page + 1 else null
+                )
+            } catch (e: Exception) {
+                LoadResult.Error(e)
+            }
+        }
+
+        override fun getRefreshKey(state: PagingState<Int, Track>): Int? {
+            val anchor = state.anchorPosition ?: return null
+            val page = anchor / (state.config.pageSize.takeIf { it > 0 } ?: 30)
+            return page
+        }
+    }
+
+    fun pagedTracks(query: String? = null, pageSize: Int = 30): Flow<PagingData<Track>> {
+        return Pager(
+            config = PagingConfig(
+                pageSize = pageSize,
+                prefetchDistance = pageSize / 2,
+                enablePlaceholders = true
+            ),
+            pagingSourceFactory = { TracksPagingSource(this, query) }
+        ).flow
     }
 }

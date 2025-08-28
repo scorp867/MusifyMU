@@ -64,6 +64,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.navigation:navigation-compose:2.7.7")
+    implementation("androidx.paging:paging-runtime-ktx:3.3.2")
+    implementation("androidx.paging:paging-compose:3.3.2")
     implementation("org.burnoutcrew.composereorderable:reorderable:0.9.6")
 
     // Coil for lazy image loading with disk caching

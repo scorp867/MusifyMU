@@ -10,6 +10,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -89,6 +91,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = repo.getAllTracks())
 
     val listState = rememberLazyListState()
+    val pagedSongs = remember(repo) { repo.pagedTracks() }.collectAsLazyPagingItems()
 
     // Function to refresh data
     val refreshData = {
@@ -290,9 +293,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     }
                 }
                 1 -> {
-                    // SONGS section (Library-like list)
-                    items(tracksFiltered.size, key = { i -> "songs_${tracksFiltered[i].mediaId}" }) { idx ->
-                        val t = tracksFiltered[idx]
+                    // SONGS section (Paging 3)
+                    items(pagedSongs.itemCount, key = { i -> "songs_${pagedSongs.peek(i)?.mediaId ?: i}" }) { idx ->
+                        val t = pagedSongs[idx] ?: return@items
                         val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
                         
                         // Add queue operations for swipe gestures
@@ -320,7 +323,12 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                 contentDescription = t.title,
                                 isPlaying = isPlaying,
                                 showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                                onClick = { onPlay(tracksFiltered, idx) }
+                                onClick = {
+                                    // Play from the current paged snapshot: gather around index
+                                    val snapshot = (0 until pagedSongs.itemCount).mapNotNull { pagedSongs[it] }
+                                    val playIndex = snapshot.indexOfFirst { it.mediaId == t.mediaId }.coerceAtLeast(0)
+                                    onPlay(snapshot, playIndex)
+                                }
                             )
                         }
                     }
