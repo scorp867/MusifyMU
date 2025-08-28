@@ -37,6 +37,7 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.util.toMediaItem
 import com.musify.mu.util.toTrack
+import com.musify.mu.util.resolveTrack
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -266,12 +267,14 @@ fun NowPlayingScreen(navController: NavController) {
         }
     }
 
-    // Listen for player state changes
-    LaunchedEffect(controller) {
-        controller?.let { mediaController ->
+    // Listen for player state changes; ensure listener is removed when controller changes
+    DisposableEffect(controller) {
+        val mediaController = controller
+        var listenerRef: Player.Listener? = null
+        if (mediaController != null) {
             // Initial state
             currentTrack = mediaController.currentMediaItem?.let { item ->
-                repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
+                resolveTrack(repo, item)
             }
             isPlaying = mediaController.isPlaying
             shuffleOn = mediaController.shuffleModeEnabled
@@ -286,18 +289,22 @@ fun NowPlayingScreen(navController: NavController) {
             duration = mediaController.duration
             // Load like state
             currentTrack?.let { t ->
-                isLiked = repo.isLiked(t.mediaId)
+                coroutineScope.launch(Dispatchers.IO) {
+                    val liked = try { repo.isLiked(t.mediaId) } catch (_: Exception) { false }
+                    withContext(Dispatchers.Main) { isLiked = liked }
+                }
             }
 
             // Add listener for real-time updates
             val listener = object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                    currentTrack = mediaItem?.let { item ->
-                        repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
-                    }
+                    currentTrack = mediaItem?.let { item -> resolveTrack(repo, item) }
                     currentTrack?.let { t ->
                         // refresh like state on track change
-                        coroutineScope.launch { isLiked = repo.isLiked(t.mediaId) }
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val liked = try { repo.isLiked(t.mediaId) } catch (_: Exception) { false }
+                            withContext(Dispatchers.Main) { isLiked = liked }
+                        }
                     }
                 }
 
@@ -325,6 +332,7 @@ fun NowPlayingScreen(navController: NavController) {
             }
 
             mediaController.addListener(listener)
+            listenerRef = listener
 
             // Continuous progress updates - pause updates while user is seeking
             launch {
@@ -344,6 +352,12 @@ fun NowPlayingScreen(navController: NavController) {
                         delay(500)
                     }
                 }
+            }
+        }
+        onDispose {
+            val l = listenerRef
+            if (l != null) {
+                try { mediaController?.removeListener(l) } catch (_: Exception) {}
             }
         }
     }

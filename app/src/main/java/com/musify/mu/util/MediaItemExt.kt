@@ -3,6 +3,7 @@ package com.musify.mu.util
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import com.musify.mu.data.db.entities.Track
+import com.musify.mu.data.repo.LibraryRepository
 
 /**
  * Convert Track to MediaItem for ExoPlayer.
@@ -47,3 +48,11 @@ fun MediaItem.toTrack(): Track =
         track = mediaMetadata.trackNumber?.takeIf { it != null && it > 0 },
         albumArtist = mediaMetadata.albumArtist?.toString()
     )
+
+/**
+ * Resolve a full Track for a MediaItem by consulting the repository first,
+ * then falling back to converting the MediaItem metadata.
+ */
+fun resolveTrack(repo: LibraryRepository, item: MediaItem): Track {
+    return repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
+}

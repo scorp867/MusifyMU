@@ -13,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,6 +46,8 @@ import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.net.Uri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.musify.mu.util.resolveTrack
 
 class MainActivity : ComponentActivity() {
     
@@ -112,12 +115,10 @@ class MainActivity : ComponentActivity() {
                     // Data loading is handled automatically on app launch
                     android.util.Log.d("MainActivity", "Permissions granted - data loading handled automatically")
 
-                    // Log optional permissions status
+                    // Store optional permissions map for cleaner debugging/possible UI
                     val optionalPermissions = PermissionManager.getOptionalPermissions()
-                    optionalPermissions.forEach { permission ->
-                        val granted = permissions[permission] == true
-                        android.util.Log.d("MainActivity", "Optional permission $permission: ${if (granted) "GRANTED" else "DENIED"}")
-                    }
+                    val optionalStatus = optionalPermissions.associateWith { perm -> permissions[perm] == true }
+                    android.util.Log.d("MainActivity", "Optional permissions: $optionalStatus")
                 } else {
                     val deniedRequired = requiredPermissions.filter { permissions[it] != true }
                     android.util.Log.w("MainActivity", "Required permissions denied: $deniedRequired")
@@ -147,34 +148,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Connect to media service with proper cleanup
-            LaunchedEffect(Unit) {
-                try {
-                    val sessionToken = SessionToken(
-                        context,
-                        ComponentName(context, PlayerService::class.java)
-                    )
-                    val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-                    val controller = controllerFuture.await()
-                    mediaController = controller
-                    controllerState = controller
-                    // Try to play any pending file open request now that controller is ready
-                    tryPlayPendingOpenUri()
-                } catch (e: Exception) {
-                    android.util.Log.e("MainActivity", "Failed to connect to MediaController", e)
-                }
-            }
-            
-            // Cleanup MediaController when leaving composition
-            DisposableEffect(Unit) {
-                onDispose {
-                    try {
-                        mediaController?.release()
-                        mediaController = null
-                    } catch (e: Exception) {
-                        android.util.Log.e("MainActivity", "Error releasing MediaController", e)
-                    }
-                }
+            // Use helper to remember and auto-release MediaController
+            val rememberedController = rememberMediaController()
+            LaunchedEffect(rememberedController) {
+                mediaController = rememberedController
+                controllerState = rememberedController
+                tryPlayPendingOpenUri()
             }
 
             android.util.Log.d("MainActivity", "About to render UI with hasPermissions: $hasPermissions")
@@ -247,22 +226,15 @@ private fun AppContent(
     var hasPlayableQueue by remember { mutableStateOf(false) }
     var previewTrack by remember { mutableStateOf<Track?>(null) }
 
-    // Listen to media controller changes
-    LaunchedEffect(mediaController) {
-        mediaController?.let { controller ->
-            controller.addListener(object : Player.Listener {
+    // Listen to media controller changes and clean up listener when controller changes
+    DisposableEffect(mediaController) {
+        val controller = mediaController
+        var listener: Player.Listener? = null
+        if (controller != null) {
+            listener = object : Player.Listener {
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                     // Get the full track data from repository to ensure we have the pre-extracted artwork
-                    currentTrack = mediaItem?.let { item ->
-                        val repoTrack = repo.getTrackByMediaId(item.mediaId)
-                        if (repoTrack != null) {
-                            android.util.Log.d("MainActivity", "Found track in repository: ${repoTrack.title}, artUri: ${repoTrack.artUri}")
-                            repoTrack
-                        } else {
-                            android.util.Log.d("MainActivity", "Track not found in repository, using MediaItem: ${item.mediaId}")
-                            item.toTrack()
-                        }
-                    }
+                    currentTrack = mediaItem?.let { item -> resolveTrack(repo, item) }
                     hasPlayableQueue = (controller.mediaItemCount > 0)
                     if (controller.mediaItemCount > 0) previewTrack = null
                 }
@@ -283,34 +255,20 @@ private fun AppContent(
                 ) {
                     hasPlayableQueue = controller.mediaItemCount > 0
                     if (controller.currentMediaItem != null) {
-                        currentTrack = controller.currentMediaItem?.let { item ->
-                            val repoTrack = repo.getTrackByMediaId(item.mediaId)
-                            if (repoTrack != null) {
-                                android.util.Log.d("MainActivity", "Timeline changed - Found track in repository: ${repoTrack.title}, artUri: ${repoTrack.artUri}")
-                                repoTrack
-                            } else {
-                                android.util.Log.d("MainActivity", "Timeline changed - Track not found in repository: ${item.mediaId}")
-                                item.toTrack()
-                            }
-                        }
+                        currentTrack = controller.currentMediaItem?.let { item -> resolveTrack(repo, item) }
                     }
                 }
-            })
+            }
+            controller.addListener(listener)
 
             // Initialize UI state
-            currentTrack = controller.currentMediaItem?.let { item ->
-                val repoTrack = repo.getTrackByMediaId(item.mediaId)
-                if (repoTrack != null) {
-                    android.util.Log.d("MainActivity", "Initial state - Found track in repository: ${repoTrack.title}, artUri: ${repoTrack.artUri}")
-                    repoTrack
-                } else {
-                    android.util.Log.d("MainActivity", "Initial state - Track not found in repository: ${item.mediaId}")
-                    item.toTrack()
-                }
-            }
+            currentTrack = controller.currentMediaItem?.let { item -> resolveTrack(repo, item) }
             isPlaying = controller.isPlaying
             hasPlayableQueue = controller.mediaItemCount > 0
             if (controller.mediaItemCount > 0) previewTrack = null
+        }
+        onDispose {
+            try { if (listener != null) controller?.removeListener(listener!!) } catch (_: Exception) {}
         }
     }
 
@@ -334,7 +292,7 @@ private fun AppContent(
     }
 
     // Helper: restore last queue from store and play
-    val restoreLastQueueAndPlay: () -> Unit = {
+    fun restoreLastQueueAndPlay() {
         scope.launch(Dispatchers.IO) {
             try {
                 val state = stateStore.load()
@@ -404,55 +362,53 @@ private fun AppContent(
                         exit = fadeOut(animationSpec = tween(300))
                     ) {
                         Column {
-                            // Show now playing bar only when controller has a queue
-                            AnimatedVisibility(
-                                visible = hasPlayableQueue && currentTrack != null,
-                                enter = fadeIn(animationSpec = tween(300)),
-                                exit = fadeOut(animationSpec = tween(300))
-                            ) {
-                                NowPlayingBar(
-                                    navController = navController,
-                                    currentTrack = currentTrack ?: previewTrack,
-                                    isPlaying = isPlaying,
-                                    onPlayPause = {
-                                        mediaController?.let { c ->
-                                            if ((c.mediaItemCount == 0) && previewTrack != null) {
-                                                restoreLastQueueAndPlay()
-                                            } else {
-                                                if (c.isPlaying) c.pause() else c.play()
+                            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 0.dp)) {
+                                AnimatedVisibility(
+                                    visible = hasPlayableQueue && currentTrack != null,
+                                    enter = fadeIn(animationSpec = tween(300)),
+                                    exit = fadeOut(animationSpec = tween(300))
+                                ) {
+                                    NowPlayingBar(
+                                        navController = navController,
+                                        currentTrack = currentTrack ?: previewTrack,
+                                        isPlaying = isPlaying,
+                                        onPlayPause = {
+                                            mediaController?.let { c ->
+                                                if ((c.mediaItemCount == 0) && previewTrack != null) {
+                                                    restoreLastQueueAndPlay()
+                                                } else {
+                                                    if (c.isPlaying) c.pause() else c.play()
+                                                }
+                                            }
+                                        },
+                                        onNext = {
+                                            mediaController?.let { c ->
+                                                if ((c.mediaItemCount == 0) && previewTrack != null) {
+                                                    restoreLastQueueAndPlay()
+                                                } else {
+                                                    c.seekToNext()
+                                                    if (!c.isPlaying) c.play()
+                                                }
+                                            }
+                                        },
+                                        onPrev = {
+                                            mediaController?.let { c ->
+                                                if ((c.mediaItemCount == 0) && previewTrack != null) {
+                                                    restoreLastQueueAndPlay()
+                                                } else {
+                                                    c.seekToPrevious()
+                                                    if (!c.isPlaying) c.play()
+                                                }
+                                            }
+                                        },
+                                        onExpand = {
+                                            val target = com.musify.mu.ui.navigation.Screen.NowPlaying.route
+                                            if (navController.currentDestination?.route != target) {
+                                                navController.navigate(target) { launchSingleTop = true }
                                             }
                                         }
-                                    },
-                                    onNext = {
-                                        mediaController?.let { c ->
-                                            if ((c.mediaItemCount == 0) && previewTrack != null) {
-                                                restoreLastQueueAndPlay()
-                                            } else {
-                                                c.seekToNext()
-                                                if (!c.isPlaying) c.play()
-                                            }
-                                        }
-                                    },
-                                    onPrev = {
-                                        mediaController?.let { c ->
-                                            if ((c.mediaItemCount == 0) && previewTrack != null) {
-                                                restoreLastQueueAndPlay()
-                                            } else {
-                                                c.seekToPrevious()
-                                                if (!c.isPlaying) c.play()
-                                            }
-                                        }
-                                    },
-                                    onExpand = {
-                                        val target = com.musify.mu.ui.navigation.Screen.NowPlaying.route
-                                        // Navigate only if we're not already showing it
-                                        if (navController.currentDestination?.route != target) {
-                                            navController.navigate(target) {
-                                                launchSingleTop = true
-                                            }
-                                        }
-                                    }
-                                )
+                                    )
+                                }
                             }
                             com.musify.mu.ui.components.BottomBar(navController)
                         }
@@ -485,4 +441,30 @@ private fun MediaItem.toTrack(): Track {
         artUri = md.artworkUri?.toString(),
         albumId = null
     )
+}
+
+@Composable
+private fun rememberMediaController(): MediaController? {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var controller by remember { mutableStateOf<MediaController?>(null) }
+    LaunchedEffect(Unit) {
+        try {
+            val sessionToken = SessionToken(
+                context,
+                ComponentName(context, PlayerService::class.java)
+            )
+            val controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+            controller = controllerFuture.await()
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "rememberMediaController: connection failed", e)
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            try { controller?.release() } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "rememberMediaController: release error", e)
+            } finally { controller = null }
+        }
+    }
+    return controller
 }
