@@ -200,8 +200,12 @@ class HeadphoneDetector(private val context: Context) {
      */
     fun disableBuiltInAudioInputs() {
         try {
-            // Set audio mode to communication to prioritize headset mic
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            // IMPORTANT: Keep audio mode as NORMAL to prevent music from playing through communication speaker
+            // Do NOT use MODE_IN_COMMUNICATION as it affects audio output quality and routing
+            if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                audioManager.mode = AudioManager.MODE_NORMAL
+                android.util.Log.d("HeadphoneDetector", "Ensured audio mode is NORMAL")
+            }
 
             // Ensure speakerphone is off (this helps prevent built-in mic usage)
             audioManager.isSpeakerphoneOn = false
@@ -233,8 +237,10 @@ class HeadphoneDetector(private val context: Context) {
                     audioManager.stopBluetoothSco()
                     audioManager.isBluetoothScoOn = false
 
-                    // Set communication mode BEFORE starting SCO
-                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                    // IMPORTANT: Keep audio mode as NORMAL - do NOT use communication mode
+                    if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                        audioManager.mode = AudioManager.MODE_NORMAL
+                    }
 
                     // Force Bluetooth SCO audio for headset microphone ONLY
                     audioManager.startBluetoothSco()
@@ -264,7 +270,12 @@ class HeadphoneDetector(private val context: Context) {
             }
             AudioDeviceInfo.TYPE_WIRED_HEADSET -> {
                 // For wired headsets, the system should automatically use the headset mic
-                // when it's connected, but we can log this for debugging
+                // Ensure audio mode stays NORMAL
+                if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                    audioManager.mode = AudioManager.MODE_NORMAL
+                }
+                audioManager.isSpeakerphoneOn = false
+                
                 android.util.Log.d("HeadphoneDetector", "Wired headset detected - should use headset microphone")
 
                 // Show toast for audio routing change
@@ -276,6 +287,12 @@ class HeadphoneDetector(private val context: Context) {
             }
             AudioDeviceInfo.TYPE_USB_HEADSET -> {
                 // For USB headsets, the system should automatically use the headset mic
+                // Ensure audio mode stays NORMAL
+                if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                    audioManager.mode = AudioManager.MODE_NORMAL
+                }
+                audioManager.isSpeakerphoneOn = false
+                
                 android.util.Log.d("HeadphoneDetector", "USB headset detected - should use headset microphone")
 
                 // Show toast for audio routing change

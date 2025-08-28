@@ -196,6 +196,31 @@ class MainActivity : ComponentActivity() {
         handleViewIntent(intent)
     }
     
+    override fun onPause() {
+        super.onPause()
+        AppForegroundState.isInForeground = false
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        AppForegroundState.isInForeground = true
+    }
+    
+    override fun onStop() {
+        super.onStop()
+        // When app goes to background, stop the microphone service to save battery
+        // and ensure microphone is not kept active when user is not using the app
+        try {
+            val vcm = com.musify.mu.voice.VoiceControlManager.getInstance(this)
+            if (vcm?.isGymModeEnabled() == true) {
+                android.util.Log.d("MainActivity", "App going to background - disabling gym mode")
+                vcm.toggleGymMode() // This will turn off gym mode and stop the service
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error disabling gym mode in onStop", e)
+        }
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
         // Ensure MediaController is properly released
@@ -211,6 +236,13 @@ class MainActivity : ComponentActivity() {
             com.musify.mu.voice.VoiceControlManager.getInstance(this)?.cleanupOnAppDestroy()
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error cleaning up VoiceControlManager", e)
+        }
+        // Failsafe: directly stop WakeWordService in case it's still running
+        try {
+            com.musify.mu.voice.WakeWordService.stop(this)
+            android.util.Log.d("MainActivity", "Ensured WakeWordService is stopped")
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error stopping WakeWordService", e)
         }
     }
 }

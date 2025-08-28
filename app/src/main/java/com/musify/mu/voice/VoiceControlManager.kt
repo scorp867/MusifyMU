@@ -217,8 +217,12 @@ class VoiceControlManager(
 
     fun cleanup() {
         android.util.Log.d("VoiceControlManager", "Cleaning up VoiceControlManager")
-        // Restore default audio routing before cleanup
+        // Stop WakeWordService if it's running
         if (isGymModeActive) {
+            android.util.Log.d("VoiceControlManager", "Stopping WakeWordService during cleanup")
+            WakeWordService.stop(context)
+            isGymModeActive = false
+            onGymModeChanged?.invoke(false)
             headphoneDetector.restoreDefaultAudioRouting()
         }
         scope.cancel()
@@ -228,6 +232,10 @@ class VoiceControlManager(
 
     fun cleanupOnAppDestroy() {
         android.util.Log.d("VoiceControlManager", "App destroying - cleaning up")
+        // Ensure WakeWordService is stopped
+        if (isGymModeActive) {
+            WakeWordService.stop(context)
+        }
         cleanup()
     }
 
