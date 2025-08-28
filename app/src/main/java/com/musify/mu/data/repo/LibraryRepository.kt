@@ -172,39 +172,6 @@ class LibraryRepository private constructor(private val context: Context, privat
     }
 
     // ----- Paging 3: Tracks PagingSource over cached data -----
-    private class TracksPagingSource(
-        private val repo: LibraryRepository,
-        private val query: String?
-    ) : PagingSource<Int, Track>() {
-        override suspend fun load(params: LoadParams<Int>): LoadResult<Int, Track> {
-            return try {
-                val page = params.key ?: 0
-                val pageSize = params.loadSize
-                val all = if (query.isNullOrBlank()) {
-                    repo.dataManager.getAllTracks()
-                } else {
-                    repo.dataManager.searchTracks(query)
-                }
-                val from = (page * pageSize).coerceAtLeast(0)
-                val to = (from + pageSize).coerceAtMost(all.size)
-                val slice = if (from < to) all.subList(from, to) else emptyList()
-                LoadResult.Page(
-                    data = slice,
-                    prevKey = if (page == 0) null else page - 1,
-                    nextKey = if (to < all.size) page + 1 else null
-                )
-            } catch (e: Exception) {
-                LoadResult.Error(e)
-            }
-        }
-
-        override fun getRefreshKey(state: PagingState<Int, Track>): Int? {
-            val anchor = state.anchorPosition ?: return null
-            val page = anchor / (state.config.pageSize.takeIf { it > 0 } ?: 30)
-            return page
-        }
-    }
-
     fun pagedTracks(query: String? = null, pageSize: Int = 30): Flow<PagingData<Track>> {
         return Pager(
             config = PagingConfig(
@@ -212,7 +179,10 @@ class LibraryRepository private constructor(private val context: Context, privat
                 prefetchDistance = pageSize / 2,
                 enablePlaceholders = true
             ),
-            pagingSourceFactory = { TracksPagingSource(this, query) }
+            pagingSourceFactory = {
+                if (query.isNullOrBlank()) db.dao().pagingTracks()
+                else db.dao().pagingTracksSearch("%${query.trim()}%")
+            }
         ).flow
     }
 
