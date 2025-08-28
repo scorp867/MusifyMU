@@ -105,11 +105,6 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
-        
-        <!-- Notification dismiss receiver -->
-        <receiver
-            android:name=".playback.NotificationDismissReceiver"
-            android:exported="false" />
 
 
 

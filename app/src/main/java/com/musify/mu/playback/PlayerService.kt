@@ -23,6 +23,7 @@ import com.musify.mu.data.repo.LyricsStateStore
 import com.musify.mu.data.repo.PlaybackStateStore
 import com.musify.mu.data.repo.QueueStateStore
 import com.musify.mu.util.toMediaItem
+import com.musify.mu.data.db.entities.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -242,17 +243,18 @@ class PlayerService : MediaLibraryService() {
         // Build session with a placeholder player that will be replaced on first playback
         val placeholderPlayer = ExoPlayer.Builder(this).build()
 
-        // Create custom notification provider
-        val notificationProvider = MusicMediaNotificationProvider(this)
-        
         mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(this, placeholderPlayer, callback)
             .setId("MusifyMU_Session")
             .setShowPlayButtonIfPlaybackIsSuppressed(false)
             .setSessionActivity(createPlayerActivityIntent())
             .build()
             
-        // Set the custom notification provider
-        setMediaNotificationProvider(notificationProvider)
+        // Configure the service for media playback
+        setListener(object : Listener {
+            override fun onForegroundServiceStartNotAllowedException() {
+                android.util.Log.e("PlayerService", "Foreground service start not allowed")
+            }
+        })
 
         // Player and QueueManager will be created in ensurePlayerInitialized() when needed
         // This prevents duplicate creation and ensures proper initialization order
@@ -335,7 +337,7 @@ class PlayerService : MediaLibraryService() {
                     }
                 }
 
-                val items = validTracks.map { it.toMediaItem() }
+                val items = validTracks.map { track: Track -> track.toMediaItem() }
                 if (items.isNotEmpty()) {
                     val validStartIndex = startIndex.coerceIn(0, items.size - 1)
                     val validStartPos = if (startPos > 0L) startPos else 0L
