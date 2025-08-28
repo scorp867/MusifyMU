@@ -200,8 +200,8 @@ class HeadphoneDetector(private val context: Context) {
      */
     fun disableBuiltInAudioInputs() {
         try {
-            // Set audio mode to communication to prioritize headset mic
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            // Keep audio in normal mode as requested - do NOT use communication mode
+            // audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
 
             // Ensure speakerphone is off (this helps prevent built-in mic usage)
             audioManager.isSpeakerphoneOn = false
@@ -233,8 +233,8 @@ class HeadphoneDetector(private val context: Context) {
                     audioManager.stopBluetoothSco()
                     audioManager.isBluetoothScoOn = false
 
-                    // Set communication mode BEFORE starting SCO
-                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+                    // Keep audio in normal mode as requested - do NOT use communication mode
+                    // audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
 
                     // Force Bluetooth SCO audio for headset microphone ONLY
                     audioManager.startBluetoothSco()

@@ -100,6 +100,8 @@ class WebRtcCapture(
             audioSource = peerConnectionFactory!!.createAudioSource(constraints)
             audioTrack = peerConnectionFactory!!.createAudioTrack("ARDAMSa0", audioSource)
             audioTrack!!.setEnabled(true)
+            // Ensure no audio playback by setting volume to 0
+            audioTrack!!.setVolume(0.0)
 
             val rtcConfig = PeerConnection.RTCConfiguration(emptyList())
             peerConnection = peerConnectionFactory!!.createPeerConnection(
@@ -141,7 +143,8 @@ class WebRtcCapture(
                 }
             )
 
-            try { loopbackPeerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO) } catch (_: Throwable) {}
+            // Don't add transceiver on loopback to prevent audio playback
+            // try { loopbackPeerConnection?.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO) } catch (_: Throwable) {}
 
             // Unified Plan: addTrack directly
             audioSender = peerConnection!!.addTrack(audioTrack, listOf("ARDAMS"))

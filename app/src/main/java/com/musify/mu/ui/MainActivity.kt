@@ -206,6 +206,13 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error releasing MediaController in onDestroy", e)
         }
+        // Stop WakeWordService to ensure microphone is released
+        try {
+            com.musify.mu.voice.WakeWordService.stop(this)
+            android.util.Log.d("MainActivity", "WakeWordService stopped in onDestroy")
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error stopping WakeWordService", e)
+        }
         // Cleanup voice controls on app destroy
         try {
             com.musify.mu.voice.VoiceControlManager.getInstance(this)?.cleanupOnAppDestroy()
