@@ -91,7 +91,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = repo.getAllTracks())
 
     val listState = rememberLazyListState()
-    val pagedSongs = remember(repo) { repo.pagedTracks(query = if (searchQuery.isBlank()) null else searchQuery) }.collectAsLazyPagingItems()
+    val pagedSongs = remember(repo, searchQuery) { repo.pagedTracks(query = if (searchQuery.isBlank()) null else searchQuery) }.collectAsLazyPagingItems()
+    val pagedArtists = remember(repo) { repo.pagedArtists() }.collectAsLazyPagingItems()
+    val pagedAlbums = remember(repo) { repo.pagedAlbums() }.collectAsLazyPagingItems()
 
     // Function to refresh data
     val refreshData = {
