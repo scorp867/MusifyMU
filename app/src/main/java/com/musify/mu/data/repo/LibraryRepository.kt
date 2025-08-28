@@ -7,6 +7,8 @@ import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.db.entities.*
 import com.musify.mu.data.media.SimpleBackgroundDataManager
 import com.musify.mu.data.media.LoadingState
+import com.musify.mu.data.paging.TrackPagingSource
+import com.musify.mu.data.paging.CachedTrackPagingSource
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.CoroutineScope
@@ -14,6 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
@@ -162,5 +167,18 @@ class LibraryRepository private constructor(private val context: Context, privat
         val arr = JSONArray()
         list.forEach { arr.put(it) }
         searchPrefs.edit().putString(searchKey, arr.toString()).apply()
+    }
+    
+    // Paging 3 support using cached data
+    fun getTracksPager(query: String? = null): Flow<PagingData<Track>> {
+        return Pager(
+            config = PagingConfig(
+                pageSize = 50,
+                prefetchDistance = 10,
+                enablePlaceholders = false,
+                initialLoadSize = 100
+            ),
+            pagingSourceFactory = { CachedTrackPagingSource(dataManager, query) }
+        ).flow
     }
 }

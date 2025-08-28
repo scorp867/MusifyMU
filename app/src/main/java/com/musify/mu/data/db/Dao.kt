@@ -16,6 +16,13 @@ interface AppDao {
 
     @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
     suspend fun searchTracks(q: String): List<Track>
+    
+    // Paging queries
+    @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE LIMIT :limit OFFSET :offset")
+    suspend fun getTracksPaged(limit: Int, offset: Int): List<Track>
+    
+    @Query("SELECT * FROM track WHERE title LIKE :query OR artist LIKE :query OR album LIKE :query ORDER BY title COLLATE NOCASE LIMIT :limit OFFSET :offset")
+    suspend fun searchTracksPaged(query: String, limit: Int, offset: Int): List<Track>
 
     @Query("SELECT * FROM track WHERE mediaId = :mediaId")
     suspend fun getTrack(mediaId: String): Track?

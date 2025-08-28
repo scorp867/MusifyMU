@@ -8,6 +8,7 @@ import coil.request.CachePolicy
 import coil.util.DebugLogger
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import com.musify.mu.R
 
 
 /**
@@ -20,14 +21,14 @@ object CoilImageLoaderConfig {
         return ImageLoader.Builder(context)
             .memoryCache {
                 MemoryCache.Builder(context)
-                    .maxSizePercent(0.15) // Use 15% of available memory
+                    .maxSizePercent(0.20) // Use 20% of available memory for better performance
                     .strongReferencesEnabled(true) // Keep strong references for better performance
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("coil_artwork_cache"))
-                    .maxSizeBytes(100 * 1024 * 1024) // 100MB disk cache
+                    .maxSizeBytes(200 * 1024 * 1024) // 200MB disk cache for Paging 3
                     .build()
             }
             .okHttpClient {
@@ -38,13 +39,10 @@ object CoilImageLoaderConfig {
                     .build()
             }
             .respectCacheHeaders(false) // Ignore HTTP cache headers for local files
-            .allowHardware(false) // Better compatibility with older devices
+            .allowHardware(true) // Enable hardware acceleration for better performance
             .crossfade(true) // Enable smooth transitions
-            .apply {
-                if (android.util.Log.isLoggable("CoilImageLoader", android.util.Log.DEBUG)) {
-                    logger(DebugLogger())
-                }
-            }
+            .error(R.drawable.ic_music_note) // Set error drawable
+            .logger(if (android.util.Log.isLoggable("CoilImageLoader", android.util.Log.DEBUG)) DebugLogger() else null)
             .build()
     }
     

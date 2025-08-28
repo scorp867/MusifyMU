@@ -47,14 +47,18 @@ class SimpleMediaStoreScanner(
     private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var contentObserver: MediaStoreContentObserver? = null
     
-    // Minimal projection - only what we need for basic display
+    // Enhanced projection with more metadata fields for better album art extraction
     private val BASIC_PROJECTION = arrayOf(
         MediaStore.Audio.Media._ID,
         MediaStore.Audio.Media.TITLE,
         MediaStore.Audio.Media.ARTIST,
         MediaStore.Audio.Media.ALBUM,
         MediaStore.Audio.Media.DURATION,
-        MediaStore.Audio.Media.ALBUM_ID
+        MediaStore.Audio.Media.ALBUM_ID,
+        MediaStore.Audio.Media.DATA,  // File path for better metadata extraction
+        MediaStore.Audio.Media.ALBUM_ARTIST,
+        MediaStore.Audio.Media.YEAR,
+        MediaStore.Audio.Media.TRACK
     )
 
     /**
@@ -97,9 +101,31 @@ class SimpleMediaStoreScanner(
     }
 
     /**
-     * Extract and cache artwork for a track during startup scan
+     * Get album art URI from MediaStore
      */
-    private suspend fun extractAndCacheArtwork(trackUri: String): String? = withContext(Dispatchers.IO) {
+    private fun getAlbumArtFromMediaStore(albumId: Long?): String? {
+        if (albumId == null || albumId == 0L) return null
+        
+        return try {
+            val albumArtUri = ContentUris.withAppendedId(
+                Uri.parse("content://media/external/audio/albumart"),
+                albumId
+            )
+            // Check if the URI actually has content
+            context.contentResolver.openInputStream(albumArtUri)?.use {
+                // If we can open the stream, the album art exists
+                albumArtUri.toString()
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+    
+    /**
+     * Extract and cache artwork for a track during startup scan
+     * Enhanced to match Media3 notification player's accuracy
+     */
+    private suspend fun extractAndCacheArtwork(trackUri: String, albumId: Long? = null): String? = withContext(Dispatchers.IO) {
         try {
             val cacheKey = generateCacheKey(trackUri)
             val cacheFile = File(artworkCacheDir, "$cacheKey.jpg")
@@ -111,7 +137,7 @@ class SimpleMediaStoreScanner(
             
             val retriever = MediaMetadataRetriever()
             try {
-                // Set data source
+                // Set data source with better error handling
                 when {
                     trackUri.startsWith("content://") -> {
                         retriever.setDataSource(context, Uri.parse(trackUri))
@@ -125,8 +151,36 @@ class SimpleMediaStoreScanner(
                     }
                 }
                 
-                // Extract embedded artwork
-                val artworkBytes = retriever.embeddedPicture
+                // Try multiple metadata keys for artwork (matching Media3's approach)
+                var artworkBytes: ByteArray? = null
+                
+                // First try embedded picture (most accurate)
+                artworkBytes = retriever.embeddedPicture
+                
+                // Log metadata for debugging
+                val albumMetadata = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                val artistMetadata = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                val titleMetadata = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                
+                if (artworkBytes != null) {
+                    Log.d(TAG, "Found embedded artwork for: $titleMetadata by $artistMetadata (${artworkBytes.size} bytes)")
+                }
+                
+                // If no embedded picture, try to extract from video frame (for some formats)
+                if (artworkBytes == null) {
+                    try {
+                        val frameAtTime = retriever.getFrameAtTime(0)
+                        if (frameAtTime != null) {
+                            val stream = java.io.ByteArrayOutputStream()
+                            frameAtTime.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                            artworkBytes = stream.toByteArray()
+                            frameAtTime.recycle()
+                        }
+                    } catch (e: Exception) {
+                        // Frame extraction not supported for audio files
+                    }
+                }
+                
                 if (artworkBytes != null) {
                     val originalBitmap = BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size)
                     if (originalBitmap != null) {
@@ -140,10 +194,19 @@ class SimpleMediaStoreScanner(
                         }
                         resizedBitmap.recycle()
                         
+                        Log.d(TAG, "Successfully extracted and cached embedded artwork for: $trackUri")
                         return@withContext "file://${cacheFile.absolutePath}"
                     }
                 }
                 
+                // If no embedded artwork found, try MediaStore album art as fallback
+                val mediaStoreArt = getAlbumArtFromMediaStore(albumId)
+                if (mediaStoreArt != null) {
+                    Log.d(TAG, "Using MediaStore album art as fallback for albumId: $albumId")
+                    return@withContext mediaStoreArt
+                }
+                
+                Log.d(TAG, "No artwork found for: $trackUri")
                 return@withContext null
                 
             } finally {
@@ -281,7 +344,7 @@ class SimpleMediaStoreScanner(
                         // Validate essential fields - be less restrictive
                         if (duration >= 0) {  // Allow 0 duration for now
                             // Extract artwork during startup scan
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                            val artworkUri = extractAndCacheArtwork(contentUri.toString(), albumId)
                             
                             val track = Track(
                                 mediaId = contentUri.toString(),
@@ -353,7 +416,7 @@ class SimpleMediaStoreScanner(
                             // Basic validation
                             if (duration >= 0) {
                                 // Extract artwork during startup scan (broad query)
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                val artworkUri = extractAndCacheArtwork(contentUri.toString(), albumId)
                                 
                                 val track = Track(
                                     mediaId = contentUri.toString(),
@@ -448,7 +511,7 @@ class SimpleMediaStoreScanner(
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
                         if (duration >= 0) {
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                            val artworkUri = extractAndCacheArtwork(contentUri.toString(), albumId)
                             tracks.add(
                                 Track(
                                     mediaId = contentUri.toString(),
@@ -496,7 +559,7 @@ class SimpleMediaStoreScanner(
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
                             if (duration >= 0) {
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                val artworkUri = extractAndCacheArtwork(contentUri.toString(), albumId)
                                 tracks.add(
                                     Track(
                                         mediaId = contentUri.toString(),

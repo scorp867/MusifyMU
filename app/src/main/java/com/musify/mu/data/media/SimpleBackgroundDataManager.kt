@@ -125,9 +125,7 @@ class SimpleBackgroundDataManager private constructor(
      * Get all tracks from memory cache - NO database query
      */
     fun getAllTracks(): List<Track> {
-        val tracks = _cachedTracks.value
-        Log.d(TAG, "getAllTracks called, returning ${tracks.size} tracks")
-        return tracks
+        return _cachedTracks.value
     }
     
     /**
