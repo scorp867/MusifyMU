@@ -336,7 +336,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 }
                 2 -> {
                     // ARTISTS section (Paging)
-                    val pagedArtists = remember(repo) { repo.pagedArtists() }.collectAsLazyPagingItems()
                     items(pagedArtists.itemCount, key = { i -> "artist_${pagedArtists.peek(i)?.first ?: i}" }) { idx ->
                         val pair = pagedArtists[idx] ?: return@items
                         val (name, count) = pair
@@ -355,7 +354,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 }
                 3 -> {
                     // ALBUMS section (Paging)
-                    val pagedAlbums = remember(repo) { repo.pagedAlbums() }.collectAsLazyPagingItems()
                     items(pagedAlbums.itemCount, key = { i ->
                         val a = pagedAlbums.peek(i)
                         "album_${a?.albumId ?: i}_${a?.albumName ?: i}"
