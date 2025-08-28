@@ -242,29 +242,8 @@ class WakeWordService : Service() {
         }
 
         try {
-            // Use WebRTC for audio capture and processing
-            webRtcCapture = WebRtcCapture(
-                context = this,
-                onFrame = { frame ->
-                    if (!isInCommandWindow) {
-                        processWakeWordFrame(frame)
-                    } else {
-                        processCommandFrame(frame, frame.size)
-                        if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
-                            android.util.Log.d("WakeWordService", "Command window timeout reached")
-                            showToast("Command window ended")
-                            finalizeCommandWindow()
-                        }
-                    }
-                },
-                onError = { error ->
-                    android.util.Log.e("WakeWordService", "WebRTC error: $error")
-                    // Fallback to direct AudioRecord if WebRTC fails
-                    fallbackToDirectAudioRecord()
-                }
-            )
-            
-            webRtcCapture?.start()
+            // Start with direct AudioRecord to avoid WebRTC/Vosk crash
+            fallbackToDirectAudioRecord()
 
             // Audio processing is handled by WebRTC callback
 
@@ -309,13 +288,18 @@ class WakeWordService : Service() {
     }
 
     private fun stopListening() {
+        android.util.Log.d("WakeWordService", "Stopping listening")
         try { audioLoopJob?.cancel() } catch (_: Exception) {}
         audioLoopJob = null
         try { headphoneMonitorJob?.cancel() } catch (_: Exception) {}
         headphoneMonitorJob = null
         try { webRtcCapture?.stop() } catch (_: Exception) {}
         webRtcCapture = null
-        try { audioRecord?.stop(); audioRecord?.release() } catch (_: Exception) {}
+        try { 
+            audioRecord?.stop()
+            audioRecord?.release()
+            android.util.Log.d("WakeWordService", "AudioRecord stopped and released")
+        } catch (_: Exception) {}
         audioRecord = null
         try { voskRecognizer?.close() } catch (_: Exception) {}
         voskRecognizer = null
@@ -325,11 +309,20 @@ class WakeWordService : Service() {
         mediaController = null
         try { mediaControllerFuture?.cancel(true) } catch (_: Exception) {}
         mediaControllerFuture = null
+        
+        // IMPORTANT: Restore audio mode to NORMAL
+        try {
+            audioManager.mode = AudioManager.MODE_NORMAL
+            audioManager.isSpeakerphoneOn = false
+            android.util.Log.d("WakeWordService", "Audio mode restored to NORMAL")
+        } catch (_: Exception) {}
+        
         try { headphoneDetector?.restoreDefaultAudioRouting() } catch (_: Exception) {}
         try { headphoneDetector?.cleanup() } catch (_: Exception) {}
         headphoneDetector = null
         commandController = null
-        // Audio effects are tied to session; they are released with AudioRecord. Nothing further needed.
+        
+        showToast("Microphone stopped")
     }
 
     private suspend fun ensureVoskRecognizer(): Recognizer? {
@@ -635,12 +628,18 @@ class WakeWordService : Service() {
     }
     
     private fun fallbackToDirectAudioRecord() {
-        android.util.Log.w("WakeWordService", "Falling back to direct AudioRecord capture")
-        showToast("Using fallback audio capture")
+        android.util.Log.w("WakeWordService", "Using direct AudioRecord capture")
+        showToast("Microphone active")
         
         // Clean up WebRTC
         try { webRtcCapture?.stop() } catch (_: Exception) {}
         webRtcCapture = null
+        
+        // IMPORTANT: Ensure we're in NORMAL mode, NOT communication mode
+        try {
+            audioManager.mode = AudioManager.MODE_NORMAL
+            audioManager.isSpeakerphoneOn = false
+        } catch (_: Exception) {}
         
         // Start direct AudioRecord capture
         try {
@@ -657,6 +656,7 @@ class WakeWordService : Service() {
                 bufferSize
             )
             
+            // Do NOT enable any audio effects that might cause mode changes
             audioRecord?.startRecording()
             
             val frameSize = 320 // 20 ms @ 16 kHz

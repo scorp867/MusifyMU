@@ -228,6 +228,8 @@ class VoiceControlManager(
 
     fun cleanupOnAppDestroy() {
         android.util.Log.d("VoiceControlManager", "App destroying - cleaning up")
+        // Stop the wake word service
+        stopWakeWordListening()
         cleanup()
     }
 
