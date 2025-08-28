@@ -42,7 +42,8 @@ class WebRtcCapture(
     private var audioSource: AudioSource? = null
     private var audioTrack: AudioTrack? = null
     private var peerConnection: PeerConnection? = null
-    private var loopbackPeerConnection: PeerConnection? = null
+    // Removed loopback peer connection to prevent audio feedback
+    // private var loopbackPeerConnection: PeerConnection? = null
     private var audioSender: RtpSender? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var receivedSamples = false
@@ -81,6 +82,17 @@ class WebRtcCapture(
                 .setUseHardwareAcousticEchoCanceler(false)
                 .setUseHardwareNoiseSuppressor(false)
                 .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+                .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
+                    override fun onWebRtcAudioRecordInitError(errorMessage: String) {
+                        onError("Audio record init error: $errorMessage")
+                    }
+                    override fun onWebRtcAudioRecordStartError(errorCode: JavaAudioDeviceModule.AudioRecordStartErrorCode, errorMessage: String) {
+                        onError("Audio record start error: $errorMessage")
+                    }
+                    override fun onWebRtcAudioRecordError(errorMessage: String) {
+                        onError("Audio record error: $errorMessage")
+                    }
+                })
                 .setSamplesReadyCallback(samplesCallback)
                 .createAudioDeviceModule()
 
@@ -217,7 +229,7 @@ class WebRtcCapture(
         try { mainHandler.removeCallbacksAndMessages(null) } catch (_: Throwable) {}
         try { audioSender?.setTrack(null, false) } catch (_: Throwable) {}
         try { peerConnection?.close() } catch (_: Throwable) {}
-        try { loopbackPeerConnection?.close() } catch (_: Throwable) {}
+        // Loopback connection removed
         try { audioTrack?.dispose() } catch (_: Throwable) {}
         try { audioSource?.dispose() } catch (_: Throwable) {}
         try { peerConnectionFactory?.dispose() } catch (_: Throwable) {}
@@ -225,7 +237,7 @@ class WebRtcCapture(
         try { eglBase?.release() } catch (_: Throwable) {}
         audioSender = null
         peerConnection = null
-        loopbackPeerConnection = null
+        // loopbackPeerConnection = null
         audioTrack = null
         audioSource = null
         peerConnectionFactory = null

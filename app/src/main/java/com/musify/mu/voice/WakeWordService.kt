@@ -309,6 +309,7 @@ class WakeWordService : Service() {
     }
 
     private fun stopListening() {
+        android.util.Log.d("WakeWordService", "Stopping listening - releasing all audio resources")
         try { audioLoopJob?.cancel() } catch (_: Exception) {}
         audioLoopJob = null
         try { headphoneMonitorJob?.cancel() } catch (_: Exception) {}
@@ -330,6 +331,7 @@ class WakeWordService : Service() {
         headphoneDetector = null
         commandController = null
         // Audio effects are tied to session; they are released with AudioRecord. Nothing further needed.
+        android.util.Log.d("WakeWordService", "All audio resources released - microphone stopped")
     }
 
     private suspend fun ensureVoskRecognizer(): Recognizer? {
