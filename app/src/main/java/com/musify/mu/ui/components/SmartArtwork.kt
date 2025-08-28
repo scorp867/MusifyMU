@@ -85,7 +85,24 @@ fun SmartArtwork(
                 !artworkUri.isNullOrBlank() -> {
                     // Primary: Use pre-extracted artwork
                     android.util.Log.d("SmartArtwork", "Loading artwork: $artworkUri")
-                    artworkUri
+                    when {
+                        artworkUri.startsWith("file://") -> {
+                            // Local file URI
+                            java.io.File(artworkUri.removePrefix("file://"))
+                        }
+                        artworkUri.startsWith("content://") -> {
+                            // Content URI
+                            artworkUri
+                        }
+                        artworkUri.startsWith("/") -> {
+                            // Absolute path
+                            java.io.File(artworkUri)
+                        }
+                        else -> {
+                            // Assume it's a valid URI
+                            artworkUri
+                        }
+                    }
                 }
                 else -> {
                     // Fallback: Use default placeholder

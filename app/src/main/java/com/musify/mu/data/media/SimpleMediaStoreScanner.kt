@@ -135,13 +135,6 @@ class SimpleMediaStoreScanner(
                 return@withContext "file://${cacheFile.absolutePath}"
             }
             
-            // First try MediaStore album art (most accurate for many files)
-            val mediaStoreArt = getAlbumArtFromMediaStore(albumId)
-            if (mediaStoreArt != null) {
-                Log.d(TAG, "Found album art from MediaStore for albumId: $albumId")
-                return@withContext mediaStoreArt
-            }
-            
             val retriever = MediaMetadataRetriever()
             try {
                 // Set data source with better error handling
@@ -163,6 +156,15 @@ class SimpleMediaStoreScanner(
                 
                 // First try embedded picture (most accurate)
                 artworkBytes = retriever.embeddedPicture
+                
+                // Log metadata for debugging
+                val albumMetadata = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)
+                val artistMetadata = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                val titleMetadata = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)
+                
+                if (artworkBytes != null) {
+                    Log.d(TAG, "Found embedded artwork for: $titleMetadata by $artistMetadata (${artworkBytes.size} bytes)")
+                }
                 
                 // If no embedded picture, try to extract from video frame (for some formats)
                 if (artworkBytes == null) {
@@ -192,10 +194,19 @@ class SimpleMediaStoreScanner(
                         }
                         resizedBitmap.recycle()
                         
+                        Log.d(TAG, "Successfully extracted and cached embedded artwork for: $trackUri")
                         return@withContext "file://${cacheFile.absolutePath}"
                     }
                 }
                 
+                // If no embedded artwork found, try MediaStore album art as fallback
+                val mediaStoreArt = getAlbumArtFromMediaStore(albumId)
+                if (mediaStoreArt != null) {
+                    Log.d(TAG, "Using MediaStore album art as fallback for albumId: $albumId")
+                    return@withContext mediaStoreArt
+                }
+                
+                Log.d(TAG, "No artwork found for: $trackUri")
                 return@withContext null
                 
             } finally {
