@@ -68,7 +68,6 @@ import kotlinx.coroutines.withContext
 import com.musify.mu.ui.helpers.MediaControllerListener
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.LazyPagingItems
-import androidx.paging.compose.itemsIndexed
 import androidx.paging.compose.itemKey
 import androidx.paging.PagingData
 import kotlinx.coroutines.flow.flowOf

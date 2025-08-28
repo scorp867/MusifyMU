@@ -8,6 +8,7 @@ import coil.request.CachePolicy
 import coil.util.DebugLogger
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import com.musify.mu.R
 
 
 /**
@@ -40,14 +41,8 @@ object CoilImageLoaderConfig {
             .respectCacheHeaders(false) // Ignore HTTP cache headers for local files
             .allowHardware(true) // Enable hardware acceleration for better performance
             .crossfade(true) // Enable smooth transitions
-            .bitmapPoolPercentage(0.25) // Allocate 25% of memory to bitmap pool
-            .placeholder(android.R.color.transparent) // Set transparent placeholder
-            .error(com.musify.mu.R.drawable.ic_launcher_foreground) // Set error drawable
-            .apply {
-                if (android.util.Log.isLoggable("CoilImageLoader", android.util.Log.DEBUG)) {
-                    logger(DebugLogger())
-                }
-            }
+            .error(R.drawable.ic_music_note) // Set error drawable
+            .logger(if (android.util.Log.isLoggable("CoilImageLoader", android.util.Log.DEBUG)) DebugLogger() else null)
             .build()
     }
     
