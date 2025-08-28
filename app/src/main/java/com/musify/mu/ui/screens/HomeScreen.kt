@@ -66,11 +66,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.musify.mu.ui.helpers.MediaControllerListener
-import androidx.paging.compose.collectAsLazyPagingItems
-import androidx.paging.compose.LazyPagingItems
-import androidx.paging.compose.itemKey
-import androidx.paging.PagingData
-import kotlinx.coroutines.flow.flowOf
 
 // Composition local to provide scroll state to child components
 val LocalScrollState = compositionLocalOf<LazyListState?> { null }
@@ -95,9 +90,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var searchQuery by remember { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = repo.getAllTracks())
-    
-    // Paging 3 for tracks
-    val tracksPagingItems = repo.getTracksPager().collectAsLazyPagingItems()
 
     val listState = rememberLazyListState()
 
@@ -325,51 +317,38 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     }
                 }
                 1 -> {
-                    // SONGS section with Paging 3
-                    items(
-                        count = tracksPagingItems.itemCount,
-                        key = tracksPagingItems.itemKey { track -> "songs_${track.mediaId}" }
-                    ) { index ->
-                        tracksPagingItems[index]?.let { t ->
-                            val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
-                            
-                            // Add queue operations for swipe gestures
-                            val queueOps = rememberQueueOperations()
-                            val scope = rememberCoroutineScope()
-                            
-                            com.musify.mu.ui.components.EnhancedSwipeableItem(
-                                onSwipeRight = {
-                                    // Swipe right: Play Next
-                                    val ctx = QueueContextHelper.createDiscoverContext("home_songs")
-                                    scope.launch { queueOps.playNextWithContext(items = listOf(t.toMediaItem()), context = ctx) }
-                                },
-                                onSwipeLeft = {
-                                    // Swipe left: Add to User Queue
-                                    val ctx = QueueContextHelper.createDiscoverContext("home_songs")
-                                    scope.launch { queueOps.addToUserQueueWithContext(items = listOf(t.toMediaItem()), context = ctx) }
-                                },
-                                isInQueue = false,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                com.musify.mu.ui.components.CompactTrackRow(
-                                    title = t.title,
-                                    subtitle = t.artist,
-                                    artData = t.artUri,
-                                    contentDescription = t.title,
-                                    isPlaying = isPlaying,
-                                    showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                                    onClick = { 
-                                        // Create a list from visible items for playback
-                                        val visibleTracks = (0 until tracksPagingItems.itemCount).mapNotNull { i -> 
-                                            tracksPagingItems.peek(i)
-                                        }
-                                        val currentIndex = visibleTracks.indexOfFirst { it.mediaId == t.mediaId }
-                                        if (currentIndex >= 0) {
-                                            onPlay(visibleTracks, currentIndex)
-                                        }
-                                    }
-                                )
-                            }
+                    // SONGS section (Library-like list)
+                    items(tracksFiltered.size, key = { i -> "songs_${tracksFiltered[i].mediaId}" }) { idx ->
+                        val t = tracksFiltered[idx]
+                        val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                        
+                        // Add queue operations for swipe gestures
+                        val queueOps = rememberQueueOperations()
+                        val scope = rememberCoroutineScope()
+                        
+                        com.musify.mu.ui.components.EnhancedSwipeableItem(
+                            onSwipeRight = {
+                                // Swipe right: Play Next
+                                val ctx = QueueContextHelper.createDiscoverContext("home_songs")
+                                scope.launch { queueOps.playNextWithContext(items = listOf(t.toMediaItem()), context = ctx) }
+                            },
+                            onSwipeLeft = {
+                                // Swipe left: Add to User Queue
+                                val ctx = QueueContextHelper.createDiscoverContext("home_songs")
+                                scope.launch { queueOps.addToUserQueueWithContext(items = listOf(t.toMediaItem()), context = ctx) }
+                            },
+                            isInQueue = false,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            com.musify.mu.ui.components.CompactTrackRow(
+                                title = t.title,
+                                subtitle = t.artist,
+                                artData = t.artUri,
+                                contentDescription = t.title,
+                                isPlaying = isPlaying,
+                                showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
+                                onClick = { onPlay(tracksFiltered, idx) }
+                            )
                         }
                     }
                 }
@@ -585,16 +564,13 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         // Alphabetical overlay scroll bar (narrow)
         val isScrolling by remember { derivedStateOf { listState.isScrollInProgress } }
         val headerAndTabsOffset = 2
-        val indexMap = remember(selectedSection, tracksPagingItems.itemCount, artistsFiltered, albumsFiltered) {
+        val indexMap = remember(selectedSection, tracksFiltered, artistsFiltered, albumsFiltered) {
             when (selectedSection) {
                 1 -> {
                     val m = mutableMapOf<String, Int>()
-                    // For paging items, we can only build index map for loaded items
-                    for (i in 0 until tracksPagingItems.itemCount) {
-                        tracksPagingItems.peek(i)?.let { t ->
-                            val l = getFirstLetter(t.title)
-                            if (m[l] == null) m[l] = i + headerAndTabsOffset
-                        }
+                    tracksFiltered.forEachIndexed { i, t ->
+                        val l = getFirstLetter(t.title)
+                        if (m[l] == null) m[l] = i + headerAndTabsOffset
                     }
                     m as Map<String, Int>
                 }
