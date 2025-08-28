@@ -242,110 +242,51 @@ class WakeWordService : Service() {
         }
 
         try {
-            // Start direct AudioRecord capture at 16 kHz mono and feed Vosk
-            val sampleRate = 16000
-            val channelConfig = AudioFormat.CHANNEL_IN_MONO
-            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-            val minBuf = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-            val bufferSize = kotlin.math.max(minBuf, 320 * 8)
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                sampleRate,
-                channelConfig,
-                audioFormat,
-                bufferSize
-            )
-
-            // Enable platform effects if available
-            try {
-                if (NoiseSuppressor.isAvailable()) NoiseSuppressor.create(audioRecord!!.audioSessionId)?.enabled = true
-                if (AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(audioRecord!!.audioSessionId)?.enabled = true
-                if (AutomaticGainControl.isAvailable()) AutomaticGainControl.create(audioRecord!!.audioSessionId)?.enabled = true
-                audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-            } catch (_: Exception) {}
-
-            audioRecord?.startRecording()
-
-            val frameSize = 320 // 20 ms @ 16 kHz
-            val frameAccumulator = ShortArray(frameSize * 4)
-            var accLenLocal = 0
-
-            audioLoopJob = serviceScope.launch(Dispatchers.Default) {
-                val ioBuffer = ShortArray(2048)
-                while (isActive && audioRecord != null) {
-                    val n = try { audioRecord?.read(ioBuffer, 0, ioBuffer.size) ?: -1 } catch (_: Exception) { -1 }
-                    if (n == null || n <= 0) {
-                        kotlinx.coroutines.delay(5)
-                        continue
-                    }
-                    var offset = 0
-                    while (offset < n) {
-                        val copy = kotlin.math.min(n - offset, frameAccumulator.size - accLenLocal)
-                        System.arraycopy(ioBuffer, offset, frameAccumulator, accLenLocal, copy)
-                        accLenLocal += copy
-                        offset += copy
-                        while (accLenLocal >= frameSize) {
-                            val out = ShortArray(frameSize)
-                            System.arraycopy(frameAccumulator, 0, out, 0, frameSize)
-                            try {
-                                if (!isInCommandWindow) {
-                                    val wake = voskWakeRecognizer
-                                    if (wake != null) {
-                                        val bytes = shortsToBytesLE(out, out.size)
-                                        val accepted = wake.acceptWaveForm(bytes, bytes.size)
-                                        if (accepted) {
-                                            val pair = parseVoskResult(wake.result)
-                                            if (pair != null) {
-                                                val text = pair.first
-                                                val conf = pair.second
-                                                if (isWakePhrase(text) && conf >= wakeConfidenceThreshold) {
-                                                    android.util.Log.d("WakeWordService", "Wakeword detected by Vosk (conf=${"%.2f".format(conf)})")
-                                                    showToast("Wakeword detected")
-                                                    openCommandWindow()
-                                                    try { wake.reset() } catch (_: Exception) {}
-                                                }
-                                            }
-                                        } else {
-                                            val partialJson = wake.partialResult
-                                            val partialText = parseText(partialJson) ?: ""
-                                            if (isWakePhrase(partialText)) {
-                                                android.util.Log.d("WakeWordService", "Wakeword partial detected by Vosk")
-                                                showToast("Wakeword detected")
-                                                openCommandWindow()
-                                                try { wake.reset() } catch (_: Exception) {}
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    processCommandFrame(out, out.size)
-                                    if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
-                                        android.util.Log.d("WakeWordService", "Command window timeout reached")
-                                        showToast("Command window ended")
-                                        finalizeCommandWindow()
-                                    }
-                                }
-                            } catch (t: Throwable) {
-                                android.util.Log.w("WakeWordService", "Frame handling failed: ${t.message}")
-                            }
-                            // shift leftover
-                            val remain = accLenLocal - frameSize
-                            if (remain > 0) {
-                                System.arraycopy(frameAccumulator, frameSize, frameAccumulator, 0, remain)
-                            }
-                            accLenLocal = remain
+            // Use WebRTC for audio capture and processing
+            webRtcCapture = WebRtcCapture(
+                context = this,
+                onFrame = { frame ->
+                    if (!isInCommandWindow) {
+                        processWakeWordFrame(frame)
+                    } else {
+                        processCommandFrame(frame, frame.size)
+                        if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
+                            android.util.Log.d("WakeWordService", "Command window timeout reached")
+                            showToast("Command window ended")
+                            finalizeCommandWindow()
                         }
                     }
+                },
+                onError = { error ->
+                    android.util.Log.e("WakeWordService", "WebRTC error: $error")
+                    // Fallback to direct AudioRecord if WebRTC fails
+                    fallbackToDirectAudioRecord()
                 }
-            }
+            )
 
-            // Monitor headphone connectivity and stop if disconnected
+            webRtcCapture?.start()
+
+            // Audio processing is handled by WebRTC callback
+
+            // Monitor headphone connectivity and handle audio routing changes
             headphoneMonitorJob?.cancel()
-            // Optional: Keep monitoring but don't stop when disconnected; just log
             headphoneMonitorJob = serviceScope.launch(Dispatchers.Main) {
                 detector.isHeadphonesConnected.collect { connected ->
                     if (!connected) {
-                        android.util.Log.w("WakeWordService", "Headphones disconnected - continuing with device mic")
-                        try { detector.restoreDefaultAudioRouting() } catch (_: Exception) {}
+                        android.util.Log.w("WakeWordService", "Headphones disconnected - restoring audio routing")
+                        try {
+                            detector.restoreDefaultAudioRouting()
+                            // Ensure audio mode is restored to prevent music from playing through speaker
+                            audioManager.mode = AudioManager.MODE_NORMAL
+                        } catch (_: Exception) {}
+                    } else {
+                        // Headphones reconnected, re-establish routing if needed
+                        try {
+                            val isBt = detector.getPreferredAudioSource() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || !isBt || hasPermission(android.Manifest.permission.BLUETOOTH_CONNECT)) {
+                                detector.forceAudioRoutingToHeadset()
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
             }
@@ -659,5 +600,109 @@ class WakeWordService : Service() {
     private fun isWakePhrase(text: String): Boolean {
         val norm = text.trim().lowercase().replace(" ", "")
         return norm.contains("heymusify") || norm.contains("heymusicfy") || norm.contains("heymusicfi") || norm.contains("heymusicfive") || norm.contains("heymuzify") || norm.contains("heymusefy")
+    }
+
+    private fun processWakeWordFrame(frame: ShortArray) {
+        val wake = voskWakeRecognizer ?: return
+        try {
+            val bytes = shortsToBytesLE(frame, frame.size)
+            val accepted = wake.acceptWaveForm(bytes, bytes.size)
+            if (accepted) {
+                val pair = parseVoskResult(wake.result)
+                if (pair != null) {
+                    val text = pair.first
+                    val conf = pair.second
+                    if (isWakePhrase(text) && conf >= wakeConfidenceThreshold) {
+                        android.util.Log.d("WakeWordService", "Wakeword detected by Vosk (conf=${"%.2f".format(conf)})")
+                        showToast("Wakeword detected")
+                        openCommandWindow()
+                        try { wake.reset() } catch (_: Exception) {}
+                    }
+                }
+            } else {
+                val partialJson = wake.partialResult
+                val partialText = parseText(partialJson) ?: ""
+                if (isWakePhrase(partialText)) {
+                    android.util.Log.d("WakeWordService", "Wakeword partial detected by Vosk")
+                    showToast("Wakeword detected")
+                    openCommandWindow()
+                    try { wake.reset() } catch (_: Exception) {}
+                }
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("WakeWordService", "Wake word frame handling failed: ${t.message}")
+        }
+    }
+
+    private fun fallbackToDirectAudioRecord() {
+        android.util.Log.w("WakeWordService", "Falling back to direct AudioRecord capture")
+        showToast("Using fallback audio capture")
+
+        // Clean up WebRTC
+        try { webRtcCapture?.stop() } catch (_: Exception) {}
+        webRtcCapture = null
+
+        // Start direct AudioRecord capture
+        try {
+            val sampleRate = 16000
+            val channelConfig = AudioFormat.CHANNEL_IN_MONO
+            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+            val minBuf = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+            val bufferSize = kotlin.math.max(minBuf, 320 * 8)
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSize
+            )
+
+            audioRecord?.startRecording()
+
+            val frameSize = 320 // 20 ms @ 16 kHz
+            val frameAccumulator = ShortArray(frameSize * 4)
+            var accLenLocal = 0
+
+            audioLoopJob = serviceScope.launch(Dispatchers.Default) {
+                val ioBuffer = ShortArray(2048)
+                while (isActive && audioRecord != null) {
+                    val n = try { audioRecord?.read(ioBuffer, 0, ioBuffer.size) ?: -1 } catch (_: Exception) { -1 }
+                    if (n == null || n <= 0) {
+                        kotlinx.coroutines.delay(5)
+                        continue
+                    }
+                    var offset = 0
+                    while (offset < n) {
+                        val copy = kotlin.math.min(n - offset, frameAccumulator.size - accLenLocal)
+                        System.arraycopy(ioBuffer, offset, frameAccumulator, accLenLocal, copy)
+                        accLenLocal += copy
+                        offset += copy
+                        while (accLenLocal >= frameSize) {
+                            val out = ShortArray(frameSize)
+                            System.arraycopy(frameAccumulator, 0, out, 0, frameSize)
+                            if (!isInCommandWindow) {
+                                processWakeWordFrame(out)
+                            } else {
+                                processCommandFrame(out, out.size)
+                                if (SystemClock.elapsedRealtime() >= commandWindowEndAt) {
+                                    android.util.Log.d("WakeWordService", "Command window timeout reached")
+                                    showToast("Command window ended")
+                                    finalizeCommandWindow()
+                                }
+                            }
+                            // shift leftover
+                            val remain = accLenLocal - frameSize
+                            if (remain > 0) {
+                                System.arraycopy(frameAccumulator, frameSize, frameAccumulator, 0, remain)
+                            }
+                            accLenLocal = remain
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("WakeWordService", "Failed to start fallback audio recording", e)
+            showToast("Failed to start audio capture")
+        }
     }
 }

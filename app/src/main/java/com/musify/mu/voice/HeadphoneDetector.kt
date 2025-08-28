@@ -233,6 +233,9 @@ class HeadphoneDetector(private val context: Context) {
                     audioManager.stopBluetoothSco()
                     audioManager.isBluetoothScoOn = false
 
+                    // Set communication mode BEFORE starting SCO
+                    audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+
                     // Force Bluetooth SCO audio for headset microphone ONLY
                     audioManager.startBluetoothSco()
                     audioManager.isBluetoothScoOn = true
@@ -240,7 +243,7 @@ class HeadphoneDetector(private val context: Context) {
                     // Disable speakerphone to prevent built-in mic
                     audioManager.isSpeakerphoneOn = false
 
-                    android.util.Log.d("HeadphoneDetector", "Successfully forced EXCLUSIVE Bluetooth SCO audio routing - headset mic only (no COMM mode)")
+                    android.util.Log.d("HeadphoneDetector", "Successfully forced EXCLUSIVE Bluetooth SCO audio routing - headset mic only")
 
                     // Show toast for audio routing change
                     android.widget.Toast.makeText(
@@ -302,25 +305,26 @@ class HeadphoneDetector(private val context: Context) {
         val preferredSource = getPreferredAudioSource()
         android.util.Log.d("HeadphoneDetector", "Restoring default audio routing from: $preferredSource")
 
-        when (preferredSource) {
-            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> {
-                try {
-                    // Stop Bluetooth SCO audio and restore default routing
-                    audioManager.stopBluetoothSco()
-                    audioManager.isBluetoothScoOn = false
-
-                    // Restore normal audio mode
-                    audioManager.mode = AudioManager.MODE_NORMAL
-
-                    android.util.Log.d("HeadphoneDetector", "Successfully restored default audio routing - headset exclusive mode ended")
-                } catch (e: Exception) {
-                    android.util.Log.w("HeadphoneDetector", "Failed to restore default audio routing", e)
-                }
+        try {
+            // First, ensure we restore normal audio mode to prevent music from playing through communication speaker
+            if (audioManager.mode != AudioManager.MODE_NORMAL) {
+                audioManager.mode = AudioManager.MODE_NORMAL
+                android.util.Log.d("HeadphoneDetector", "Restored audio mode to NORMAL")
             }
-            else -> {
-                // For wired/USB headsets, no special cleanup needed
-                android.util.Log.d("HeadphoneDetector", "Default audio routing restored")
+
+            // Stop any active Bluetooth SCO connection
+            if (audioManager.isBluetoothScoOn) {
+                audioManager.stopBluetoothSco()
+                audioManager.isBluetoothScoOn = false
+                android.util.Log.d("HeadphoneDetector", "Stopped Bluetooth SCO")
             }
+
+            // Ensure speakerphone is in correct state
+            audioManager.isSpeakerphoneOn = false
+
+            android.util.Log.d("HeadphoneDetector", "Successfully restored default audio routing")
+        } catch (e: Exception) {
+            android.util.Log.w("HeadphoneDetector", "Failed to restore default audio routing", e)
         }
     }
 
