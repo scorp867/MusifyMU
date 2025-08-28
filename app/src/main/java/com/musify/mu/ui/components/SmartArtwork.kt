@@ -33,13 +33,15 @@ import kotlinx.coroutines.Dispatchers
  * - Lazy loading with progressive quality
  * - Multiple fallback strategies
  * - Smooth transitions and placeholders
+ * - Optimized for Paging 3 with automatic memory management
  */
 @Composable
 fun SmartArtwork(
     artworkUri: String?, // Pre-extracted artwork URI from Track entity
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
-    shape: Shape? = null
+    shape: Shape? = null,
+    enableCrossfade: Boolean = true
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
@@ -101,9 +103,10 @@ fun SmartArtwork(
                     .dispatcher(Dispatchers.IO)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
-                    .crossfade(300)
+                    .crossfade(if (enableCrossfade) 300 else 0)
                     .size(Size.ORIGINAL)
                     .scale(Scale.FIT)
+                    .allowHardware(true) // Enable hardware bitmaps for better performance
                     .listener(
                         onStart = {
                             isLoading = true

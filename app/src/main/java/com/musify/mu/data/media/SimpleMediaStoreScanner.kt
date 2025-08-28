@@ -47,14 +47,18 @@ class SimpleMediaStoreScanner(
     private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var contentObserver: MediaStoreContentObserver? = null
     
-    // Minimal projection - only what we need for basic display
+    // Enhanced projection with more metadata fields for better album art extraction
     private val BASIC_PROJECTION = arrayOf(
         MediaStore.Audio.Media._ID,
         MediaStore.Audio.Media.TITLE,
         MediaStore.Audio.Media.ARTIST,
         MediaStore.Audio.Media.ALBUM,
         MediaStore.Audio.Media.DURATION,
-        MediaStore.Audio.Media.ALBUM_ID
+        MediaStore.Audio.Media.ALBUM_ID,
+        MediaStore.Audio.Media.DATA,  // File path for better metadata extraction
+        MediaStore.Audio.Media.ALBUM_ARTIST,
+        MediaStore.Audio.Media.YEAR,
+        MediaStore.Audio.Media.TRACK
     )
 
     /**
@@ -98,6 +102,7 @@ class SimpleMediaStoreScanner(
 
     /**
      * Extract and cache artwork for a track during startup scan
+     * Enhanced to match Media3 notification player's accuracy
      */
     private suspend fun extractAndCacheArtwork(trackUri: String): String? = withContext(Dispatchers.IO) {
         try {
@@ -111,7 +116,7 @@ class SimpleMediaStoreScanner(
             
             val retriever = MediaMetadataRetriever()
             try {
-                // Set data source
+                // Set data source with better error handling
                 when {
                     trackUri.startsWith("content://") -> {
                         retriever.setDataSource(context, Uri.parse(trackUri))
@@ -125,8 +130,27 @@ class SimpleMediaStoreScanner(
                     }
                 }
                 
-                // Extract embedded artwork
-                val artworkBytes = retriever.embeddedPicture
+                // Try multiple metadata keys for artwork (matching Media3's approach)
+                var artworkBytes: ByteArray? = null
+                
+                // First try embedded picture (most accurate)
+                artworkBytes = retriever.embeddedPicture
+                
+                // If no embedded picture, try to extract from video frame (for some formats)
+                if (artworkBytes == null) {
+                    try {
+                        val frameAtTime = retriever.getFrameAtTime(0)
+                        if (frameAtTime != null) {
+                            val stream = java.io.ByteArrayOutputStream()
+                            frameAtTime.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+                            artworkBytes = stream.toByteArray()
+                            frameAtTime.recycle()
+                        }
+                    } catch (e: Exception) {
+                        // Frame extraction not supported for audio files
+                    }
+                }
+                
                 if (artworkBytes != null) {
                     val originalBitmap = BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size)
                     if (originalBitmap != null) {

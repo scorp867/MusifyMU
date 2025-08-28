@@ -98,6 +98,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-process:2.8.3")
 
     implementation("androidx.work:work-runtime-ktx:2.9.0")
+    
+    // Paging 3
+    implementation("androidx.paging:paging-runtime-ktx:3.2.1")
+    implementation("androidx.paging:paging-compose:3.2.1")
 
     // Unit tests
     testImplementation("junit:junit:4.13.2")
