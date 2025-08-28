@@ -62,6 +62,10 @@ import com.musify.mu.ui.components.getFirstLetter
 import com.musify.mu.ui.components.EnhancedSwipeableItem
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.musify.mu.ui.helpers.MediaControllerListener
 
 // Composition local to provide scroll state to child components
 val LocalScrollState = compositionLocalOf<LazyListState?> { null }
@@ -85,51 +89,69 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var showSearchSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val cachedTracks by repo.dataManager.cachedTracks.collectAsState(initial = repo.getAllTracks())
+    val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = repo.getAllTracks())
 
     val listState = rememberLazyListState()
 
-    // Function to refresh data
+    // Function to refresh data with IO dispatcher
     val refreshData = {
         scope.launch {
-            try {
-                recentPlayed = repo.recentlyPlayed(12)
-                android.util.Log.d("HomeScreen", "Recently played loaded: ${recentPlayed.size} tracks")
+            withContext(Dispatchers.IO) {
+                try {
+                    val recentPlayedData = repo.recentlyPlayed(12)
+                    val recentAddedData = repo.recentlyAdded(12)
+                    val favoritesData = repo.favorites()
+                    val customPlaylistsData = repo.playlists()
+                    
+                    withContext(Dispatchers.Main) {
+                        recentPlayed = recentPlayedData
+                        android.util.Log.d("HomeScreen", "Recently played loaded: ${recentPlayed.size} tracks")
 
-                recentAdded = repo.recentlyAdded(12)
-                android.util.Log.d("HomeScreen", "Recently added loaded: ${recentAdded.size} tracks")
+                        recentAdded = recentAddedData
+                        android.util.Log.d("HomeScreen", "Recently added loaded: ${recentAdded.size} tracks")
 
-                favorites = repo.favorites()
-                android.util.Log.d("HomeScreen", "Favorites loaded: ${favorites.size} tracks")
+                        favorites = favoritesData
+                        android.util.Log.d("HomeScreen", "Favorites loaded: ${favorites.size} tracks")
 
-                customPlaylists = repo.playlists()
-                android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
-            } catch (e: Exception) {
-                android.util.Log.w("HomeScreen", "Failed to refresh data", e)
+                        customPlaylists = customPlaylistsData
+                        android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("HomeScreen", "Failed to refresh data", e)
+                }
             }
         }
     }
 
     LaunchedEffect(Unit) {
-        scope.launch {
+        withContext(Dispatchers.IO) {
             try {
                 // Get data from fast cache - background loading handles the heavy lifting
-                recentPlayed = repo.recentlyPlayed(12)
-                android.util.Log.d("HomeScreen", "Recently played loaded: ${recentPlayed.size} tracks")
+                val recentPlayedData = repo.recentlyPlayed(12)
+                val recentAddedData = repo.recentlyAdded(12)
+                val favoritesData = repo.favorites()
+                val customPlaylistsData = repo.playlists()
+                
+                withContext(Dispatchers.Main) {
+                    recentPlayed = recentPlayedData
+                    android.util.Log.d("HomeScreen", "Recently played loaded: ${recentPlayed.size} tracks")
 
-                recentAdded = repo.recentlyAdded(12)
-                android.util.Log.d("HomeScreen", "Recently added loaded: ${recentAdded.size} tracks")
+                    recentAdded = recentAddedData
+                    android.util.Log.d("HomeScreen", "Recently added loaded: ${recentAdded.size} tracks")
 
-                favorites = repo.favorites()
-                android.util.Log.d("HomeScreen", "Favorites loaded: ${favorites.size} tracks")
+                    favorites = favoritesData
+                    android.util.Log.d("HomeScreen", "Favorites loaded: ${favorites.size} tracks")
 
-                customPlaylists = repo.playlists()
-                android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
+                    customPlaylists = customPlaylistsData
+                    android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
+                }
             } catch (e: Exception) {
                 // Handle error gracefully
                 android.util.Log.w("HomeScreen", "Failed to load home data", e)
             } finally {
-                isLoading = false
+                withContext(Dispatchers.Main) {
+                    isLoading = false
+                }
             }
         }
     }
@@ -150,13 +172,19 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     }
 
     // Dynamically update recently played when the controller transitions
-    LaunchedEffect(controller) {
-        controller?.addListener(object : androidx.media3.common.Player.Listener {
-            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                scope.launch { recentPlayed = repo.recentlyPlayed(12) }
+    MediaControllerListener(
+        controller = controller,
+        onMediaItemTransition = { _, _ ->
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    val updated = repo.recentlyPlayed(12)
+                    withContext(Dispatchers.Main) {
+                        recentPlayed = updated
+                    }
+                }
             }
-        })
-    }
+        }
+    )
 
     // Refresh data when the screen becomes visible (simplified approach)
     LaunchedEffect(Unit) {

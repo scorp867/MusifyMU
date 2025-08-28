@@ -1,21 +1,38 @@
 package com.musify.mu.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import coil.compose.AsyncImage
+import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import coil.request.CachePolicy
 import coil.size.Size
 import coil.size.Scale
+// Removed BlurTransformation to avoid extra artifact
 import com.musify.mu.R
+import kotlinx.coroutines.Dispatchers
 
 /**
- * Cache-only artwork component that reads from pre-extracted artwork stored in database
- * No on-demand extraction - all artwork is extracted at app startup for smooth scrolling
+ * Enhanced artwork component with lazy loading and multiple fallback methods
+ * Features:
+ * - Lazy loading with progressive quality
+ * - Multiple fallback strategies
+ * - Smooth transitions and placeholders
  */
 @Composable
 fun SmartArtwork(
@@ -25,46 +42,115 @@ fun SmartArtwork(
     shape: Shape? = null
 ) {
     val context = LocalContext.current
-    
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
     
-    // Determine what to display - either pre-extracted artwork or placeholder
-    val imageData = remember(artworkUri) {
-        when {
-            !artworkUri.isNullOrBlank() -> {
-                // Use pre-extracted artwork from startup scan
-                android.util.Log.d("SmartArtwork", "Using pre-extracted artwork: $artworkUri")
-                android.net.Uri.parse(artworkUri)
-            }
-            else -> {
-                // Show placeholder - no artwork was found during startup scan
-                android.util.Log.d("SmartArtwork", "Showing placeholder - no artwork extracted during startup for contentDescription: $contentDescription")
-                R.drawable.ic_music_note
+    // State for tracking load status
+    var isLoading by remember { mutableStateOf(true) }
+    var hasError by remember { mutableStateOf(false) }
+    
+    // Create gradient background colors based on theme
+    val gradientColors = listOf(
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+        MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
+        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f)
+    )
+    
+    Box(
+        modifier = finalModifier,
+        contentAlignment = Alignment.Center
+    ) {
+        // Background gradient placeholder
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = if (hasError) {
+                            listOf(
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                                MaterialTheme.colorScheme.error.copy(alpha = 0.1f)
+                            )
+                        } else {
+                            gradientColors
+                        }
+                    )
+                )
+        )
+        
+        // Determine image source with fallback chain
+        val imageData = remember(artworkUri) {
+            when {
+                !artworkUri.isNullOrBlank() -> {
+                    // Primary: Use pre-extracted artwork
+                    android.util.Log.d("SmartArtwork", "Loading artwork: $artworkUri")
+                    artworkUri
+                }
+                else -> {
+                    // Fallback: Use default placeholder
+                    android.util.Log.d("SmartArtwork", "No artwork available, using placeholder")
+                    null
+                }
             }
         }
+        
+        if (imageData != null) {
+            // Create image painter with multiple fallback strategies
+            val painter = rememberAsyncImagePainter(
+                model = ImageRequest.Builder(context)
+                    .data(imageData)
+                    .dispatcher(Dispatchers.IO)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .crossfade(300)
+                    .size(Size.ORIGINAL)
+                    .scale(Scale.FIT)
+                    .listener(
+                        onStart = {
+                            isLoading = true
+                            hasError = false
+                        },
+                        onSuccess = { _, _ ->
+                            isLoading = false
+                            hasError = false
+                        },
+                        onError = { _, _ ->
+                            isLoading = false
+                            hasError = true
+                            android.util.Log.w("SmartArtwork", "Failed to load artwork: $imageData")
+                        }
+                    )
+                    .build()
+            )
+            
+            // Display the image
+            androidx.compose.foundation.Image(
+                painter = painter,
+                contentDescription = contentDescription,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                alpha = if (isLoading) 0.7f else 1f
+            )
+            
+            // Loading state overlay
+            if (painter.state is AsyncImagePainter.State.Loading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.2f))
+                )
+            }
+        }
+        
+        // Show icon placeholder when no image or on error
+        if (imageData == null || hasError) {
+            Icon(
+                imageVector = Icons.Rounded.MusicNote,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.fillMaxSize(0.4f)
+            )
+        }
     }
-    
-    // Simple Coil image request - no complex caching needed since artwork is pre-extracted
-    val imageRequest = remember(artworkUri, imageData) {
-        ImageRequest.Builder(context)
-            .data(imageData)
-            .memoryCachePolicy(CachePolicy.ENABLED)
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .crossfade(200) // Quick transition
-            .error(R.drawable.ic_music_note)
-            .placeholder(R.drawable.ic_music_note)
-            .fallback(R.drawable.ic_music_note)
-            .size(Size.ORIGINAL)
-            .scale(Scale.FIT)
-            .build()
-    }
-    
-    AsyncImage(
-        model = imageRequest,
-        contentDescription = contentDescription,
-        modifier = finalModifier.fillMaxSize(),
-        contentScale = androidx.compose.ui.layout.ContentScale.Crop
-    )
 }
 
 // SmartArtwork component only - Artwork wrapper is in Artwork.kt

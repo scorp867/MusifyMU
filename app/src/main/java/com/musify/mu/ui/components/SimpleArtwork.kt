@@ -1,11 +1,25 @@
 package com.musify.mu.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import coil.request.CachePolicy
 import coil.size.Size
@@ -13,6 +27,7 @@ import coil.size.Scale
 import com.musify.mu.R
 import android.content.ContentUris
 import android.provider.MediaStore
+import kotlinx.coroutines.Dispatchers
 
 /**
  * Simple artwork component that efficiently displays album art from cached data.
@@ -72,40 +87,74 @@ fun SimpleArtwork(
         }
     }
     
-    // Simple Coil image request with aggressive caching
-    val imageRequest = remember(cacheKey, imageData) {
-        ImageRequest.Builder(context)
-            .data(imageData)
-            .memoryCacheKey(cacheKey)
-            .diskCacheKey(cacheKey)
-            .memoryCachePolicy(CachePolicy.ENABLED)
-            .diskCachePolicy(CachePolicy.ENABLED)
-            .crossfade(200)
-            .error(R.drawable.ic_music_note)
-            .placeholder(R.drawable.ic_music_note)
-            .fallback(R.drawable.ic_music_note)
-            .size(Size.ORIGINAL)
-            .scale(Scale.FIT)
-            .listener(
-                onStart = { placeholder ->
-                    android.util.Log.d("SimpleArtwork", "Loading artwork for: $cacheKey")
-                },
-                onSuccess = { _, _ ->
-                    android.util.Log.d("SimpleArtwork", "Successfully loaded artwork for: $cacheKey")
-                },
-                onError = { _, result ->
-                    android.util.Log.w("SimpleArtwork", "Failed to load artwork for: $cacheKey", result.throwable)
-                }
-            )
-            .build()
-    }
+
     
-    AsyncImage(
-        model = imageRequest,
-        contentDescription = contentDescription,
+    // State for tracking load status
+    var hasError by remember { mutableStateOf(false) }
+    
+    Box(
         modifier = finalModifier,
-        contentScale = androidx.compose.ui.layout.ContentScale.Crop
-    )
+        contentAlignment = Alignment.Center
+    ) {
+        // Background gradient placeholder
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.05f)
+                        )
+                    )
+                )
+        )
+        
+        AsyncImage(
+            model = ImageRequest.Builder(context)
+                .data(imageData)
+                .memoryCacheKey(cacheKey)
+                .diskCacheKey(cacheKey)
+                .memoryCachePolicy(CachePolicy.ENABLED)
+                .diskCachePolicy(CachePolicy.ENABLED)
+                .dispatcher(Dispatchers.IO)
+                .crossfade(200)
+                .error(R.drawable.ic_music_note)
+                .placeholder(R.drawable.ic_music_note)
+                .fallback(R.drawable.ic_music_note)
+                .size(Size.ORIGINAL)
+                .scale(Scale.FIT)
+                .listener(
+                    onError = { _, _ ->
+                        hasError = true
+                    },
+                    onSuccess = { _, _ ->
+                        hasError = false
+                    }
+                )
+                .build(),
+            contentDescription = contentDescription,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+        
+        // Show icon overlay on error
+        if (hasError) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.3f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.8f),
+                    modifier = Modifier.fillMaxSize(0.3f)
+                )
+            }
+        }
+    }
 }
 
 /**

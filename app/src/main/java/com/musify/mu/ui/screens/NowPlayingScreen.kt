@@ -45,6 +45,7 @@ import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.AnimatedBackground
 import com.musify.mu.ui.components.EnhancedLyricsView
 import com.musify.mu.ui.navigation.Screen
+import com.musify.mu.ui.helpers.resolveTrack
 import org.burnoutcrew.reorderable.rememberReorderableLazyListState
 import org.burnoutcrew.reorderable.reorderable
 import org.burnoutcrew.reorderable.ReorderableItem
@@ -266,38 +267,52 @@ fun NowPlayingScreen(navController: NavController) {
         }
     }
 
-    // Listen for player state changes
-    LaunchedEffect(controller) {
-        controller?.let { mediaController ->
-            // Initial state
-            currentTrack = mediaController.currentMediaItem?.let { item ->
-                repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
-            }
-            isPlaying = mediaController.isPlaying
-            shuffleOn = mediaController.shuffleModeEnabled
-            repeatMode = when(mediaController.repeatMode) {
+    // Listen for player state changes with proper lifecycle management
+    DisposableEffect(controller) {
+        if (controller == null) {
+            return@DisposableEffect onDispose { }
+        }
+        
+        // Initial state setup
+        coroutineScope.launch {
+            currentTrack = resolveTrack(controller.currentMediaItem, repo)
+            isPlaying = controller.isPlaying
+            shuffleOn = controller.shuffleModeEnabled
+            repeatMode = when(controller.repeatMode) {
                 Player.REPEAT_MODE_ONE -> 1
                 Player.REPEAT_MODE_ALL -> 2
                 else -> 0
             }
-            progress = if (mediaController.duration > 0) {
-                mediaController.currentPosition.toFloat() / mediaController.duration.toFloat()
+            progress = if (controller.duration > 0) {
+                controller.currentPosition.toFloat() / controller.duration.toFloat()
             } else 0f
-            duration = mediaController.duration
-            // Load like state
+            duration = controller.duration
+            
+            // Load like state with IO dispatcher
             currentTrack?.let { t ->
-                isLiked = repo.isLiked(t.mediaId)
-            }
-
-            // Add listener for real-time updates
-            val listener = object : Player.Listener {
-                override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                    currentTrack = mediaItem?.let { item ->
-                        repo.getTrackByMediaId(item.mediaId) ?: item.toTrack()
+                withContext(Dispatchers.IO) {
+                    val liked = repo.isLiked(t.mediaId)
+                    withContext(Dispatchers.Main) {
+                        isLiked = liked
                     }
-                    currentTrack?.let { t ->
-                        // refresh like state on track change
-                        coroutineScope.launch { isLiked = repo.isLiked(t.mediaId) }
+                }
+            }
+        }
+
+        // Add listener for real-time updates
+        val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                currentTrack = resolveTrack(mediaItem, repo)
+                currentTrack?.let { t ->
+                    // refresh like state on track change
+                    coroutineScope.launch {
+                        withContext(Dispatchers.IO) {
+                            val liked = repo.isLiked(t.mediaId)
+                            withContext(Dispatchers.Main) {
+                                isLiked = liked
+                            }
+                        }
+                    }
                     }
                 }
 
@@ -319,32 +334,36 @@ fun NowPlayingScreen(navController: NavController) {
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_READY) {
-                        duration = mediaController.duration
+                        duration = controller.duration
                     }
                 }
             }
 
-            mediaController.addListener(listener)
-
-            // Continuous progress updates - pause updates while user is seeking
-            launch {
-                while (true) {
-                    try {
-                        val currentPos = mediaController.currentPosition
-                        val dur = mediaController.duration
-                        if (dur > 0) {
-                            duration = dur
-                            if (!userSeeking) {
-                                progress = (currentPos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
-                            }
+        controller.addListener(listener)
+        
+        // Progress updater in separate coroutine
+        val progressJob = coroutineScope.launch {
+            while (true) {
+                try {
+                    val currentPos = controller.currentPosition
+                    val dur = controller.duration
+                    if (dur > 0) {
+                        duration = dur
+                        if (!userSeeking) {
+                            progress = (currentPos.toFloat() / dur.toFloat()).coerceIn(0f, 1f)
                         }
-                        // Update every 150ms to reduce main-thread churn without visible regression
-                        delay(150)
-                    } catch (e: Exception) {
-                        delay(500)
                     }
+                    // Update every 150ms to reduce main-thread churn without visible regression
+                    delay(150)
+                } catch (e: Exception) {
+                    delay(500)
                 }
             }
+        }
+        
+        onDispose {
+            controller.removeListener(listener)
+            progressJob.cancel()
         }
     }
 
