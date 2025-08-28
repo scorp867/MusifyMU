@@ -334,9 +334,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     }
                 }
                 2 -> {
-                    // ARTISTS section
-                    items(artistsFiltered.size, key = { i -> "artist_${artistsFiltered[i].first}" }) { idx ->
-                        val (name, count) = artistsFiltered[idx]
+                    // ARTISTS section (Paging)
+                    val pagedArtists = remember(repo) { repo.pagedArtists() }.collectAsLazyPagingItems()
+                    items(pagedArtists.itemCount, key = { i -> "artist_${pagedArtists.peek(i)?.first ?: i}" }) { idx ->
+                        val pair = pagedArtists[idx] ?: return@items
+                        val (name, count) = pair
                         Card(
                             modifier = Modifier.clickable {
                                 val encoded = java.net.URLEncoder.encode(name, "UTF-8")
@@ -351,9 +353,13 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     }
                 }
                 3 -> {
-                    // ALBUMS section
-                    items(albumsFiltered.size, key = { i -> "album_${albumsFiltered[i].albumId}_${albumsFiltered[i].albumName}" }) { idx ->
-                        val a = albumsFiltered[idx]
+                    // ALBUMS section (Paging)
+                    val pagedAlbums = remember(repo) { repo.pagedAlbums() }.collectAsLazyPagingItems()
+                    items(pagedAlbums.itemCount, key = { i ->
+                        val a = pagedAlbums.peek(i)
+                        "album_${a?.albumId ?: i}_${a?.albumName ?: i}"
+                    }) { idx ->
+                        val a = pagedAlbums[idx] ?: return@items
                         Card(
                             modifier = Modifier.clickable {
                                 val albumEnc = java.net.URLEncoder.encode(a.albumName, "UTF-8")
