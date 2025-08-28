@@ -81,6 +81,20 @@ class WebRtcCapture(
                 .setUseHardwareAcousticEchoCanceler(false)
                 .setUseHardwareNoiseSuppressor(false)
                 .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+                .setAudioRecordErrorCallback(object : JavaAudioDeviceModule.AudioRecordErrorCallback {
+                    override fun onWebRtcAudioRecordInitError(errorMessage: String) {
+                        onError("Audio record init error: $errorMessage")
+                    }
+                    override fun onWebRtcAudioRecordStartError(
+                        errorCode: JavaAudioDeviceModule.AudioRecordStartErrorCode,
+                        errorMessage: String
+                    ) {
+                        onError("Audio record start error: $errorMessage")
+                    }
+                    override fun onWebRtcAudioRecordError(errorMessage: String) {
+                        onError("Audio record error: $errorMessage")
+                    }
+                })
                 .setSamplesReadyCallback(samplesCallback)
                 .createAudioDeviceModule()
 
@@ -100,6 +114,10 @@ class WebRtcCapture(
             audioSource = peerConnectionFactory!!.createAudioSource(constraints)
             audioTrack = peerConnectionFactory!!.createAudioTrack("ARDAMSa0", audioSource)
             audioTrack!!.setEnabled(true)
+            
+            // IMPORTANT: Set audio playout to false to prevent hearing own voice
+            audioDeviceModule?.setAudioTrackEnabled(false)
+            audioDeviceModule?.setSpeakerMute(true)
 
             val rtcConfig = PeerConnection.RTCConfiguration(emptyList())
             peerConnection = peerConnectionFactory!!.createPeerConnection(

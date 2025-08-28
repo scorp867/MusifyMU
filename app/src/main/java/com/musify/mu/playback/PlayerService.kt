@@ -22,12 +22,32 @@ import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.data.repo.LyricsStateStore
 import com.musify.mu.data.repo.PlaybackStateStore
 import com.musify.mu.data.repo.QueueStateStore
-import com.musify.mu.util.toMediaItem
+import com.musify.mu.data.db.entities.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+
+// Temporary workaround - define extension function here
+fun Track.toMediaItem(): MediaItem {
+    return MediaItem.Builder()
+        .setMediaId(mediaId)
+        .setUri(mediaId)
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .setAlbumTitle(album)
+                .setArtworkUri(artUri?.let { android.net.Uri.parse(it) })
+                .setGenre(genre)
+                .setReleaseYear(year)
+                .setTrackNumber(track)
+                .setAlbumArtist(albumArtist)
+                .build()
+        )
+        .build()
+}
 
 class PlayerService : MediaLibraryService() {
 
@@ -247,6 +267,13 @@ class PlayerService : MediaLibraryService() {
             .setShowPlayButtonIfPlaybackIsSuppressed(false)
             .setSessionActivity(createPlayerActivityIntent())
             .build()
+            
+        // Configure the service for media playback
+        setListener(object : Listener {
+            override fun onForegroundServiceStartNotAllowedException() {
+                android.util.Log.e("PlayerService", "Foreground service start not allowed")
+            }
+        })
 
         // Player and QueueManager will be created in ensurePlayerInitialized() when needed
         // This prevents duplicate creation and ensures proper initialization order
@@ -264,9 +291,26 @@ class PlayerService : MediaLibraryService() {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
         android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
+        
+        // Stop playback immediately
+        try {
+            _player?.stop()
+            _player?.clearMediaItems()
+        } catch (_: Exception) {}
+        
+        // Release the media session immediately to clear notification
+        try {
+            mediaLibrarySession?.release()
+            mediaLibrarySession = null
+        } catch (_: Exception) {}
 
-        // Stop foreground service and clear notifications
+        // Stop foreground service and clear notifications immediately
         stopForeground(STOP_FOREGROUND_REMOVE)
+        
+        // Clear any remaining notifications
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancelAll()
+        
         // Stop the service completely
         serviceScope.cancel()
         stopSelf()
@@ -297,10 +341,10 @@ class PlayerService : MediaLibraryService() {
     fun playMediaIds(ids: List<String>, startIndex: Int = 0, startPos: Long = 0L) {
         serviceScope.launch {
             try {
-                val tracks = repo.getAllTracks().filter { ids.contains(it.mediaId) }
+                val tracks = repo.getAllTracks().filter { track: Track -> ids.contains(track.mediaId) }
 
                 // Validate that media files exist
-                val validTracks = tracks.filter { track ->
+                val validTracks = tracks.filter { track: Track ->
                     try {
                         val uri = Uri.parse(track.mediaId)
                         val inputStream = this@PlayerService.contentResolver.openInputStream(uri)
@@ -312,7 +356,7 @@ class PlayerService : MediaLibraryService() {
                     }
                 }
 
-                val items = validTracks.map { it.toMediaItem() }
+                val items = validTracks.map { track: Track -> track.toMediaItem() }
                 if (items.isNotEmpty()) {
                     val validStartIndex = startIndex.coerceIn(0, items.size - 1)
                     val validStartPos = if (startPos > 0L) startPos else 0L
