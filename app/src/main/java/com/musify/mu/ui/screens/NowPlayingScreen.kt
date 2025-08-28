@@ -335,7 +335,7 @@ fun NowPlayingScreen(navController: NavController) {
             listenerRef = listener
 
             // Continuous progress updates - pause updates while user is seeking
-            launch {
+            coroutineScope.launch {
                 while (true) {
                     try {
                         val currentPos = mediaController.currentPosition

@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -363,7 +364,7 @@ private fun AppContent(
                     ) {
                         Column {
                             Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 0.dp)) {
-                                AnimatedVisibility(
+                                androidx.compose.animation.AnimatedVisibility(
                                     visible = hasPlayableQueue && currentTrack != null,
                                     enter = fadeIn(animationSpec = tween(300)),
                                     exit = fadeOut(animationSpec = tween(300))
