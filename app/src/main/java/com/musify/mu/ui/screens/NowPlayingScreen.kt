@@ -495,8 +495,6 @@ fun NowPlayingScreen(navController: NavController) {
                         val nowPlayingArt: Any? = md?.artworkData ?: md?.artworkUri ?: track.artUri
                         com.musify.mu.ui.components.Artwork(
                             data = nowPlayingArt,
-                            audioUri = track.mediaId,
-                            albumId = track.albumId,
                             contentDescription = track.title,
                             modifier = Modifier.fillMaxSize()
                         )

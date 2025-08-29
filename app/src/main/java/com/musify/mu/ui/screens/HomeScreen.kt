@@ -818,8 +818,6 @@ private fun TrackCard(
                     // Use regular Artwork
                     Artwork(
                         data = track.artUri,
-                        audioUri = track.mediaId,
-                        albumId = track.albumId,
                         contentDescription = track.title,
                         modifier = Modifier.fillMaxSize(),
                         isVisible = isVisible

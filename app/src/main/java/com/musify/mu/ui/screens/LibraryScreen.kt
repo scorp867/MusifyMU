@@ -147,7 +147,6 @@ fun LibraryScreen(
     // Debug logging for tracks state
     LaunchedEffect(allTracks) {
         android.util.Log.d("LibraryScreen", "allTracks changed: ${allTracks.size} tracks")
-        android.util.Log.d("LibraryScreen", "tracks computed: ${tracks.size} tracks")
         android.util.Log.d("LibraryScreen", "visualTracks computed: ${visualTracks.size} tracks")
         android.util.Log.d("LibraryScreen", "isLoading: $isLoading")
 

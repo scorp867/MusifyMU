@@ -189,8 +189,6 @@ fun NowPlayingBar(
                 // Album artwork with rounded corners (compact)
                 Artwork(
                     data = mediaArtwork ?: currentTrack.artUri,
-                    audioUri = currentTrack.mediaId,
-                    albumId = currentTrack.albumId,
                     contentDescription = currentTrack.title,
                     modifier = Modifier
                         .size(48.dp)

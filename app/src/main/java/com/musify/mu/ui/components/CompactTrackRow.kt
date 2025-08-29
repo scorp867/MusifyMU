@@ -79,13 +79,11 @@ fun CompactTrackRow(
         ) {
         Artwork(
             data = artData,
-            audioUri = null,
-            albumId = null,
             contentDescription = contentDescription,
             modifier = Modifier.size(52.dp),
             isVisible = isArtworkVisible
         ) {
-            Box(modifier = Modifier.matchParentSize()) {
+            Box(modifier = Modifier.fillMaxSize()) {
                 if (showIndicator) {
                     PlayingIndicator(
                         modifier = Modifier
