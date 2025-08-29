@@ -181,12 +181,14 @@ fun NowPlayingBar(
                 // Album artwork with rounded corners (compact)
                 Artwork(
                     data = currentTrack.artUri,
-                    mediaUri = currentTrack.mediaId,
-                    albumId = currentTrack.albumId,
                     contentDescription = currentTrack.title,
                     modifier = Modifier
                         .size(48.dp)
                         .clip(RoundedCornerShape(10.dp)),
+                    shape = null,
+                    mediaUri = currentTrack.mediaId,
+                    cacheKey = null,
+                    albumId = currentTrack.albumId,
                     enableOnDemand = false
                 ) {
                     if (isPlaying) {

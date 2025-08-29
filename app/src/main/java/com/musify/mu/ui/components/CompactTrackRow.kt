@@ -85,7 +85,7 @@ fun CompactTrackRow(
                 modifier = Modifier.size(52.dp),
                 enableOnDemand = false
             ) {
-                Box(modifier = Modifier.matchParentSize()) {
+                Box(modifier = Modifier.fillMaxSize()) {
                     if (showIndicator) {
                         PlayingIndicator(
                             modifier = Modifier

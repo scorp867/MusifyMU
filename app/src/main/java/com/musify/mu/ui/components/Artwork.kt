@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.ui.layout.ContentScale
 
 /**
@@ -20,8 +21,8 @@ fun Artwork(
     mediaUri: String? = null, // Track media ID used for on-demand artwork extraction
     cacheKey: String? = null, // Not needed with new approach
     albumId: Long? = null, // Not used for artwork lookup anymore
-    overlay: (@Composable BoxScope.() -> Unit)? = null,
-    enableOnDemand: Boolean = false
+    enableOnDemand: Boolean = false,
+    overlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
     // data should be the pre-extracted artwork URI from Track.artUri
     val artworkUri = data as? String
