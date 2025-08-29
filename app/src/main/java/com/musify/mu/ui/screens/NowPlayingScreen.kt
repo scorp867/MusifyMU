@@ -493,7 +493,7 @@ fun NowPlayingScreen(navController: NavController) {
                     ) {
                         com.musify.mu.ui.components.Artwork(
                             data = track.artUri,
-                            audioUri = track.mediaId,
+                            mediaUri = track.mediaId,
                             albumId = track.albumId,
                             contentDescription = track.title,
                             modifier = Modifier.fillMaxSize()

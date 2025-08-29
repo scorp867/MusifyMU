@@ -383,7 +383,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Artwork(
                                     data = a.artUri,
-                                    audioUri = null,
+                                    mediaUri = null,
                                     albumId = a.albumId,
                                     contentDescription = a.albumName,
                                     modifier = Modifier.size(48.dp)
@@ -472,7 +472,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                             leadingContent = {
                                                 Artwork(
                                                     data = t.artUri,
-                                                    audioUri = t.mediaId,
+                                                    mediaUri = t.mediaId,
                                                     albumId = t.albumId,
                                                     contentDescription = t.title,
                                                     modifier = Modifier.size(40.dp)
@@ -539,7 +539,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                             leadingContent = {
                                                 Artwork(
                                                     data = a.artUri,
-                                                    audioUri = null,
+                                                    mediaUri = null,
                                                     albumId = a.albumId,
                                                     contentDescription = a.albumName,
                                                     modifier = Modifier.size(40.dp)
@@ -828,7 +828,7 @@ private fun TrackCard(
                     // Use regular Artwork
                     Artwork(
                         data = track.artUri,
-                        audioUri = track.mediaId,
+                        mediaUri = track.mediaId,
                         albumId = track.albumId,
                         contentDescription = track.title,
                         modifier = Modifier.fillMaxSize()

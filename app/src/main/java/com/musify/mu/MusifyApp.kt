@@ -21,6 +21,9 @@ class MusifyApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
 
+        // Initialize on-demand artwork loader with application context
+        com.musify.mu.util.OnDemandArtworkLoader.init(this)
+
         // Note: Data manager will be initialized by LibraryScreen when permissions are granted
         // This avoids conflicts and ensures proper initialization timing
         android.util.Log.d("MusifyApp", "Musify app initialized - data manager will be initialized by LibraryScreen")

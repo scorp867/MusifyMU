@@ -213,7 +213,7 @@ fun EnhancedQueueTrackItem(
             ) {
                 Artwork(
                     data = track.artUri,
-                    audioUri = track.mediaId,
+                    mediaUri = track.mediaId,
                     albumId = track.albumId,
                     cacheKey = track.mediaId,
                     contentDescription = track.title,

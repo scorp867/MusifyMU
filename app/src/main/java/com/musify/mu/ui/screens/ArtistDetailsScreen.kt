@@ -63,7 +63,7 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
                             if (albumArt != null) {
-                                Artwork(data = albumArt, audioUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
+                                Artwork(data = albumArt, mediaUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
                             } else {
                                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
                             }
@@ -92,7 +92,7 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                             // Compact mosaic indicator
                             Box(modifier = Modifier.size(32.dp)) {
                                 if (albumArt != null) {
-                                    Artwork(data = albumArt, audioUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
+                                    Artwork(data = albumArt, mediaUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
                                 } else {
                                     Box(Modifier.fillMaxSize().background(Color.LightGray))
                                 }
