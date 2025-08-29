@@ -1,6 +1,7 @@
 package com.musify.mu.data.db
 
 import androidx.room.*
+import androidx.paging.PagingSource
 import com.musify.mu.data.db.entities.*
 
 @Dao
@@ -10,9 +11,19 @@ interface AppDao {
     // Tracks (cached from MediaStore)
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTracks(tracks: List<Track>)
+    
+    @Query("DELETE FROM track")
+    suspend fun clearAllTracks()
 
     @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
     suspend fun getAllTracks(): List<Track>
+    
+    // Paging 3 queries for efficient loading
+    @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
+    fun getAllTracksPaged(): PagingSource<Int, Track>
+    
+    @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
+    fun searchTracksPaged(q: String): PagingSource<Int, Track>
 
     @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
     suspend fun searchTracks(q: String): List<Track>
@@ -23,6 +34,9 @@ interface AppDao {
     // Recently added and play history
     @Query("SELECT * FROM track ORDER BY dateAddedSec DESC LIMIT :limit")
     suspend fun getRecentlyAdded(limit: Int): List<Track>
+    
+    @Query("SELECT * FROM track ORDER BY dateAddedSec DESC")
+    fun getRecentlyAddedPaged(): PagingSource<Int, Track>
 
     // Smart play history insertion - only record if not played recently (within 30 seconds)
     @Query("""
@@ -54,6 +68,20 @@ interface AppDao {
         """
     )
     suspend fun getRecentlyPlayed(limit: Int): List<Track>
+    
+    @Query(
+        """
+        SELECT t.* FROM track t
+        JOIN (
+            SELECT mediaId, MAX(playedAt) AS lastPlayed
+            FROM play_history
+            GROUP BY mediaId
+            ORDER BY lastPlayed DESC
+        ) h ON t.mediaId = h.mediaId
+        ORDER BY h.lastPlayed DESC
+        """
+    )
+    fun getRecentlyPlayedPaged(): PagingSource<Int, Track>
 
 
     // Playlists
@@ -74,6 +102,9 @@ interface AppDao {
 
     @Query("SELECT t.* FROM track t JOIN playlist_item p ON t.mediaId = p.mediaId WHERE p.playlistId = :playlistId ORDER BY p.position")
     suspend fun getPlaylistTracks(playlistId: Long): List<Track>
+    
+    @Query("SELECT t.* FROM track t JOIN playlist_item p ON t.mediaId = p.mediaId WHERE p.playlistId = :playlistId ORDER BY p.position")
+    fun getPlaylistTracksPaged(playlistId: Long): PagingSource<Int, Track>
 
     @Query("SELECT * FROM playlist ORDER BY createdAt DESC")
     suspend fun getPlaylists(): List<Playlist>
@@ -98,6 +129,16 @@ interface AppDao {
         """
     )
     suspend fun getFavorites(): List<Track>
+    
+    @Query(
+        """
+        SELECT t.* FROM track t
+        JOIN likes l ON t.mediaId = l.mediaId
+        LEFT JOIN favorites_order fo ON fo.mediaId = t.mediaId
+        ORDER BY CASE WHEN fo.position IS NULL THEN 1 ELSE 0 END, fo.position ASC, l.likedAt DESC
+        """
+    )
+    fun getFavoritesPaged(): PagingSource<Int, Track>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertFavoriteOrder(order: List<FavoritesOrder>)

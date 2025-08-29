@@ -25,8 +25,12 @@ import java.io.File
 import java.security.MessageDigest
 
 /**
- * MediaStore scanner that extracts ALL artwork during initial scan and stores permanently.
- * No on-demand loading - everything is cached at startup for smooth scrolling.
+ * Enhanced MediaStore scanner with efficient on-demand artwork loading.
+ * Features:
+ * - Fast initial scan without artwork extraction (like Media3)
+ * - On-demand artwork loading via ArtworkManager
+ * - Session-based caching for performance
+ * - Multiple fallback strategies
  */
 class SimpleMediaStoreScanner(
     private val context: Context, 
@@ -280,22 +284,19 @@ class SimpleMediaStoreScanner(
 
                         // Validate essential fields - be less restrictive
                         if (duration >= 0) {  // Allow 0 duration for now
-                            // Extract artwork during startup scan
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
-                            
                             val track = Track(
                                 mediaId = contentUri.toString(),
                                 title = title,
                                 artist = artist,
                                 album = album,
                                 durationMs = duration,
-                                artUri = artworkUri, // Extracted and cached at startup
+                                artUri = null, // No artwork extraction - will be loaded on-demand via ArtworkManager
                                 albumId = albumId
                             )
                             tracks.add(track)
                             
                             if (tracks.size <= 5) {
-                                Log.d(TAG, "Added track: $title by $artist (${duration}ms) - artwork: ${if (artworkUri != null) "extracted" else "none"}")
+                                Log.d(TAG, "Added track: $title by $artist (${duration}ms) - fast scan mode")
                             }
                         } else {
                             Log.d(TAG, "Skipped track with invalid duration: $title (${duration}ms)")
@@ -352,22 +353,19 @@ class SimpleMediaStoreScanner(
 
                             // Basic validation
                             if (duration >= 0) {
-                                // Extract artwork during startup scan (broad query)
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
-                                
                                 val track = Track(
                                     mediaId = contentUri.toString(),
                                     title = title,
                                     artist = artist,
                                     album = album,
                                     durationMs = duration,
-                                    artUri = artworkUri, // Extracted and cached at startup
+                                    artUri = null, // No artwork extraction - fast scan mode
                                     albumId = albumId
                                 )
                                 tracks.add(track)
                                 
                                 if (tracks.size <= 5) {
-                                    Log.d(TAG, "Added track (broad): $title by $artist (${duration}ms) - artwork: ${if (artworkUri != null) "extracted" else "none"}")
+                                    Log.d(TAG, "Added track (broad): $title by $artist (${duration}ms) - fast scan mode")
                                 }
                             }
                         } catch (e: Exception) {
@@ -448,7 +446,6 @@ class SimpleMediaStoreScanner(
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
                         if (duration >= 0) {
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
                             tracks.add(
                                 Track(
                                     mediaId = contentUri.toString(),
@@ -456,7 +453,7 @@ class SimpleMediaStoreScanner(
                                     artist = artist,
                                     album = album,
                                     durationMs = duration,
-                                    artUri = artworkUri,
+                                    artUri = null, // Fast scan mode
                                     albumId = albumId
                                 )
                             )
@@ -496,7 +493,6 @@ class SimpleMediaStoreScanner(
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
                             if (duration >= 0) {
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
                                 tracks.add(
                                     Track(
                                         mediaId = contentUri.toString(),
@@ -504,7 +500,7 @@ class SimpleMediaStoreScanner(
                                         artist = artist,
                                         album = album,
                                         durationMs = duration,
-                                        artUri = artworkUri,
+                                        artUri = null, // Fast scan mode
                                         albumId = albumId
                                     )
                                 )
@@ -524,6 +520,131 @@ class SimpleMediaStoreScanner(
             return tracks
         } catch (_: Exception) {
             return emptyList()
+        }
+    }
+
+    /**
+     * Scan MediaStore without extracting artwork (for Paging 3 performance)
+     * Artwork will be loaded on-demand by ArtworkManager
+     */
+    suspend fun scanTracksWithoutArtwork(): List<Track> = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Starting fast MediaStore scan (without artwork)...")
+            
+            // Check permissions first
+            val requiredPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                android.Manifest.permission.READ_MEDIA_AUDIO
+            } else {
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+            
+            val hasPermission = ContextCompat.checkSelfPermission(context, requiredPermission) == PackageManager.PERMISSION_GRANTED
+            
+            if (!hasPermission) {
+                Log.e(TAG, "Required permission not granted: $requiredPermission")
+                return@withContext emptyList()
+            }
+            
+            val tracks = mutableListOf<Track>()
+            val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1"
+            val sortOrder = "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC"
+
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                BASIC_PROJECTION,
+                selection,
+                null,
+                sortOrder
+            )?.use { cursor ->
+                Log.d(TAG, "Fast scan found ${cursor.count} tracks")
+
+                val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val titleIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+
+                while (cursor.moveToNext()) {
+                    try {
+                        val id = cursor.getLong(idIndex)
+                        val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                        val title = cursor.getString(titleIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val artist = cursor.getString(artistIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val duration = cursor.getLong(durationIndex)
+                        val albumId = cursor.getLong(albumIdIndex)
+
+                        if (duration >= 0) {
+                            val track = Track(
+                                mediaId = contentUri.toString(),
+                                title = title,
+                                artist = artist,
+                                album = album,
+                                durationMs = duration,
+                                artUri = null, // No artwork extraction - will be loaded on-demand
+                                albumId = albumId
+                            )
+                            tracks.add(track)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error processing track at cursor position ${cursor.position}", e)
+                    }
+                }
+            }
+
+            // Fallback to broader query if no tracks found
+            if (tracks.isEmpty()) {
+                context.contentResolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    BASIC_PROJECTION,
+                    null,
+                    null,
+                    sortOrder
+                )?.use { cursor ->
+                    Log.d(TAG, "Broader fast scan found ${cursor.count} audio files")
+                    
+                    val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val titleIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+
+                    while (cursor.moveToNext()) {
+                        try {
+                            val id = cursor.getLong(idIndex)
+                            val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                            val title = cursor.getString(titleIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val artist = cursor.getString(artistIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val duration = cursor.getLong(durationIndex)
+                            val albumId = cursor.getLong(albumIdIndex)
+
+                            if (duration >= 0) {
+                                val track = Track(
+                                    mediaId = contentUri.toString(),
+                                    title = title,
+                                    artist = artist,
+                                    album = album,
+                                    durationMs = duration,
+                                    artUri = null, // No artwork extraction
+                                    albumId = albumId
+                                )
+                                tracks.add(track)
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error processing track in broader scan", e)
+                        }
+                    }
+                }
+            }
+
+            Log.d(TAG, "Fast scan completed with ${tracks.size} tracks (no artwork)")
+            tracks
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during fast scan", e)
+            emptyList()
         }
     }
 

@@ -611,16 +611,15 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         }
     }
 
-    // Prefetch embedded art for visible recent lists (row-based prefetch for the main column)
-    LaunchedEffect(listState, recentAdded, recentPlayed, favorites) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
-            .distinctUntilChanged()
-            .collectLatest { _ ->
-                val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
-                val uris = visibleTracks.map { it.mediaId }
-                // Simple artwork loading - no preloading needed
-            }
-    }
+    // Lazy artwork loading for visible items in the main list
+    com.musify.mu.ui.components.LazyArtworkLoader(
+        tracks = (recentAdded + recentPlayed + favorites).take(60),
+        listState = listState,
+        preloadDistance = 3
+    )
+    
+    // Artwork cache manager for memory efficiency
+    com.musify.mu.ui.components.ArtworkCacheManager()
 }
 
 // (Flattened sections implemented inline above to avoid nested scrollables)
@@ -784,38 +783,21 @@ private fun TrackCard(
     val scrollState = LocalScrollState.current
     val scrollOffset = scrollState?.firstVisibleItemScrollOffset ?: 0
 
-    // Add queue operations for swipe gestures
-    val queueOps = rememberQueueOperations()
-    val scope = rememberCoroutineScope()
-
-    com.musify.mu.ui.components.EnhancedSwipeableItem(
-        onSwipeRight = {
-            // Swipe right: Play Next
-            val ctx = QueueContextHelper.createDiscoverContext("home")
-            scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-        },
-        onSwipeLeft = {
-            // Swipe left: Add to User Queue
-            val ctx = QueueContextHelper.createDiscoverContext("home")
-            scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-        },
-        isInQueue = false,
-        modifier = Modifier.width(150.dp)
+    // Remove swipe gestures from carousel to allow proper horizontal scrolling
+    Card(
+        modifier = Modifier
+            .width(150.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        shape = RoundedCornerShape(16.dp)
     ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                }
-                .clickable { onClick() },
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-            shape = RoundedCornerShape(16.dp)
-        ) {
             Column(
                 modifier = Modifier.padding(12.dp)
             ) {
