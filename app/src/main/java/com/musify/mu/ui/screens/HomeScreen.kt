@@ -66,6 +66,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.musify.mu.ui.helpers.MediaControllerListener
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.LazyPagingItems
 
 // Composition local to provide scroll state to child components
 val LocalScrollState = compositionLocalOf<LazyListState?> { null }
@@ -317,9 +321,19 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     }
                 }
                 1 -> {
-                    // SONGS section (Library-like list)
-                    items(tracksFiltered.size, key = { i -> "songs_${tracksFiltered[i].mediaId}" }) { idx ->
-                        val t = tracksFiltered[idx]
+                    // SONGS section now uses Paging 3 for on-demand loading
+                    val pagingItems: LazyPagingItems<Track> = remember {
+                        Pager(PagingConfig(pageSize = 40, prefetchDistance = 10)) {
+                            repo.pagingSource()
+                        }.flow
+                    }.collectAsLazyPagingItems()
+
+                    items(pagingItems.itemCount, key = { i ->
+                        val item = pagingItems[i]
+                        item?.mediaId ?: "placeholder_$i"
+                    }) { idx ->
+                        val t = pagingItems[idx]
+                        if (t == null) return@items // Placeholder while loading
                         val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
                         
                         // Add queue operations for swipe gestures
@@ -333,7 +347,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             contentDescription = t.title,
                             isPlaying = isPlaying,
                             showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                            onClick = { onPlay(tracksFiltered, idx) },
+                            onClick = { onPlay(pagingItems.snapshot().items, idx) },
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
