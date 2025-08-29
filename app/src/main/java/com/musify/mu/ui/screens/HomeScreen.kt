@@ -351,7 +351,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                 isPlaying = isPlaying,
                                 showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
                                 onClick = { onPlay(tracksFiltered, idx) },
-                                isArtworkVisible = isVisible
+                                isArtworkVisible = isVisible,
+                                albumId = t.albumId,
+                                trackUri = t.mediaId
                             )
                         }
                     }

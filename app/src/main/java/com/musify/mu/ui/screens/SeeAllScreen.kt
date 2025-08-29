@@ -148,7 +148,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                             )
                                         }
                                     },
-                                    isArtworkVisible = true
+                                    isArtworkVisible = true,
+                                    albumId = track.albumId,
+                                    trackUri = track.mediaId
                                 )
                             }
                         }
@@ -196,7 +198,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                 isPlaying = isPlaying,
                                 showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
                                 onClick = { onPlay(tracks, idx) },
-                                isArtworkVisible = true
+                                isArtworkVisible = true,
+                                albumId = track.albumId,
+                                trackUri = track.mediaId
                             )
                         }
                     }
