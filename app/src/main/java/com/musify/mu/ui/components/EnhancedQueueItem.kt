@@ -217,7 +217,8 @@ fun EnhancedQueueTrackItem(
                     albumId = track.albumId,
                     cacheKey = track.mediaId,
                     contentDescription = track.title,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    enableOnDemand = false
                 )
 
                 // Play next indicator

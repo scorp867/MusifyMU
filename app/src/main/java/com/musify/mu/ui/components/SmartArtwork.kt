@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.collectAsState
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -40,7 +41,8 @@ fun SmartArtwork(
     mediaUri: String? = null, // Content URI or file path to the audio file
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
-    shape: Shape? = null
+    shape: Shape? = null,
+    enableOnDemand: Boolean = true
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
@@ -78,24 +80,48 @@ fun SmartArtwork(
                 )
         )
 
-        var imageData by remember { mutableStateOf<String?>(artworkUri) }
+        // Ignore MediaStore album art content URIs; rely on embedded art or Media3
+        val sanitizedArtworkUri = remember(artworkUri) {
+            artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
+        }
+        var imageData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
 
-        // Trigger on-demand load if needed
-        LaunchedEffect(key1 = artworkUri, key2 = mediaUri) {
-            if (imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
-                imageData = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+        // Observe Media3/loader-provided artwork for this mediaUri
+        val loaderFlowValue = if (enableOnDemand && !mediaUri.isNullOrBlank()) {
+            val observedLoaderArt = remember(mediaUri) { com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri!!) }
+            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri!!).collectAsState(initial = observedLoaderArt).value
+        } else null
+
+        // Prioritize explicit artwork from track, otherwise use loader-provided art
+        LaunchedEffect(sanitizedArtworkUri) {
+            if (!sanitizedArtworkUri.isNullOrBlank()) {
+                imageData = sanitizedArtworkUri
+            }
+        }
+        LaunchedEffect(loaderFlowValue) {
+            if (imageData.isNullOrBlank() && !loaderFlowValue.isNullOrBlank()) {
+                imageData = loaderFlowValue
+            }
+        }
+
+        // Trigger one-time extraction if still missing and mediaUri available
+        // Trigger one-time extraction if still missing and not negatively cached
+        LaunchedEffect(key1 = mediaUri) {
+            if (enableOnDemand && imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
+                com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
             }
         }
 
         if (imageData != null) {
             // Create image painter with multiple fallback strategies
+            val enableCrossfade = !imageData.isNullOrBlank()
             val painter = rememberAsyncImagePainter(
                 model = ImageRequest.Builder(context)
                     .data(imageData)
                     .dispatcher(Dispatchers.IO)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
-                    .crossfade(300)
+                    .apply { if (enableCrossfade) crossfade(300) else crossfade(false) }
                     .size(Size.ORIGINAL)
                     .scale(Scale.FIT)
                     .listener(
@@ -110,7 +136,6 @@ fun SmartArtwork(
                         onError = { _, _ ->
                             isLoading = false
                             hasError = true
-                            android.util.Log.w("SmartArtwork", "Failed to load artwork: $imageData")
                         }
                     )
                     .build()

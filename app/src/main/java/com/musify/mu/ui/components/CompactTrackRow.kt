@@ -82,9 +82,10 @@ fun CompactTrackRow(
                 mediaUri = mediaUri,
                 albumId = null,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(52.dp)
+                modifier = Modifier.size(52.dp),
+                enableOnDemand = false
             ) {
-                Box(modifier = Modifier.matchParentSize()) {
+                Box(modifier = Modifier.fillMaxSize()) {
                     if (showIndicator) {
                         PlayingIndicator(
                             modifier = Modifier

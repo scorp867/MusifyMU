@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.ui.layout.ContentScale
 
 /**
@@ -20,10 +21,11 @@ fun Artwork(
     mediaUri: String? = null, // Track media ID used for on-demand artwork extraction
     cacheKey: String? = null, // Not needed with new approach
     albumId: Long? = null, // Not used for artwork lookup anymore
+    enableOnDemand: Boolean = false,
     overlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
     // data should be the pre-extracted artwork URI from Track.artUri
-    val artworkUri = data as? String
+    val artworkUri = (data as? String)?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
 
     Box(modifier = modifier) {
         SmartArtwork(
@@ -31,7 +33,8 @@ fun Artwork(
             mediaUri = mediaUri,
             contentDescription = contentDescription,
             modifier = Modifier.matchParentSize(),
-            shape = shape
+            shape = shape,
+            enableOnDemand = enableOnDemand
         )
         if (overlay != null) {
             overlay()
