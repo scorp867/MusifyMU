@@ -32,6 +32,7 @@ fun CompactTrackRow(
     title: String,
     subtitle: String,
     artData: Any?,
+    mediaUri: String? = null,
     contentDescription: String?,
     isPlaying: Boolean,
     onClick: () -> Unit,
@@ -78,7 +79,7 @@ fun CompactTrackRow(
         ) {
         Artwork(
             data = artData,
-            mediaUri = null,
+            mediaUri = mediaUri,
             albumId = null,
             contentDescription = contentDescription,
             modifier = Modifier.size(52.dp)
