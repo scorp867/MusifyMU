@@ -36,7 +36,8 @@ import kotlinx.coroutines.Dispatchers
  */
 @Composable
 fun SmartArtwork(
-    artworkUri: String?, // Pre-extracted artwork URI from Track entity
+    artworkUri: String?, // Pre-extracted artwork URI from Track entity (may be null)
+    mediaUri: String? = null, // Content URI or file path to the audio file
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
     shape: Shape? = null
