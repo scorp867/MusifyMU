@@ -97,6 +97,13 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
 
     val listState = rememberLazyListState()
 
+    // LazyPagingItems for all tracks (alphabetical)
+    val pagingItems: androidx.paging.compose.LazyPagingItems<Track> = remember {
+        Pager(PagingConfig(pageSize = 40, prefetchDistance = 10)) {
+            repo.pagingSource()
+        }.flow
+    }.collectAsLazyPagingItems()
+
     // Function to refresh data with IO dispatcher
     val refreshData = {
         scope.launch {
@@ -322,12 +329,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 }
                 1 -> {
                     // SONGS section now uses Paging 3 for on-demand loading
-                    val pagingItems: LazyPagingItems<Track> = remember {
-                        Pager(PagingConfig(pageSize = 40, prefetchDistance = 10)) {
-                            repo.pagingSource()
-                        }.flow
-                    }.collectAsLazyPagingItems()
-
                     items(pagingItems.itemCount, key = { i ->
                         val item = pagingItems[i]
                         item?.mediaId ?: "placeholder_$i"
@@ -347,7 +348,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             contentDescription = t.title,
                             isPlaying = isPlaying,
                             showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                            onClick = { onPlay(pagingItems.snapshot().items, idx) },
+                            onClick = { onPlay(pagingItems.itemSnapshotList.items, idx) },
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
