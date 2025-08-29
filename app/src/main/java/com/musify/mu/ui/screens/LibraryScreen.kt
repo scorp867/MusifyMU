@@ -54,6 +54,11 @@ import androidx.compose.material.DismissDirection
 import android.content.ContentUris
 import android.provider.MediaStore
 import androidx.compose.material.ExperimentalMaterialApi
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.LazyPagingItems
+import androidx.paging.compose.itemsIndexed
+import androidx.paging.PagingData
+import kotlinx.coroutines.flow.Flow
 
 enum class SortType {
     TITLE, ARTIST, ALBUM, DATE_ADDED
@@ -86,18 +91,15 @@ fun LibraryScreen(
     var isProcessingQueueOps by remember { mutableStateOf(false) }
 
     // Debounced search with visual-only immediate feedback
-    val tracks = if (searchQuery.isBlank()) allTracks else allTracks.filter { t ->
-        t.title.contains(searchQuery, ignoreCase = true) ||
-                t.artist.contains(searchQuery, ignoreCase = true) ||
-                t.album.contains(searchQuery, ignoreCase = true)
-    }
+    // Paging sources for tracks
+    val pagingAllFlow: Flow<PagingData<Track>> = remember { repo.pagingAllTracks(pageSize = 60) }
+    val pagingSearchFlowProvider: (String) -> Flow<PagingData<Track>> = remember { { q -> repo.pagingSearchTracks(q, pageSize = 60) } }
+    val pagingItems: LazyPagingItems<Track> = remember(searchQuery) {
+        if (searchQuery.isBlank()) pagingAllFlow else pagingSearchFlowProvider(searchQuery)
+    }.collectAsLazyPagingItems()
 
     // Visual tracks for immediate search feedback
-    val visualTracks = if (visualSearchQuery.isBlank()) allTracks else allTracks.filter { t ->
-        t.title.contains(visualSearchQuery, ignoreCase = true) ||
-                t.artist.contains(visualSearchQuery, ignoreCase = true) ||
-                t.album.contains(visualSearchQuery, ignoreCase = true)
-    }
+    val visualTracks = allTracks // keep for quick feedback; paging drives list rendering
 
     // Debounced search to prevent excessive filtering
     LaunchedEffect(visualSearchQuery) {
@@ -114,7 +116,7 @@ fun LibraryScreen(
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // Observe background loading progress and get data from cache
+    // Observe background loading progress and get data from cache (for lightweight UI feedback)
     LaunchedEffect(hasPermissions) {
         android.util.Log.d("LibraryScreen", "LaunchedEffect triggered - hasPermissions: $hasPermissions")
         if (hasPermissions) {
@@ -192,7 +194,7 @@ fun LibraryScreen(
             isLoading -> {
                 LoadingLibrary()
             }
-            tracks.isEmpty() -> {
+            pagingItems.itemCount == 0 -> {
                 EmptyLibrary()
             }
             else -> {
@@ -208,64 +210,69 @@ fun LibraryScreen(
                         // Performance optimizations for smooth scrolling
                         flingBehavior = rememberSnapFlingBehavior(listState)
                     ) {
-                        itemsIndexed(visualTracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
+                        itemsIndexed(pagingItems, key = { index, item -> "library_${index}_${item?.mediaId ?: index}" }) { index, track ->
+                            if (track != null) {
+                                // Visibility-aware artwork loading
+                                val visibleItems = listState.layoutInfo.visibleItemsInfo
+                                val first = visibleItems.firstOrNull()?.index ?: 0
+                                val last = visibleItems.lastOrNull()?.index ?: -1
+                                val isVisible = index in first..last
 
-                            // Improved track item without aggressive swipe gestures
-                            TrackItem(
-                                track = track,
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onPlay(visualTracks, index)
-                                },
-                                queueOperation = queueOperationsState[track.mediaId],
-                                onAddToQueue = { addToEnd ->
-                                    // Visual-only queue operation - immediate UI feedback
-                                    val operation = if (addToEnd) QueueOperation.ADDING_TO_END else QueueOperation.ADDING_TO_NEXT
-                                    queueOperationsState = queueOperationsState + (track.mediaId to operation)
+                                // Improved track item without aggressive swipe gestures
+                                TrackItem(
+                                    track = track,
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        // Build a snapshot list around this page for continuity
+                                        val snapshot = mutableListOf<Track>()
+                                        val count = pagingItems.itemCount
+                                        for (i in 0 until count) {
+                                            pagingItems.peek(i)?.let { snapshot += it }
+                                        }
+                                        onPlay(snapshot, index.coerceIn(0, snapshot.lastIndex))
+                                    },
+                                    queueOperation = queueOperationsState[track.mediaId],
+                                    onAddToQueue = { addToEnd ->
+                                        val operation = if (addToEnd) QueueOperation.ADDING_TO_END else QueueOperation.ADDING_TO_NEXT
+                                        queueOperationsState = queueOperationsState + (track.mediaId to operation)
 
-                                    // Perform actual queue operation in background
-                                    coroutineScope.launch {
-                                        try {
-                                            // Create library context for the operation
-                                            val context = QueueContextHelper.createSearchContext("library")
-
-                                            if (addToEnd) {
-                                                // Add to User Queue (Add to next segment)
-                                                queueOperationsManager.addToUserQueueWithContext(
-                                                    items = listOf(track.toMediaItem()),
-                                                    context = context
-                                                )
-                                            } else {
-                                                // Add to Priority Queue (Play Next)
-                                                queueOperationsManager.playNextWithContext(
-                                                    items = listOf(track.toMediaItem()),
-                                                    context = context
-                                                )
+                                        coroutineScope.launch {
+                                            try {
+                                                val context = QueueContextHelper.createSearchContext("library")
+                                                if (addToEnd) {
+                                                    queueOperationsManager.addToUserQueueWithContext(
+                                                        items = listOf(track.toMediaItem()),
+                                                        context = context
+                                                    )
+                                                } else {
+                                                    queueOperationsManager.playNextWithContext(
+                                                        items = listOf(track.toMediaItem()),
+                                                        context = context
+                                                    )
+                                                }
+                                                queueOperationsState = queueOperationsState + (track.mediaId to QueueOperation.COMPLETED_SUCCESS)
+                                                delay(2000)
+                                                queueOperationsState = queueOperationsState - track.mediaId
+                                            } catch (e: Exception) {
+                                                queueOperationsState = queueOperationsState + (track.mediaId to QueueOperation.COMPLETED_ERROR)
+                                                delay(3000)
+                                                queueOperationsState = queueOperationsState - track.mediaId
                                             }
-
-                                            // Success feedback
-                                            queueOperationsState = queueOperationsState + (track.mediaId to QueueOperation.COMPLETED_SUCCESS)
-                                            delay(2000) // Show success for 2 seconds
-                                            queueOperationsState = queueOperationsState - track.mediaId
-
-                                        } catch (e: Exception) {
-                                            // Error feedback
-                                            queueOperationsState = queueOperationsState + (track.mediaId to QueueOperation.COMPLETED_ERROR)
-                                            delay(3000) // Show error longer
-                                            queueOperationsState = queueOperationsState - track.mediaId
                                         }
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
 
                     // Alphabetical scroll bar
                     // Precompute first-letter index map for O(1) jumps with better performance
-                    val indexMap by remember(visualTracks) {
+                    val indexMap by remember(pagingItems.itemCount) {
                         derivedStateOf {
                             val map = mutableMapOf<String, Int>()
-                            visualTracks.forEachIndexed { i, t ->
+                            // Use peek to avoid triggering loads here
+                            for (i in 0 until pagingItems.itemCount) {
+                                val t = pagingItems.peek(i) ?: continue
                                 val l = getFirstLetter(t.title)
                                 if (map[l] == null) map[l] = i
                             }
@@ -289,7 +296,7 @@ fun LibraryScreen(
                             }
                         },
                         modifier = Modifier.align(Alignment.CenterEnd),
-                        isVisible = visualTracks.size > 10 // Show for even smaller lists
+                        isVisible = pagingItems.itemCount > 10
                     )
                 }
             }
@@ -443,8 +450,10 @@ private fun TrackItem(
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
+                    // Visibility-aware art loading
+                    val visibleItems = LocalMediaController.current // not used here, keep local state
                     com.musify.mu.ui.components.SmartArtwork(
-                        artworkUri = track.artUri, // Use pre-extracted artwork from database
+                        artData = track.artUri, // Use pre-extracted artwork from database
                         contentDescription = track.title,
                         modifier = Modifier.fillMaxSize()
                     )

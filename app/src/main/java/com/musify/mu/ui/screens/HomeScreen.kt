@@ -326,20 +326,23 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         val queueOps = rememberQueueOperations()
                         val scope = rememberCoroutineScope()
                         
+                        // Keep swipe gestures in SONGS list as requested
                         com.musify.mu.ui.components.EnhancedSwipeableItem(
                             onSwipeRight = {
-                                // Swipe right: Play Next
                                 val ctx = QueueContextHelper.createDiscoverContext("home_songs")
                                 scope.launch { queueOps.playNextWithContext(items = listOf(t.toMediaItem()), context = ctx) }
                             },
                             onSwipeLeft = {
-                                // Swipe left: Add to User Queue
                                 val ctx = QueueContextHelper.createDiscoverContext("home_songs")
                                 scope.launch { queueOps.addToUserQueueWithContext(items = listOf(t.toMediaItem()), context = ctx) }
                             },
                             isInQueue = false,
                             modifier = Modifier.fillMaxWidth()
                         ) {
+                            val visibleItems = listState.layoutInfo.visibleItemsInfo
+                            val first = visibleItems.firstOrNull()?.index ?: 0
+                            val last = visibleItems.lastOrNull()?.index ?: -1
+                            val isVisible = idx in first..last
                             com.musify.mu.ui.components.CompactTrackRow(
                                 title = t.title,
                                 subtitle = t.artist,
@@ -347,7 +350,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                 contentDescription = t.title,
                                 isPlaying = isPlaying,
                                 showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                                onClick = { onPlay(tracksFiltered, idx) }
+                                onClick = { onPlay(tracksFiltered, idx) },
+                                isArtworkVisible = isVisible
                             )
                         }
                     }
@@ -755,8 +759,11 @@ private fun AnimatedCarousel(
             ) {
                 items(data.size, key = { index -> "carousel_${title}_${index}_${data[index].mediaId}" }) { index ->
                     val track = data[index]
+                    val visibleRange = rowScrollState.layoutInfo.visibleItemsInfo.firstOrNull()?.index to rowScrollState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
+                    val isVisible = visibleRange.first != null && visibleRange.second != null && index in (visibleRange.first!!..visibleRange.second!!)
                     TrackCard(
                         track = track,
+                        isVisible = isVisible,
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             onPlay(data, index)
@@ -771,6 +778,7 @@ private fun AnimatedCarousel(
 @Composable
 private fun TrackCard(
     track: Track,
+    isVisible: Boolean,
     onClick: () -> Unit
 ) {
     var isPressed by remember { mutableStateOf(false) }
@@ -784,25 +792,7 @@ private fun TrackCard(
     val scrollState = LocalScrollState.current
     val scrollOffset = scrollState?.firstVisibleItemScrollOffset ?: 0
 
-    // Add queue operations for swipe gestures
-    val queueOps = rememberQueueOperations()
-    val scope = rememberCoroutineScope()
-
-    com.musify.mu.ui.components.EnhancedSwipeableItem(
-        onSwipeRight = {
-            // Swipe right: Play Next
-            val ctx = QueueContextHelper.createDiscoverContext("home")
-            scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-        },
-        onSwipeLeft = {
-            // Swipe left: Add to User Queue
-            val ctx = QueueContextHelper.createDiscoverContext("home")
-            scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-        },
-        isInQueue = false,
-        modifier = Modifier.width(150.dp)
-    ) {
-        Card(
+    Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .graphicsLayer {
@@ -831,7 +821,8 @@ private fun TrackCard(
                         audioUri = track.mediaId,
                         albumId = track.albumId,
                         contentDescription = track.title,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        isVisible = isVisible
                     )
 
                     // Play overlay

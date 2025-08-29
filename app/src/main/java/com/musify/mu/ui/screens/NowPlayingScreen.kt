@@ -491,8 +491,10 @@ fun NowPlayingScreen(navController: NavController) {
                                 shape = RoundedCornerShape(20.dp)
                             )
                     ) {
+                        val md = controller?.mediaMetadata
+                        val nowPlayingArt: Any? = md?.artworkData ?: md?.artworkUri ?: track.artUri
                         com.musify.mu.ui.components.Artwork(
-                            data = track.artUri,
+                            data = nowPlayingArt,
                             audioUri = track.mediaId,
                             albumId = track.albumId,
                             contentDescription = track.title,

@@ -39,7 +39,8 @@ fun CompactTrackRow(
     trailingContent: (@Composable () -> Unit)? = null,
     showIndicator: Boolean = isPlaying,
     useGlass: Boolean = true,
-    extraArtOverlay: (@Composable BoxScope.() -> Unit)? = null
+    extraArtOverlay: (@Composable BoxScope.() -> Unit)? = null,
+    isArtworkVisible: Boolean = true
 ) {
     val pressed by remember { MutableInteractionSource() }.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.98f else 1f, spring(stiffness = Spring.StiffnessLow))
@@ -81,7 +82,8 @@ fun CompactTrackRow(
             audioUri = null,
             albumId = null,
             contentDescription = contentDescription,
-            modifier = Modifier.size(52.dp)
+            modifier = Modifier.size(52.dp),
+            isVisible = isArtworkVisible
         ) {
             Box(modifier = Modifier.matchParentSize()) {
                 if (showIndicator) {

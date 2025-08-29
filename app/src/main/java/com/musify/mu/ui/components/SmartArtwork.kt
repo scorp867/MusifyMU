@@ -36,10 +36,11 @@ import kotlinx.coroutines.Dispatchers
  */
 @Composable
 fun SmartArtwork(
-    artworkUri: String?, // Pre-extracted artwork URI from Track entity
+    artData: Any?, // Can be Uri, String, ByteArray, or resource id
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
-    shape: Shape? = null
+    shape: Shape? = null,
+    shouldLoad: Boolean = true
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
@@ -78,22 +79,9 @@ fun SmartArtwork(
         )
         
         // Determine image source with fallback chain
-        val imageData = remember(artworkUri) {
-            when {
-                !artworkUri.isNullOrBlank() -> {
-                    // Primary: Use pre-extracted artwork
-                    android.util.Log.d("SmartArtwork", "Loading artwork: $artworkUri")
-                    artworkUri
-                }
-                else -> {
-                    // Fallback: Use default placeholder
-                    android.util.Log.d("SmartArtwork", "No artwork available, using placeholder")
-                    null
-                }
-            }
-        }
+        val imageData = remember(artData) { artData }
         
-        if (imageData != null) {
+        if (imageData != null && shouldLoad) {
             // Create image painter with multiple fallback strategies
             val painter = rememberAsyncImagePainter(
                 model = ImageRequest.Builder(context)
@@ -142,7 +130,7 @@ fun SmartArtwork(
         }
         
         // Show icon placeholder when no image or on error
-        if (imageData == null || hasError) {
+        if (!shouldLoad || imageData == null || hasError) {
             Icon(
                 imageVector = Icons.Rounded.MusicNote,
                 contentDescription = null,

@@ -20,17 +20,19 @@ fun Artwork(
     audioUri: String? = null, // Track media ID (not used for artwork anymore)
     cacheKey: String? = null, // Not needed with new approach
     albumId: Long? = null, // Not used for artwork lookup anymore
-    overlay: (@Composable BoxScope.() -> Unit)? = null
+    overlay: (@Composable BoxScope.() -> Unit)? = null,
+    isVisible: Boolean = true
 ) {
     // data should be the pre-extracted artwork URI from Track.artUri
-    val artworkUri = data as? String
+    val artData = data
     
     Box(modifier = modifier) {
         SmartArtwork(
-            artworkUri = artworkUri,
+            artData = artData,
             contentDescription = contentDescription,
             modifier = Modifier.matchParentSize(),
-            shape = shape
+            shape = shape,
+            shouldLoad = isVisible
         )
         if (overlay != null) {
             overlay()

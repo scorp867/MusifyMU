@@ -78,6 +78,7 @@ dependencies {
     implementation("androidx.room:room-runtime:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    implementation("androidx.room:room-paging:2.6.1")
 
     implementation("androidx.palette:palette-ktx:1.0.0")
 
@@ -87,6 +88,10 @@ dependencies {
     implementation("androidx.media3:media3-session:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("androidx.media:media:1.7.0")
+
+    // Paging 3
+    implementation("androidx.paging:paging-runtime:3.3.2")
+    implementation("androidx.paging:paging-compose:3.3.2")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.core:core-splashscreen:1.0.1")
