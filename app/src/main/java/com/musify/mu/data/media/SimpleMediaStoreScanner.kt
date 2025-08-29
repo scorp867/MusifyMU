@@ -358,8 +358,8 @@ class SimpleMediaStoreScanner(
 
                             // Basic validation
                             if (duration >= 0) {
-                                // Extract artwork during startup scan (broad query)
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                // Skip artwork extraction here as well
+                                val artworkUri: String? = null
 
                                 val track = Track(
                                     mediaId = contentUri.toString(),
@@ -454,7 +454,7 @@ class SimpleMediaStoreScanner(
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
                         if (duration >= 0) {
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                            val artworkUri: String? = null // skip during streaming scan
                             tracks.add(
                                 Track(
                                     mediaId = contentUri.toString(),
@@ -502,7 +502,7 @@ class SimpleMediaStoreScanner(
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
                             if (duration >= 0) {
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                val artworkUri: String? = null
                                 tracks.add(
                                     Track(
                                         mediaId = contentUri.toString(),
