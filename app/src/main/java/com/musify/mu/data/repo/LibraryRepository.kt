@@ -3,6 +3,7 @@ package com.musify.mu.data.repo
 import android.content.Context
 import org.json.JSONArray
 import com.musify.mu.data.db.AppDatabase
+import com.musify.mu.data.db.AppDao
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.db.entities.*
 import com.musify.mu.data.media.SimpleBackgroundDataManager
@@ -14,11 +15,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
     // Create data manager instance - this will be initialized by the app
-    val dataManager by lazy { 
+    val dataManager by lazy {
         SimpleBackgroundDataManager.get(context, db)
     }
 
@@ -40,18 +43,47 @@ class LibraryRepository private constructor(private val context: Context, privat
             }
         }
     }
-    
+
+    /**
+     * PagingSource that reads from Room table `track` alphabetically by title.
+     */
+    class TrackPagingSource(private val dao: AppDao) : PagingSource<Int, Track>() {
+        override suspend fun load(params: LoadParams<Int>): LoadResult<Int, Track> {
+            return try {
+                val limit = params.loadSize
+                val offset = params.key ?: 0
+                val tracks = dao.getTracksPaged(limit, offset)
+                LoadResult.Page(
+                    data = tracks,
+                    prevKey = if (offset == 0) null else offset - limit,
+                    nextKey = if (tracks.size < limit) null else offset + limit
+                )
+            } catch (e: Exception) {
+                LoadResult.Error(e)
+            }
+        }
+
+        override fun getRefreshKey(state: PagingState<Int, Track>): Int? {
+            return state.anchorPosition?.let { anchor ->
+                val page = state.closestPageToPosition(anchor)
+                page?.prevKey?.plus(state.config.pageSize) ?: page?.nextKey?.minus(state.config.pageSize)
+            }
+        }
+    }
+
+    fun pagingSource(): PagingSource<Int, Track> = TrackPagingSource(db.dao())
+
     // Search in cached data - NO database query
     fun search(q: String): List<Track> = dataManager.searchTracks(q)
-    
+
     // Get playlists from database (these are user-created, not cached)
     suspend fun playlists(): List<Playlist> = db.dao().getPlaylists()
-    
+
     // Playlist management operations
     suspend fun createPlaylist(name: String, imageUri: String? = null): Long = db.dao().createPlaylist(Playlist(name = name, imageUri = imageUri))
     suspend fun renamePlaylist(id: Long, name: String) = db.dao().renamePlaylist(id, name)
     suspend fun deletePlaylist(id: Long) = db.dao().deletePlaylist(id)
-    
+
     suspend fun addToPlaylist(playlistId: Long, mediaIds: List<String>) {
         val existing = db.dao().getPlaylistTracks(playlistId).map { it.mediaId }.toSet()
         val toInsert = mediaIds.filter { it !in existing }
@@ -60,7 +92,7 @@ class LibraryRepository private constructor(private val context: Context, privat
         val items = toInsert.mapIndexed { idx, id -> PlaylistItem(playlistId, id, start + idx) }
         db.dao().addItems(items)
     }
-    
+
     suspend fun removeFromPlaylist(playlistId: Long, mediaId: String) = db.dao().removeItem(playlistId, mediaId)
     suspend fun playlistTracks(playlistId: Long): List<Track> {
         val databaseTracks = db.dao().getPlaylistTracks(playlistId)
@@ -79,12 +111,12 @@ class LibraryRepository private constructor(private val context: Context, privat
         }
         db.dao().addItems(items)
     }
-    
+
     // Like/unlike operations
     suspend fun like(mediaId: String) = db.dao().like(Like(mediaId))
     suspend fun unlike(mediaId: String) = db.dao().unlike(mediaId)
     suspend fun isLiked(mediaId: String): Boolean = db.dao().isLiked(mediaId)
-    
+
     // Get favorites from database (these are user-created, not cached)
     // Filter out deleted tracks by checking against current cached tracks
     suspend fun favorites(): List<Track> {
@@ -108,7 +140,7 @@ class LibraryRepository private constructor(private val context: Context, privat
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
-    
+
     suspend fun recentlyPlayed(limit: Int = 20): List<Track> {
         val databaseRecent = db.dao().getRecentlyPlayed(limit)
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
@@ -121,8 +153,8 @@ class LibraryRepository private constructor(private val context: Context, privat
         fun get(context: Context): LibraryRepository =
             INSTANCE ?: synchronized(this) {
                 val db = DatabaseProvider.get(context)
-                INSTANCE ?: LibraryRepository(context.applicationContext, db).also { 
-                    INSTANCE = it 
+                INSTANCE ?: LibraryRepository(context.applicationContext, db).also {
+                    INSTANCE = it
                 }
             }
     }

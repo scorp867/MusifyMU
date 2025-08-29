@@ -71,13 +71,18 @@ dependencies {
     implementation("io.coil-kt:coil:2.5.0")
     implementation("io.coil-kt:coil-gif:2.5.0")
     // transformations artifact not used; keep core/compose/gif only
-    
+
     // Glide as alternative for non-Compose usage
     implementation("com.github.bumptech.glide:glide:4.16.0")
 
     implementation("androidx.room:room-runtime:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    implementation("androidx.room:room-paging:2.6.1")
+
+    // Paging 3 for efficient data loading
+    implementation("androidx.paging:paging-runtime-ktx:3.2.1")
+    implementation("androidx.paging:paging-compose:3.2.1")
 
     implementation("androidx.palette:palette-ktx:1.0.0")
 

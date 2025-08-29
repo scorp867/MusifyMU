@@ -14,6 +14,10 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
     suspend fun getAllTracks(): List<Track>
 
+    // Paging support
+    @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE LIMIT :limit OFFSET :offset")
+    suspend fun getTracksPaged(limit: Int, offset: Int): List<Track>
+
     @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
     suspend fun searchTracks(q: String): List<Track>
 
@@ -118,7 +122,7 @@ interface AppDao {
 
     @Query("SELECT * FROM track WHERE artUri IS NULL OR artUri = ''")
     suspend fun getTracksMissingArt(): List<Track>
-    
+
     // Album info helpers for embedded art extraction
     @Query("""
         SELECT album, artist, COUNT(*) as trackCount 
@@ -127,7 +131,7 @@ interface AppDao {
         HAVING COUNT(*) > 1
     """)
     suspend fun getAlbumsWithMultipleTracks(): List<AlbumInfo>
-    
+
     @Query("SELECT * FROM track WHERE album = :album AND artist = :artist")
     suspend fun getTracksByAlbum(album: String, artist: String): List<Track>
 }

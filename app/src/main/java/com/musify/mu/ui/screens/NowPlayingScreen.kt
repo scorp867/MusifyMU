@@ -272,7 +272,7 @@ fun NowPlayingScreen(navController: NavController) {
         if (controller == null) {
             return@DisposableEffect onDispose { }
         }
-        
+
         // Initial state setup
         coroutineScope.launch {
             currentTrack = resolveTrack(controller.currentMediaItem, repo)
@@ -287,7 +287,7 @@ fun NowPlayingScreen(navController: NavController) {
                 controller.currentPosition.toFloat() / controller.duration.toFloat()
             } else 0f
             duration = controller.duration
-            
+
             // Load like state with IO dispatcher
             currentTrack?.let { t ->
                 withContext(Dispatchers.IO) {
@@ -313,34 +313,34 @@ fun NowPlayingScreen(navController: NavController) {
                             }
                         }
                     }
-                    }
-                }
-
-                override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                    isPlaying = isPlayingNow
-                }
-
-                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
-                    shuffleOn = shuffleModeEnabled
-                }
-
-                override fun onRepeatModeChanged(repeatModeValue: Int) {
-                    repeatMode = when(repeatModeValue) {
-                        Player.REPEAT_MODE_ONE -> 1
-                        Player.REPEAT_MODE_ALL -> 2
-                        else -> 0
-                    }
-                }
-
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == Player.STATE_READY) {
-                        duration = controller.duration
-                    }
                 }
             }
 
+            override fun onIsPlayingChanged(isPlayingNow: Boolean) {
+                isPlaying = isPlayingNow
+            }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                shuffleOn = shuffleModeEnabled
+            }
+
+            override fun onRepeatModeChanged(repeatModeValue: Int) {
+                repeatMode = when(repeatModeValue) {
+                    Player.REPEAT_MODE_ONE -> 1
+                    Player.REPEAT_MODE_ALL -> 2
+                    else -> 0
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    duration = controller.duration
+                }
+            }
+        }
+
         controller.addListener(listener)
-        
+
         // Progress updater in separate coroutine
         val progressJob = coroutineScope.launch {
             while (true) {
@@ -360,7 +360,7 @@ fun NowPlayingScreen(navController: NavController) {
                 }
             }
         }
-        
+
         onDispose {
             controller.removeListener(listener)
             progressJob.cancel()
@@ -493,7 +493,7 @@ fun NowPlayingScreen(navController: NavController) {
                     ) {
                         com.musify.mu.ui.components.Artwork(
                             data = track.artUri,
-                            audioUri = track.mediaId,
+                            mediaUri = track.mediaId,
                             albumId = track.albumId,
                             contentDescription = track.title,
                             modifier = Modifier.fillMaxSize()

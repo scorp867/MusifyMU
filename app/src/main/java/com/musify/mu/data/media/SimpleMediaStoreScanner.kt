@@ -29,7 +29,7 @@ import java.security.MessageDigest
  * No on-demand loading - everything is cached at startup for smooth scrolling.
  */
 class SimpleMediaStoreScanner(
-    private val context: Context, 
+    private val context: Context,
     private val db: AppDatabase
 ) {
     companion object {
@@ -37,16 +37,16 @@ class SimpleMediaStoreScanner(
         private const val ARTWORK_CACHE_DIR = "startup_artwork_cache"
         private const val MAX_ARTWORK_SIZE = 512
     }
-    
+
     private val artworkCacheDir: File by lazy {
         File(context.cacheDir, ARTWORK_CACHE_DIR).apply {
             if (!exists()) mkdirs()
         }
     }
-    
+
     private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var contentObserver: MediaStoreContentObserver? = null
-    
+
     // Minimal projection - only what we need for basic display
     private val BASIC_PROJECTION = arrayOf(
         MediaStore.Audio.Media._ID,
@@ -62,7 +62,7 @@ class SimpleMediaStoreScanner(
      */
     fun registerContentObserver(onChange: () -> Unit) {
         if (contentObserver != null) return
-        
+
         contentObserver = MediaStoreContentObserver(Handler(Looper.getMainLooper())) { uri ->
             Log.d(TAG, "MediaStore changed: $uri")
             observerScope.launch {
@@ -76,15 +76,15 @@ class SimpleMediaStoreScanner(
                 }
             }
         }
-        
+
         context.contentResolver.registerContentObserver(
-            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, 
-            true, 
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+            true,
             contentObserver!!
         )
         Log.d(TAG, "MediaStore content observer registered")
     }
-    
+
     /**
      * Unregister content observer
      */
@@ -103,12 +103,12 @@ class SimpleMediaStoreScanner(
         try {
             val cacheKey = generateCacheKey(trackUri)
             val cacheFile = File(artworkCacheDir, "$cacheKey.jpg")
-            
+
             // Check if already cached
             if (cacheFile.exists()) {
                 return@withContext "file://${cacheFile.absolutePath}"
             }
-            
+
             val retriever = MediaMetadataRetriever()
             try {
                 // Set data source
@@ -124,7 +124,7 @@ class SimpleMediaStoreScanner(
                         return@withContext null
                     }
                 }
-                
+
                 // Extract embedded artwork
                 val artworkBytes = retriever.embeddedPicture
                 if (artworkBytes != null) {
@@ -133,19 +133,19 @@ class SimpleMediaStoreScanner(
                         // Resize and save to cache
                         val resizedBitmap = resizeBitmap(originalBitmap, MAX_ARTWORK_SIZE)
                         saveBitmapToCache(resizedBitmap, cacheFile)
-                        
+
                         // Clean up bitmaps
                         if (resizedBitmap != originalBitmap) {
                             originalBitmap.recycle()
                         }
                         resizedBitmap.recycle()
-                        
+
                         return@withContext "file://${cacheFile.absolutePath}"
                     }
                 }
-                
+
                 return@withContext null
-                
+
             } finally {
                 try {
                     retriever.release()
@@ -158,25 +158,25 @@ class SimpleMediaStoreScanner(
             return@withContext null
         }
     }
-    
+
     /**
      * Resize bitmap to maximum size while maintaining aspect ratio
      */
     private fun resizeBitmap(bitmap: Bitmap, maxSize: Int): Bitmap {
         val width = bitmap.width
         val height = bitmap.height
-        
+
         if (width <= maxSize && height <= maxSize) {
             return bitmap
         }
-        
+
         val ratio = minOf(maxSize.toFloat() / width, maxSize.toFloat() / height)
         val newWidth = (width * ratio).toInt()
         val newHeight = (height * ratio).toInt()
-        
+
         return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
     }
-    
+
     /**
      * Save bitmap to cache file
      */
@@ -193,7 +193,7 @@ class SimpleMediaStoreScanner(
             }
         }
     }
-    
+
     /**
      * Generate cache key from track URI
      */
@@ -209,22 +209,22 @@ class SimpleMediaStoreScanner(
     suspend fun scanTracks(): List<Track> = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Starting simple MediaStore scan...")
-            
+
             // Check permissions first
             val requiredPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 android.Manifest.permission.READ_MEDIA_AUDIO
             } else {
                 android.Manifest.permission.READ_EXTERNAL_STORAGE
             }
-            
+
             val hasPermission = ContextCompat.checkSelfPermission(context, requiredPermission) == PackageManager.PERMISSION_GRANTED
             Log.d(TAG, "Permission check - $requiredPermission: ${if (hasPermission) "GRANTED" else "DENIED"}")
-            
+
             if (!hasPermission) {
                 Log.e(TAG, "Required permission not granted: $requiredPermission")
                 return@withContext emptyList()
             }
-            
+
             // Check if we can access MediaStore at all
             try {
                 val testUri = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
@@ -240,7 +240,7 @@ class SimpleMediaStoreScanner(
             } catch (e: Exception) {
                 Log.e(TAG, "MediaStore accessibility test failed", e)
             }
-            
+
             val tracks = mutableListOf<Track>()
 
             // Less restrictive selection - just basic audio files
@@ -280,22 +280,28 @@ class SimpleMediaStoreScanner(
 
                         // Validate essential fields - be less restrictive
                         if (duration >= 0) {  // Allow 0 duration for now
-                            // Extract artwork during startup scan
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
-                            
+                            // Skip heavy artwork extraction during the initial scan. The artwork
+                            // will now be loaded on-demand only when the item becomes visible
+                            // in the UI. This keeps the startup scan lightweight and prevents
+                            // UI jank on low-end devices.
+
+                            val quickArtUri = if (albumId > 0) {
+                                "content://media/external/audio/albumart/$albumId"
+                            } else null
+
                             val track = Track(
                                 mediaId = contentUri.toString(),
                                 title = title,
                                 artist = artist,
                                 album = album,
                                 durationMs = duration,
-                                artUri = artworkUri, // Extracted and cached at startup
+                                artUri = quickArtUri, // Fast album art lookup via album ID
                                 albumId = albumId
                             )
                             tracks.add(track)
-                            
+
                             if (tracks.size <= 5) {
-                                Log.d(TAG, "Added track: $title by $artist (${duration}ms) - artwork: ${if (artworkUri != null) "extracted" else "none"}")
+                                Log.d(TAG, "Added track: $title by $artist (${duration}ms) - artwork: ${if (track.artUri != null) "extracted" else "none"}")
                             }
                         } else {
                             Log.d(TAG, "Skipped track with invalid duration: $title (${duration}ms)")
@@ -311,7 +317,7 @@ class SimpleMediaStoreScanner(
             // If no tracks found with IS_MUSIC filter, try without it
             if (tracks.isEmpty()) {
                 Log.d(TAG, "No tracks found with IS_MUSIC filter, trying broader query...")
-                
+
                 // Try completely unrestricted query first
                 val unrestrictedCursor = context.contentResolver.query(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -322,7 +328,7 @@ class SimpleMediaStoreScanner(
                 )
                 Log.d(TAG, "Unrestricted query (ID only) returned ${unrestrictedCursor?.count ?: "null"} files")
                 unrestrictedCursor?.close()
-                
+
                 // Now try the broader query with full projection
                 context.contentResolver.query(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -332,7 +338,7 @@ class SimpleMediaStoreScanner(
                     sortOrder
                 )?.use { cursor ->
                     Log.d(TAG, "Broader query returned ${cursor.count} audio files")
-                    
+
                     val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                     val titleIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                     val artistIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
@@ -354,7 +360,7 @@ class SimpleMediaStoreScanner(
                             if (duration >= 0) {
                                 // Extract artwork during startup scan (broad query)
                                 val artworkUri = extractAndCacheArtwork(contentUri.toString())
-                                
+
                                 val track = Track(
                                     mediaId = contentUri.toString(),
                                     title = title,
@@ -365,7 +371,7 @@ class SimpleMediaStoreScanner(
                                     albumId = albumId
                                 )
                                 tracks.add(track)
-                                
+
                                 if (tracks.size <= 5) {
                                     Log.d(TAG, "Added track (broad): $title by $artist (${duration}ms) - artwork: ${if (artworkUri != null) "extracted" else "none"}")
                                 }
@@ -534,7 +540,7 @@ class SimpleMediaStoreScanner(
         handler: Handler,
         private val onChange: (Uri?) -> Unit
     ) : ContentObserver(handler) {
-        
+
         override fun onChange(selfChange: Boolean, uri: Uri?) {
             super.onChange(selfChange, uri)
             onChange(uri)

@@ -6,7 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
- 
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -59,7 +59,7 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
                             if (albumArt != null) {
-                                Artwork(data = albumArt, audioUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
+                                Artwork(data = albumArt, mediaUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
                             } else {
                                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
                             }
@@ -90,7 +90,7 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                             }
                             Box(modifier = Modifier.size(32.dp)) {
                                 if (albumArt != null) {
-                                    Artwork(data = albumArt, audioUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
+                                    Artwork(data = albumArt, mediaUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
                                 } else {
                                     Box(Modifier.fillMaxSize().background(Color.LightGray))
                                 }
@@ -105,11 +105,11 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
 
                 itemsIndexed(tracks, key = { _, t -> t.mediaId }) { index, t ->
                     val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
-                    
+
                     // Add queue operations for swipe gestures
                     val queueOps = rememberQueueOperations()
                     val scope = rememberCoroutineScope()
-                    
+
                     com.musify.mu.ui.components.EnhancedSwipeableItem(
                         onSwipeRight = {
                             // Swipe right: Play Next

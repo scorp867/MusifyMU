@@ -76,49 +76,49 @@ fun CompactTrackRow(
                 .clickable(onClick = onClick),
             verticalAlignment = Alignment.CenterVertically
         ) {
-        Artwork(
-            data = artData,
-            audioUri = null,
-            albumId = null,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(52.dp)
-        ) {
-            Box(modifier = Modifier.matchParentSize()) {
-                if (showIndicator) {
-                    PlayingIndicator(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(2.dp)
-                    )
-                }
-                if (extraArtOverlay != null) {
-                    extraArtOverlay()
+            Artwork(
+                data = artData,
+                mediaUri = null,
+                albumId = null,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(52.dp)
+            ) {
+                Box(modifier = Modifier.matchParentSize()) {
+                    if (showIndicator) {
+                        PlayingIndicator(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(2.dp)
+                        )
+                    }
+                    if (extraArtOverlay != null) {
+                        extraArtOverlay()
+                    }
                 }
             }
-        }
 
-        Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(10.dp))
 
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                modifier = Modifier.basicMarquee()
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                maxLines = 1
-            )
-        }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    modifier = Modifier.basicMarquee()
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    maxLines = 1
+                )
+            }
 
-        if (trailingContent != null) {
-            Spacer(Modifier.width(6.dp))
-            trailingContent()
-        }
+            if (trailingContent != null) {
+                Spacer(Modifier.width(6.dp))
+                trailingContent()
+            }
         }
     }
 }

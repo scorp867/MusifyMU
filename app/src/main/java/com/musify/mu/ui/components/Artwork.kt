@@ -17,17 +17,18 @@ fun Artwork(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     shape: Shape? = null,
-    audioUri: String? = null, // Track media ID (not used for artwork anymore)
+    mediaUri: String? = null, // Track media ID used for on-demand artwork extraction
     cacheKey: String? = null, // Not needed with new approach
     albumId: Long? = null, // Not used for artwork lookup anymore
     overlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
     // data should be the pre-extracted artwork URI from Track.artUri
     val artworkUri = data as? String
-    
+
     Box(modifier = modifier) {
         SmartArtwork(
             artworkUri = artworkUri,
+            mediaUri = mediaUri,
             contentDescription = contentDescription,
             modifier = Modifier.matchParentSize(),
             shape = shape

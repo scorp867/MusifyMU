@@ -36,25 +36,26 @@ import kotlinx.coroutines.Dispatchers
  */
 @Composable
 fun SmartArtwork(
-    artworkUri: String?, // Pre-extracted artwork URI from Track entity
+    artworkUri: String?, // Pre-extracted artwork URI from Track entity (may be null)
+    mediaUri: String? = null, // Content URI or file path to the audio file
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
     shape: Shape? = null
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
-    
+
     // State for tracking load status
     var isLoading by remember { mutableStateOf(true) }
     var hasError by remember { mutableStateOf(false) }
-    
+
     // Create gradient background colors based on theme
     val gradientColors = listOf(
         MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
         MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
         MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f)
     )
-    
+
     Box(
         modifier = finalModifier,
         contentAlignment = Alignment.Center
@@ -76,23 +77,16 @@ fun SmartArtwork(
                     )
                 )
         )
-        
-        // Determine image source with fallback chain
-        val imageData = remember(artworkUri) {
-            when {
-                !artworkUri.isNullOrBlank() -> {
-                    // Primary: Use pre-extracted artwork
-                    android.util.Log.d("SmartArtwork", "Loading artwork: $artworkUri")
-                    artworkUri
-                }
-                else -> {
-                    // Fallback: Use default placeholder
-                    android.util.Log.d("SmartArtwork", "No artwork available, using placeholder")
-                    null
-                }
+
+        var imageData by remember { mutableStateOf<String?>(artworkUri) }
+
+        // Trigger on-demand load if needed
+        LaunchedEffect(key1 = artworkUri, key2 = mediaUri) {
+            if (imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
+                imageData = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
             }
         }
-        
+
         if (imageData != null) {
             // Create image painter with multiple fallback strategies
             val painter = rememberAsyncImagePainter(
@@ -121,7 +115,7 @@ fun SmartArtwork(
                     )
                     .build()
             )
-            
+
             // Display the image
             androidx.compose.foundation.Image(
                 painter = painter,
@@ -130,7 +124,7 @@ fun SmartArtwork(
                 contentScale = ContentScale.Crop,
                 alpha = if (isLoading) 0.7f else 1f
             )
-            
+
             // Loading state overlay
             if (painter.state is AsyncImagePainter.State.Loading) {
                 Box(
@@ -140,7 +134,7 @@ fun SmartArtwork(
                 )
             }
         }
-        
+
         // Show icon placeholder when no image or on error
         if (imageData == null || hasError) {
             Icon(
