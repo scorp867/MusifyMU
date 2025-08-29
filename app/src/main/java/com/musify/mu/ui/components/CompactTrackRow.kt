@@ -78,7 +78,7 @@ fun CompactTrackRow(
         ) {
         Artwork(
             data = artData,
-            audioUri = null,
+            mediaUri = null,
             albumId = null,
             contentDescription = contentDescription,
             modifier = Modifier.size(52.dp)

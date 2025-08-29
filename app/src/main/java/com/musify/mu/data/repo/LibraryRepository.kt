@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
@@ -40,6 +42,35 @@ class LibraryRepository private constructor(private val context: Context, privat
             }
         }
     }
+
+    /**
+     * PagingSource that reads from Room table `track` alphabetically by title.
+     */
+    class TrackPagingSource(private val dao: AppDao) : PagingSource<Int, Track>() {
+        override suspend fun load(params: LoadParams<Int>): LoadResult<Int, Track> {
+            return try {
+                val limit = params.loadSize
+                val offset = params.key ?: 0
+                val tracks = dao.getTracksPaged(limit, offset)
+                LoadResult.Page(
+                    data = tracks,
+                    prevKey = if (offset == 0) null else offset - limit,
+                    nextKey = if (tracks.size < limit) null else offset + limit
+                )
+            } catch (e: Exception) {
+                LoadResult.Error(e)
+            }
+        }
+
+        override fun getRefreshKey(state: PagingState<Int, Track>): Int? {
+            return state.anchorPosition?.let { anchor ->
+                val page = state.closestPageToPosition(anchor)
+                page?.prevKey?.plus(state.config.pageSize) ?: page?.nextKey?.minus(state.config.pageSize)
+            }
+        }
+    }
+
+    fun pagingSource(): PagingSource<Int, Track> = TrackPagingSource(db.dao())
     
     // Search in cached data - NO database query
     fun search(q: String): List<Track> = dataManager.searchTracks(q)
@@ -115,6 +146,9 @@ class LibraryRepository private constructor(private val context: Context, privat
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
     suspend fun recordPlayed(mediaId: String) = db.dao().insertPlayHistoryIfNotRecent(mediaId)
+
+    // Artwork cache update from playback metadata
+    suspend fun updateTrackArt(mediaId: String, artUri: String?) = db.dao().updateTrackArt(mediaId, artUri)
 
     companion object {
         @Volatile private var INSTANCE: LibraryRepository? = null

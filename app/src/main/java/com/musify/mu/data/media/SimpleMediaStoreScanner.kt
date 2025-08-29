@@ -280,22 +280,28 @@ class SimpleMediaStoreScanner(
 
                         // Validate essential fields - be less restrictive
                         if (duration >= 0) {  // Allow 0 duration for now
-                            // Extract artwork during startup scan
-                            val artworkUri = extractAndCacheArtwork(contentUri.toString())
-                            
+                            // Skip heavy artwork extraction during the initial scan. The artwork
+                            // will now be loaded on-demand only when the item becomes visible
+                            // in the UI. This keeps the startup scan lightweight and prevents
+                            // UI jank on low-end devices.
+
+                            val quickArtUri = if (albumId > 0) {
+                                "content://media/external/audio/albumart/$albumId"
+                            } else null
+
                             val track = Track(
                                 mediaId = contentUri.toString(),
                                 title = title,
                                 artist = artist,
                                 album = album,
                                 durationMs = duration,
-                                artUri = artworkUri, // Extracted and cached at startup
+                                artUri = quickArtUri, // Fast album art lookup via album ID
                                 albumId = albumId
                             )
                             tracks.add(track)
                             
                             if (tracks.size <= 5) {
-                                Log.d(TAG, "Added track: $title by $artist (${duration}ms) - artwork: ${if (artworkUri != null) "extracted" else "none"}")
+                                Log.d(TAG, "Added track: $title by $artist (${duration}ms) - artwork: ${if (track.artUri != null) "extracted" else "none"}")
                             }
                         } else {
                             Log.d(TAG, "Skipped track with invalid duration: $title (${duration}ms)")

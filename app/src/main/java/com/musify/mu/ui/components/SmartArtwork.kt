@@ -36,7 +36,8 @@ import kotlinx.coroutines.Dispatchers
  */
 @Composable
 fun SmartArtwork(
-    artworkUri: String?, // Pre-extracted artwork URI from Track entity
+    artworkUri: String?, // Pre-extracted artwork URI from Track entity (may be null)
+    mediaUri: String? = null, // Content URI or file path to the audio file
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
     shape: Shape? = null
@@ -77,19 +78,12 @@ fun SmartArtwork(
                 )
         )
         
-        // Determine image source with fallback chain
-        val imageData = remember(artworkUri) {
-            when {
-                !artworkUri.isNullOrBlank() -> {
-                    // Primary: Use pre-extracted artwork
-                    android.util.Log.d("SmartArtwork", "Loading artwork: $artworkUri")
-                    artworkUri
-                }
-                else -> {
-                    // Fallback: Use default placeholder
-                    android.util.Log.d("SmartArtwork", "No artwork available, using placeholder")
-                    null
-                }
+        var imageData by remember { mutableStateOf<String?>(artworkUri) }
+
+        // Trigger on-demand load if needed
+        LaunchedEffect(key1 = artworkUri, key2 = mediaUri) {
+            if (imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
+                imageData = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
             }
         }
         
