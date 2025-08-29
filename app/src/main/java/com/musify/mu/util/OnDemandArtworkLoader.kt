@@ -13,6 +13,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.joinAll
 
 /**
  * Lightweight, in-memory/disk on-demand artwork loader.
@@ -40,6 +42,21 @@ object OnDemandArtworkLoader {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+    }
+
+    /**
+     * Prefetch artwork for a list of media URIs concurrently (max parallel = 4).
+     */
+    fun prefetch(mediaIds: List<String>) {
+        if (!::appContext.isInitialized) return
+        val unique = mediaIds.distinct().take(200) // limit to avoid massive work
+        unique.chunked(4).forEach { chunk ->
+            scope.launch {
+                chunk.map { id ->
+                    launch { loadArtwork(id) }
+                }.joinAll()
+            }
+        }
     }
 
     suspend fun loadArtwork(mediaUri: String?): String? {
