@@ -111,7 +111,7 @@ fun SimpleArtwork(
                 .dispatcher(Dispatchers.IO)
                 .apply {
                     val enableCrossfade = imageData !is Int
-                    if (enableCrossfade) crossfade(250) else crossfade(false)
+                    if (enableCrossfade) crossfade(200) else crossfade(false)
                 }
                 .error(R.drawable.ic_music_note)
                 .placeholder(R.drawable.ic_music_note)

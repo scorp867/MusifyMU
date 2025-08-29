@@ -41,7 +41,8 @@ fun SmartArtwork(
     mediaUri: String? = null, // Content URI or file path to the audio file
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
-    shape: Shape? = null
+    shape: Shape? = null,
+    enableOnDemand: Boolean = true
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
@@ -82,15 +83,10 @@ fun SmartArtwork(
         var imageData by remember { mutableStateOf<String?>(artworkUri) }
 
         // Observe Media3/loader-provided artwork for this mediaUri
-        val observedLoaderArt: String? = remember(mediaUri) {
-            if (mediaUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri)
-        }
-        val loaderArtState = if (!mediaUri.isNullOrBlank()) {
-            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri!!).collectAsState(initial = observedLoaderArt)
-        } else {
-            remember { mutableStateOf<String?>(null) }
-        }
-        val loaderFlowValue = loaderArtState.value
+        val loaderFlowValue = if (enableOnDemand && !mediaUri.isNullOrBlank()) {
+            val observedLoaderArt = remember(mediaUri) { com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri!!) }
+            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri!!).collectAsState(initial = observedLoaderArt).value
+        } else null
 
         // Prioritize explicit artwork from track, otherwise use loader-provided art
         LaunchedEffect(artworkUri) {
@@ -105,10 +101,10 @@ fun SmartArtwork(
         }
 
         // Trigger one-time extraction if still missing and mediaUri available
-        LaunchedEffect(key1 = imageData, key2 = mediaUri) {
-            if (imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
-                val extracted = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
-                if (!extracted.isNullOrBlank()) imageData = extracted
+        // Trigger one-time extraction if still missing and not negatively cached
+        LaunchedEffect(key1 = mediaUri) {
+            if (enableOnDemand && imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
+                com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
             }
         }
 

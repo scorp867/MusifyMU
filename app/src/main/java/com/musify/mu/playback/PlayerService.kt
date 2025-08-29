@@ -155,6 +155,15 @@ class PlayerService : MediaLibraryService() {
                                 com.musify.mu.util.OnDemandArtworkLoader.cacheUri(mediaId, cached)
                             }
                         }
+                    } else if (mediaId != null && metadata.artworkUri != null) {
+                        // Use Media3 artworkUri if present (e.g., notification extracted)
+                        try {
+                            val uriStr = metadata.artworkUri.toString()
+                            serviceScope.launch(Dispatchers.IO) {
+                                try { repo.updateTrackArt(mediaId, uriStr) } catch (_: Exception) {}
+                                com.musify.mu.util.OnDemandArtworkLoader.cacheUri(mediaId, uriStr)
+                            }
+                        } catch (_: Exception) {}
                     }
                 }
             })

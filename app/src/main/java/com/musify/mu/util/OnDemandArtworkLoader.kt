@@ -41,9 +41,21 @@ object OnDemandArtworkLoader {
     // Sentinel for failed extraction so we don't retry every scroll
     private const val NONE_SENTINEL = "__NONE__"
 
+    // Strong negative cache that does not evict during the session
+    private val failedKeys: java.util.concurrent.ConcurrentHashMap.KeySetView<String, Boolean> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    // Simple in-flight guard to avoid duplicate concurrent extractions
+    private val loading = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
     /** Put a uri (or sentinel) directly into memory cache */
     fun cacheUri(mediaUri: String, artUri: String?) {
         inMemoryCache.put(mediaUri, artUri ?: NONE_SENTINEL)
+        if (artUri.isNullOrBlank()) {
+            failedKeys.add(mediaUri)
+        } else {
+            failedKeys.remove(mediaUri)
+        }
         // Publish update to any observers
         flowFor(mediaUri).value = artUri
     }
@@ -93,8 +105,14 @@ object OnDemandArtworkLoader {
 
     suspend fun loadArtwork(mediaUri: String?): String? {
         if (mediaUri.isNullOrBlank()) return null
+        if (failedKeys.contains(mediaUri)) return null
+        if (loading.putIfAbsent(mediaUri, true) == true) {
+            // Another extraction in progress; return what we have
+            return getCachedUri(mediaUri)
+        }
         // quick memory lookup
         inMemoryCache.get(mediaUri)?.let { cached ->
+            loading.remove(mediaUri)
             return if (cached == NONE_SENTINEL) null else cached
         }
         return withContext(Dispatchers.IO) {
@@ -105,6 +123,7 @@ object OnDemandArtworkLoader {
                 inMemoryCache.put(mediaUri, uriString)
                 // Notify observers immediately
                 flowFor(mediaUri).value = uriString
+                loading.remove(mediaUri)
                 return@withContext uriString
             }
 
@@ -122,7 +141,9 @@ object OnDemandArtworkLoader {
                 val artworkBytes = retriever.embeddedPicture ?: run {
                     // Negative cache so we don't thrash trying again
                     inMemoryCache.put(mediaUri, NONE_SENTINEL)
+                    failedKeys.add(mediaUri)
                     flowFor(mediaUri).value = null
+                    loading.remove(mediaUri)
                     return@withContext null
                 }
                 val bmp = BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size) ?: return@withContext null
@@ -135,12 +156,15 @@ object OnDemandArtworkLoader {
                 val uriString = "file://${cacheFile.absolutePath}"
                 inMemoryCache.put(mediaUri, uriString)
                 flowFor(mediaUri).value = uriString
+                loading.remove(mediaUri)
                 return@withContext uriString
             } catch (e: Exception) {
                 android.util.Log.w("OnDemandArtworkLoader", "Failed to extract artwork", e)
                 // Negative cache to avoid repeated attempts during session
                 inMemoryCache.put(mediaUri, NONE_SENTINEL)
+                failedKeys.add(mediaUri)
                 flowFor(mediaUri).value = null
+                loading.remove(mediaUri)
                 null
             } finally {
                 try { retriever.release() } catch (_: Exception) {}

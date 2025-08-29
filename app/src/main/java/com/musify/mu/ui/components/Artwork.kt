@@ -20,7 +20,8 @@ fun Artwork(
     mediaUri: String? = null, // Track media ID used for on-demand artwork extraction
     cacheKey: String? = null, // Not needed with new approach
     albumId: Long? = null, // Not used for artwork lookup anymore
-    overlay: (@Composable BoxScope.() -> Unit)? = null
+    overlay: (@Composable BoxScope.() -> Unit)? = null,
+    enableOnDemand: Boolean = false
 ) {
     // data should be the pre-extracted artwork URI from Track.artUri
     val artworkUri = data as? String
@@ -31,7 +32,8 @@ fun Artwork(
             mediaUri = mediaUri,
             contentDescription = contentDescription,
             modifier = Modifier.matchParentSize(),
-            shape = shape
+            shape = shape,
+            enableOnDemand = enableOnDemand
         )
         if (overlay != null) {
             overlay()
