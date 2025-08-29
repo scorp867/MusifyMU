@@ -15,6 +15,10 @@ import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Lightweight, in-memory/disk on-demand artwork loader.
@@ -37,9 +41,23 @@ object OnDemandArtworkLoader {
     // Sentinel for failed extraction so we don't retry every scroll
     private const val NONE_SENTINEL = "__NONE__"
 
+    // Strong negative cache that does not evict during the session
+    private val failedKeys: java.util.concurrent.ConcurrentHashMap.KeySetView<String, Boolean> =
+        java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    // Simple in-flight guard to avoid duplicate concurrent extractions
+    private val loading = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
     /** Put a uri (or sentinel) directly into memory cache */
     fun cacheUri(mediaUri: String, artUri: String?) {
         inMemoryCache.put(mediaUri, artUri ?: NONE_SENTINEL)
+        if (artUri.isNullOrBlank()) {
+            failedKeys.add(mediaUri)
+        } else {
+            failedKeys.remove(mediaUri)
+        }
+        // Publish update to any observers
+        flowFor(mediaUri).value = artUri
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -47,6 +65,24 @@ object OnDemandArtworkLoader {
     private val diskDir: File by lazy {
         File(appContext.cacheDir, "on_demand_artwork").apply { if (!exists()) mkdirs() }
     }
+
+    // Per-mediaUri flows to notify UI when artwork becomes available
+    private val uriFlows = ConcurrentHashMap<String, MutableStateFlow<String?>>()
+
+    private fun normalizedCachedValue(key: String): String? {
+        val cached = inMemoryCache.get(key)
+        return if (cached == null || cached == NONE_SENTINEL) null else cached
+    }
+
+    private fun flowFor(mediaUri: String): MutableStateFlow<String?> {
+        return uriFlows.getOrPut(mediaUri) {
+            MutableStateFlow(normalizedCachedValue(mediaUri))
+        }
+    }
+
+    fun artworkFlow(mediaUri: String): StateFlow<String?> = flowFor(mediaUri).asStateFlow()
+
+    fun getCachedUri(mediaUri: String): String? = normalizedCachedValue(mediaUri)
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -57,11 +93,15 @@ object OnDemandArtworkLoader {
      */
     fun prefetch(mediaIds: List<String>) {
         if (!::appContext.isInitialized) return
-        val unique = mediaIds.distinct().take(200) // limit to avoid massive work
+        val unique = mediaIds.distinct().take(200)
         unique.chunked(4).forEach { chunk ->
             scope.launch {
                 chunk.map { id ->
-                    launch { loadArtwork(id) }
+                    launch {
+                        if (!failedKeys.contains(id) && inMemoryCache.get(id) == null) {
+                            loadArtwork(id)
+                        }
+                    }
                 }.joinAll()
             }
         }
@@ -69,8 +109,14 @@ object OnDemandArtworkLoader {
 
     suspend fun loadArtwork(mediaUri: String?): String? {
         if (mediaUri.isNullOrBlank()) return null
+        if (failedKeys.contains(mediaUri)) return null
+        if (loading.putIfAbsent(mediaUri, true) == true) {
+            // Another extraction in progress; return what we have
+            return getCachedUri(mediaUri)
+        }
         // quick memory lookup
         inMemoryCache.get(mediaUri)?.let { cached ->
+            loading.remove(mediaUri)
             return if (cached == NONE_SENTINEL) null else cached
         }
         return withContext(Dispatchers.IO) {
@@ -79,6 +125,9 @@ object OnDemandArtworkLoader {
             if (cacheFile.exists()) {
                 val uriString = "file://${cacheFile.absolutePath}"
                 inMemoryCache.put(mediaUri, uriString)
+                // Notify observers immediately
+                flowFor(mediaUri).value = uriString
+                loading.remove(mediaUri)
                 return@withContext uriString
             }
 
@@ -93,7 +142,14 @@ object OnDemandArtworkLoader {
                         return@withContext null
                     }
                 }
-                val artworkBytes = retriever.embeddedPicture ?: return@withContext null
+                val artworkBytes = retriever.embeddedPicture ?: run {
+                    // Negative cache so we don't thrash trying again
+                    inMemoryCache.put(mediaUri, NONE_SENTINEL)
+                    failedKeys.add(mediaUri)
+                    flowFor(mediaUri).value = null
+                    loading.remove(mediaUri)
+                    return@withContext null
+                }
                 val bmp = BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size) ?: return@withContext null
                 val resized = resizeBitmap(bmp, MAX_BITMAP_EDGE)
                 cacheFile.outputStream().use { out ->
@@ -103,9 +159,15 @@ object OnDemandArtworkLoader {
                 resized.recycle()
                 val uriString = "file://${cacheFile.absolutePath}"
                 inMemoryCache.put(mediaUri, uriString)
+                flowFor(mediaUri).value = uriString
+                loading.remove(mediaUri)
                 return@withContext uriString
             } catch (e: Exception) {
-                android.util.Log.w("OnDemandArtworkLoader", "Failed to extract artwork", e)
+                // Negative cache to avoid repeated attempts during session
+                inMemoryCache.put(mediaUri, NONE_SENTINEL)
+                failedKeys.add(mediaUri)
+                flowFor(mediaUri).value = null
+                loading.remove(mediaUri)
                 null
             } finally {
                 try { retriever.release() } catch (_: Exception) {}
@@ -124,6 +186,7 @@ object OnDemandArtworkLoader {
             cacheFile.outputStream().use { it.write(bytes) }
             val uri = "file://${cacheFile.absolutePath}"
             inMemoryCache.put(mediaUri, uri)
+            flowFor(mediaUri).value = uri
             return@withContext uri
         } catch (e: Exception) {
             android.util.Log.w("OnDemandArtworkLoader", "Failed to store artwork bytes", e)

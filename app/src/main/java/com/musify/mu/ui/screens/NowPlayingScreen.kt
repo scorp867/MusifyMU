@@ -496,7 +496,8 @@ fun NowPlayingScreen(navController: NavController) {
                             mediaUri = track.mediaId,
                             albumId = track.albumId,
                             contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            enableOnDemand = false
                         )
 
                         // Subtle overlay for depth
