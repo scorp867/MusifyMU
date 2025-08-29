@@ -80,7 +80,11 @@ fun SmartArtwork(
                 )
         )
 
-        var imageData by remember { mutableStateOf<String?>(artworkUri) }
+        // Ignore MediaStore album art content URIs; rely on embedded art or Media3
+        val sanitizedArtworkUri = remember(artworkUri) {
+            artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
+        }
+        var imageData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
 
         // Observe Media3/loader-provided artwork for this mediaUri
         val loaderFlowValue = if (enableOnDemand && !mediaUri.isNullOrBlank()) {
@@ -89,9 +93,9 @@ fun SmartArtwork(
         } else null
 
         // Prioritize explicit artwork from track, otherwise use loader-provided art
-        LaunchedEffect(artworkUri) {
-            if (!artworkUri.isNullOrBlank()) {
-                imageData = artworkUri
+        LaunchedEffect(sanitizedArtworkUri) {
+            if (!sanitizedArtworkUri.isNullOrBlank()) {
+                imageData = sanitizedArtworkUri
             }
         }
         LaunchedEffect(loaderFlowValue) {
@@ -132,7 +136,6 @@ fun SmartArtwork(
                         onError = { _, _ ->
                             isLoading = false
                             hasError = true
-                            android.util.Log.w("SmartArtwork", "Failed to load artwork: $imageData")
                         }
                     )
                     .build()

@@ -93,11 +93,15 @@ object OnDemandArtworkLoader {
      */
     fun prefetch(mediaIds: List<String>) {
         if (!::appContext.isInitialized) return
-        val unique = mediaIds.distinct().take(200) // limit to avoid massive work
+        val unique = mediaIds.distinct().take(200)
         unique.chunked(4).forEach { chunk ->
             scope.launch {
                 chunk.map { id ->
-                    launch { loadArtwork(id) }
+                    launch {
+                        if (!failedKeys.contains(id) && inMemoryCache.get(id) == null) {
+                            loadArtwork(id)
+                        }
+                    }
                 }.joinAll()
             }
         }
@@ -159,7 +163,6 @@ object OnDemandArtworkLoader {
                 loading.remove(mediaUri)
                 return@withContext uriString
             } catch (e: Exception) {
-                android.util.Log.w("OnDemandArtworkLoader", "Failed to extract artwork", e)
                 // Negative cache to avoid repeated attempts during session
                 inMemoryCache.put(mediaUri, NONE_SENTINEL)
                 failedKeys.add(mediaUri)

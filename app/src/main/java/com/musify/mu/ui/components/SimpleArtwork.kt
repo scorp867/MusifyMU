@@ -67,14 +67,14 @@ fun SimpleArtwork(
     val loaderArt by (loaderFlow?.collectAsState(initial = loaderCached)
         ?: remember { mutableStateOf<String?>(null) })
 
-    // Resolve image data preference: explicit artUri > loaderArt > albumId MediaStore
-    val imageData = remember(artUri, loaderArt, albumId) {
+    // Resolve image data preference: explicit artUri (non-MediaStore) > loaderArt > placeholder
+    val sanitizedArtUri = remember(artUri) {
+        artUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
+    }
+    val imageData = remember(sanitizedArtUri, loaderArt) {
         when {
-            !artUri.isNullOrBlank() -> android.net.Uri.parse(artUri)
+            !sanitizedArtUri.isNullOrBlank() -> android.net.Uri.parse(sanitizedArtUri)
             !loaderArt.isNullOrBlank() -> android.net.Uri.parse(loaderArt)
-            albumId != null -> try {
-                android.net.Uri.parse("content://media/external/audio/albumart/$albumId")
-            } catch (_: Exception) { R.drawable.ic_music_note }
             else -> R.drawable.ic_music_note
         }
     }
