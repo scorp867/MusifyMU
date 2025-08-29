@@ -495,16 +495,19 @@ fun NowPlayingScreen(navController: NavController) {
                         LaunchedEffect(controller) {
                             if (controller != null) {
                                 nowPlayingArt = controller.mediaMetadata.artworkData ?: controller.mediaMetadata.artworkUri ?: track.artUri
-                                val listener = object : androidx.media3.common.Player.Listener {
-                                    override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
-                                        nowPlayingArt = mediaMetadata.artworkData ?: mediaMetadata.artworkUri ?: track.artUri
-                                    }
-                                }
-                                controller.addListener(listener)
-                                awaitDispose { controller.removeListener(listener) }
                             } else {
                                 nowPlayingArt = track.artUri
                             }
+                        }
+                        DisposableEffect(controller) {
+                            if (controller == null) return@DisposableEffect onDispose { }
+                            val listener = object : androidx.media3.common.Player.Listener {
+                                override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+                                    nowPlayingArt = mediaMetadata.artworkData ?: mediaMetadata.artworkUri ?: track.artUri
+                                }
+                            }
+                            controller.addListener(listener)
+                            onDispose { controller.removeListener(listener) }
                         }
                         com.musify.mu.ui.components.SmartArtwork(
                             artData = nowPlayingArt,

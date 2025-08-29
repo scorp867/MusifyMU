@@ -53,16 +53,18 @@ fun NowPlayingBar(
     var mediaArtwork: Any? by remember { mutableStateOf(null) }
     LaunchedEffect(controller) {
         if (controller == null) return@LaunchedEffect
-        // Initial
+        // Initial value
         mediaArtwork = controller.mediaMetadata.artworkData ?: controller.mediaMetadata.artworkUri ?: currentTrack?.artUri
-        // Listener for dynamic metadata updates
+    }
+    DisposableEffect(controller) {
+        if (controller == null) return@DisposableEffect onDispose { }
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
                 mediaArtwork = mediaMetadata.artworkData ?: mediaMetadata.artworkUri ?: currentTrack?.artUri
             }
         }
         controller.addListener(listener)
-        awaitDispose { controller.removeListener(listener) }
+        onDispose { controller.removeListener(listener) }
     }
     var miniProgress by remember { mutableStateOf(0f) }
     LaunchedEffect(controller) {
@@ -204,7 +206,7 @@ fun NowPlayingBar(
                     isVisible = true
                 ) {
                     if (isPlaying) {
-                        Box(modifier = Modifier.matchParentSize()) {
+                        Box(modifier = Modifier.fillMaxSize()) {
                             PlayingIndicator(modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp))
                         }
                     }
