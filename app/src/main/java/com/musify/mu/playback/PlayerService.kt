@@ -39,7 +39,6 @@ fun Track.toMediaItem(): MediaItem {
                 .setTitle(title)
                 .setArtist(artist)
                 .setAlbumTitle(album)
-                .setArtworkUri(artUri?.let { android.net.Uri.parse(it) })
                 .setGenre(genre)
                 .setReleaseYear(year)
                 .setTrackNumber(track)
