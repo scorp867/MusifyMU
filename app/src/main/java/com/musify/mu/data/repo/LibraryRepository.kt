@@ -14,6 +14,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
+import kotlinx.coroutines.flow.flowOn
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
@@ -39,6 +44,33 @@ class LibraryRepository private constructor(private val context: Context, privat
                 emptyList()
             }
         }
+    }
+
+    // Paging 3: all tracks
+    fun pagingAllTracks(pageSize: Int = 60): Flow<PagingData<Track>> {
+        return Pager(
+            config = PagingConfig(
+                pageSize = pageSize,
+                initialLoadSize = pageSize * 2,
+                prefetchDistance = pageSize / 2,
+                enablePlaceholders = false
+            ),
+            pagingSourceFactory = { db.dao().pagingAllTracks() }
+        ).flow
+    }
+
+    // Paging 3: search
+    fun pagingSearchTracks(query: String, pageSize: Int = 60): Flow<PagingData<Track>> {
+        val q = "%${query.trim()}%"
+        return Pager(
+            config = PagingConfig(
+                pageSize = pageSize,
+                initialLoadSize = pageSize * 2,
+                prefetchDistance = pageSize / 2,
+                enablePlaceholders = false
+            ),
+            pagingSourceFactory = { db.dao().pagingSearchTracks(q) }
+        ).flow
     }
     
     // Search in cached data - NO database query

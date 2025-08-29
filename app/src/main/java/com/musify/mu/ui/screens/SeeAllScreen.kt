@@ -147,7 +147,10 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                                 tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                             )
                                         }
-                                    }
+                                    },
+                                    isArtworkVisible = true,
+                                    albumId = track.albumId,
+                                    trackUri = track.mediaId
                                 )
                             }
                         }
@@ -194,7 +197,10 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                 contentDescription = track.title,
                                 isPlaying = isPlaying,
                                 showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
-                                onClick = { onPlay(tracks, idx) }
+                                onClick = { onPlay(tracks, idx) },
+                                isArtworkVisible = true,
+                                albumId = track.albumId,
+                                trackUri = track.mediaId
                             )
                         }
                     }

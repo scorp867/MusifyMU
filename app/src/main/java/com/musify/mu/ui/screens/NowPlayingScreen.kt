@@ -491,12 +491,29 @@ fun NowPlayingScreen(navController: NavController) {
                                 shape = RoundedCornerShape(20.dp)
                             )
                     ) {
-                        com.musify.mu.ui.components.Artwork(
-                            data = track.artUri,
-                            audioUri = track.mediaId,
-                            albumId = track.albumId,
+                        var nowPlayingArt by remember { mutableStateOf<Any?>(null) }
+                        LaunchedEffect(controller) {
+                            if (controller != null) {
+                                nowPlayingArt = controller.mediaMetadata.artworkData ?: controller.mediaMetadata.artworkUri ?: track.artUri
+                            } else {
+                                nowPlayingArt = track.artUri
+                            }
+                        }
+                        DisposableEffect(controller) {
+                            if (controller == null) return@DisposableEffect onDispose { }
+                            val listener = object : androidx.media3.common.Player.Listener {
+                                override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+                                    nowPlayingArt = mediaMetadata.artworkData ?: mediaMetadata.artworkUri ?: track.artUri
+                                }
+                            }
+                            controller.addListener(listener)
+                            onDispose { controller.removeListener(listener) }
+                        }
+                        com.musify.mu.ui.components.SmartArtwork(
+                            artData = nowPlayingArt,
                             contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            shouldLoad = true
                         )
 
                         // Subtle overlay for depth
