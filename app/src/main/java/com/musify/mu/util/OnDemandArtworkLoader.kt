@@ -100,6 +100,24 @@ object OnDemandArtworkLoader {
         }
     }
 
+    /**
+     * Store artwork bytes coming directly from ExoPlayer metadata and cache them.
+     * Returns file URI string.
+     */
+    suspend fun storeArtworkBytes(mediaUri: String, bytes: ByteArray): String? = withContext(Dispatchers.IO) {
+        if (!::appContext.isInitialized) return@withContext null
+        val cacheFile = File(diskDir, mediaUri.md5() + ".jpg")
+        try {
+            cacheFile.outputStream().use { it.write(bytes) }
+            val uri = "file://${cacheFile.absolutePath}"
+            inMemoryCache.put(mediaUri, uri)
+            return@withContext uri
+        } catch (e: Exception) {
+            android.util.Log.w("OnDemandArtworkLoader", "Failed to store artwork bytes", e)
+            null
+        }
+    }
+
     private fun resizeBitmap(src: Bitmap, max: Int): Bitmap {
         val w = src.width
         val h = src.height
