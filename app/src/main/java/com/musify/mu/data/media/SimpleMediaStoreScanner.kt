@@ -285,13 +285,17 @@ class SimpleMediaStoreScanner(
                             // in the UI. This keeps the startup scan lightweight and prevents
                             // UI jank on low-end devices.
 
+                            val quickArtUri = if (albumId > 0) {
+                                "content://media/external/audio/albumart/$albumId"
+                            } else null
+
                             val track = Track(
                                 mediaId = contentUri.toString(),
                                 title = title,
                                 artist = artist,
                                 album = album,
                                 durationMs = duration,
-                                artUri = null, // Artwork will be resolved later on-demand
+                                artUri = quickArtUri, // Fast album art lookup via album ID
                                 albumId = albumId
                             )
                             tracks.add(track)
