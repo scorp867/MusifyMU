@@ -63,10 +63,10 @@ fun PagingExampleScreen() {
                                 ) {
                                     // Artwork with on-demand loading
                                     Artwork(
-                                        data = track.artUri,
-                                        audioUri = track.mediaId,
-                                        albumId = track.albumId,
-                                        contentDescription = track.title,
+                                        data = it.artUri,
+                                        audioUri = it.mediaId,
+                                        albumId = it.albumId,
+                                        contentDescription = it.title,
                                         modifier = Modifier.size(48.dp)
                                     )
                                     
@@ -74,11 +74,11 @@ fun PagingExampleScreen() {
                                     
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = track.title,
+                                            text = it.title,
                                             style = MaterialTheme.typography.titleMedium
                                         )
                                         Text(
-                                            text = track.artist,
+                                            text = it.artist,
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                         )
