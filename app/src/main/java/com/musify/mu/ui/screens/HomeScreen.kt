@@ -326,30 +326,16 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         val queueOps = rememberQueueOperations()
                         val scope = rememberCoroutineScope()
                         
-                        com.musify.mu.ui.components.EnhancedSwipeableItem(
-                            onSwipeRight = {
-                                // Swipe right: Play Next
-                                val ctx = QueueContextHelper.createDiscoverContext("home_songs")
-                                scope.launch { queueOps.playNextWithContext(items = listOf(t.toMediaItem()), context = ctx) }
-                            },
-                            onSwipeLeft = {
-                                // Swipe left: Add to User Queue
-                                val ctx = QueueContextHelper.createDiscoverContext("home_songs")
-                                scope.launch { queueOps.addToUserQueueWithContext(items = listOf(t.toMediaItem()), context = ctx) }
-                            },
-                            isInQueue = false,
+                        com.musify.mu.ui.components.CompactTrackRow(
+                            title = t.title,
+                            subtitle = t.artist,
+                            artData = t.artUri,
+                            contentDescription = t.title,
+                            isPlaying = isPlaying,
+                            showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
+                            onClick = { onPlay(tracksFiltered, idx) },
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            com.musify.mu.ui.components.CompactTrackRow(
-                                title = t.title,
-                                subtitle = t.artist,
-                                artData = t.artUri,
-                                contentDescription = t.title,
-                                isPlaying = isPlaying,
-                                showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                                onClick = { onPlay(tracksFiltered, idx) }
-                            )
-                        }
+                        )
                     }
                 }
                 2 -> {
@@ -788,107 +774,16 @@ private fun TrackCard(
     val queueOps = rememberQueueOperations()
     val scope = rememberCoroutineScope()
 
-    com.musify.mu.ui.components.EnhancedSwipeableItem(
-        onSwipeRight = {
-            // Swipe right: Play Next
-            val ctx = QueueContextHelper.createDiscoverContext("home")
-            scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-        },
-        onSwipeLeft = {
-            // Swipe left: Add to User Queue
-            val ctx = QueueContextHelper.createDiscoverContext("home")
-            scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-        },
-        isInQueue = false,
-        modifier = Modifier.width(150.dp)
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                }
-                .clickable { onClick() },
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-            ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                ) {
-                    // Use regular Artwork
-                    Artwork(
-                        data = track.artUri,
-                        mediaUri = track.mediaId,
-                        albumId = track.albumId,
-                        contentDescription = track.title,
-                        modifier = Modifier.fillMaxSize()
-                    )
-
-                    // Play overlay
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        Color.Black.copy(alpha = 0.3f)
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .background(
-                                    Color.White.copy(alpha = 0.2f),
-                                    RoundedCornerShape(24.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.PlayArrow,
-                                contentDescription = "Play",
-                                tint = Color.White,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = track.title,
-                    maxLines = 1,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = FontWeight.Medium
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Text(
-                    text = track.artist,
-                    maxLines = 1,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-        }
-    }
+    com.musify.mu.ui.components.CompactTrackRow(
+        title = track.title,
+        subtitle = track.artist,
+        artData = track.artUri,
+        contentDescription = track.title,
+        isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current,
+        showIndicator = true,
+        onClick = { onClick() },
+        modifier = Modifier.fillMaxWidth()
+    )
 }
 
 @Composable
