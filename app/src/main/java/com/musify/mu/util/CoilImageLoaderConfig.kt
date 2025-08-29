@@ -39,7 +39,7 @@ object CoilImageLoaderConfig {
             }
             .respectCacheHeaders(false) // Ignore HTTP cache headers for local files
             .allowHardware(false) // Better compatibility with older devices
-            .crossfade(true) // Enable smooth transitions
+            .crossfade(200) // Subtle crossfade to reduce perceived flicker
             .apply {
                 if (android.util.Log.isLoggable("CoilImageLoader", android.util.Log.DEBUG)) {
                     logger(DebugLogger())

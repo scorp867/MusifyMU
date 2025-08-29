@@ -80,6 +80,15 @@ fun SmartArtwork(
         
         // Determine image source with fallback chain
         val imageData = remember(artData) { artData }
+        val memoryKey = remember(artData) {
+            when (artData) {
+                is String -> artData
+                is android.net.Uri -> artData.toString()
+                is ByteArray -> "bytes_" + artData.size
+                is Int -> "res_$artData"
+                else -> artData?.toString() ?: "unknown"
+            }
+        }
         
         if (imageData != null && shouldLoad) {
             // Create image painter with multiple fallback strategies
@@ -89,9 +98,14 @@ fun SmartArtwork(
                     .dispatcher(Dispatchers.IO)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
-                    .crossfade(300)
-                    .size(Size.ORIGINAL)
-                    .scale(Scale.FIT)
+                    .memoryCacheKey(memoryKey)
+                    .diskCacheKey(memoryKey)
+                    .placeholder(R.drawable.ic_music_note)
+                    .error(R.drawable.ic_music_note)
+                    .fallback(R.drawable.ic_music_note)
+                    .crossfade(true)
+                    .allowHardware(false)
+                    .scale(Scale.FILL)
                     .listener(
                         onStart = {
                             isLoading = true
@@ -119,18 +133,18 @@ fun SmartArtwork(
                 alpha = if (isLoading) 0.7f else 1f
             )
             
-            // Loading state overlay
+            // While loading, keep a subtle overlay but allow Coil placeholder beneath to avoid flicker
             if (painter.state is AsyncImagePainter.State.Loading) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.2f))
+                        .background(Color.Black.copy(alpha = 0.08f))
                 )
             }
         }
         
-        // Show icon placeholder when no image or on error
-        if (!shouldLoad || imageData == null || hasError) {
+        // Show icon placeholder when no image or on error or still loading (for non-Coil paths)
+        if (!shouldLoad || imageData == null || hasError || isLoading) {
             Icon(
                 imageVector = Icons.Rounded.MusicNote,
                 contentDescription = null,

@@ -491,12 +491,26 @@ fun NowPlayingScreen(navController: NavController) {
                                 shape = RoundedCornerShape(20.dp)
                             )
                     ) {
-                        val md = controller?.mediaMetadata
-                        val nowPlayingArt: Any? = md?.artworkData ?: md?.artworkUri ?: track.artUri
-                        com.musify.mu.ui.components.Artwork(
-                            data = nowPlayingArt,
+                        var nowPlayingArt by remember { mutableStateOf<Any?>(null) }
+                        LaunchedEffect(controller) {
+                            if (controller != null) {
+                                nowPlayingArt = controller.mediaMetadata.artworkData ?: controller.mediaMetadata.artworkUri ?: track.artUri
+                                val listener = object : androidx.media3.common.Player.Listener {
+                                    override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) {
+                                        nowPlayingArt = mediaMetadata.artworkData ?: mediaMetadata.artworkUri ?: track.artUri
+                                    }
+                                }
+                                controller.addListener(listener)
+                                awaitDispose { controller.removeListener(listener) }
+                            } else {
+                                nowPlayingArt = track.artUri
+                            }
+                        }
+                        com.musify.mu.ui.components.SmartArtwork(
+                            artData = nowPlayingArt,
                             contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier.fillMaxSize(),
+                            shouldLoad = true
                         )
 
                         // Subtle overlay for depth

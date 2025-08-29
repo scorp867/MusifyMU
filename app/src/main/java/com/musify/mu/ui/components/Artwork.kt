@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.fillMaxSize
 
 /**
  * Artwork wrapper component that uses pre-extracted artwork URIs
@@ -23,14 +24,21 @@ fun Artwork(
     isVisible: Boolean = true,
     overlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
-    // data should be the pre-extracted artwork URI from Track.artUri
-    val artData = data
-    
+    // Prefer provided data; fallback to albumId-based MediaStore URI; then to audioUri; else null
+    val artData = remember(data, albumId, audioUri) {
+        when {
+            data != null -> data
+            albumId != null -> android.net.Uri.parse("content://media/external/audio/albumart/$albumId")
+            !audioUri.isNullOrBlank() -> android.net.Uri.parse(audioUri)
+            else -> null
+        }
+    }
+
     Box(modifier = modifier) {
         SmartArtwork(
             artData = artData,
             contentDescription = contentDescription,
-            modifier = Modifier.matchParentSize(),
+            modifier = Modifier.fillMaxSize(),
             shape = shape,
             shouldLoad = isVisible
         )
