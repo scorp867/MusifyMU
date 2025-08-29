@@ -56,7 +56,6 @@ import android.provider.MediaStore
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.LazyPagingItems
-import androidx.paging.compose.itemsIndexed
 import androidx.paging.PagingData
 import kotlinx.coroutines.flow.Flow
 
@@ -209,7 +208,11 @@ fun LibraryScreen(
                         // Performance optimizations for smooth scrolling
                         flingBehavior = rememberSnapFlingBehavior(listState)
                     ) {
-                        itemsIndexed(pagingItems, key = { index, item -> "library_${index}_${item?.mediaId ?: index}" }) { index, track ->
+                        items(
+                            count = pagingItems.itemCount,
+                            key = { index -> "library_${index}_${pagingItems.peek(index)?.mediaId ?: index}" }
+                        ) { index ->
+                            val track = pagingItems[index]
                             if (track != null) {
                                 // Visibility-aware artwork loading
                                 val visibleItems = listState.layoutInfo.visibleItemsInfo
@@ -258,7 +261,8 @@ fun LibraryScreen(
                                                 queueOperationsState = queueOperationsState - track.mediaId
                                             }
                                         }
-                                    }
+                                    },
+                                    loadArtwork = isVisible
                                 )
                             }
                         }
@@ -392,7 +396,8 @@ private fun TrackItem(
     track: Track,
     onClick: () -> Unit,
     onAddToQueue: (Boolean) -> Unit,
-    queueOperation: QueueOperation? = null
+    queueOperation: QueueOperation? = null,
+    loadArtwork: Boolean = true
 ) {
     var isPressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -449,12 +454,11 @@ private fun TrackItem(
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    // Visibility-aware art loading
-                    val visibleItems = LocalMediaController.current // not used here, keep local state
                     com.musify.mu.ui.components.SmartArtwork(
-                        artData = track.artUri, // Use pre-extracted artwork from database
+                        artData = track.artUri,
                         contentDescription = track.title,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        shouldLoad = loadArtwork
                     )
                 }
 
@@ -514,71 +518,19 @@ private fun TrackItem(
                                     imageVector = Icons.Rounded.CheckCircle,
                                     contentDescription = "Added successfully",
                                     tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Added",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                             QueueOperation.COMPLETED_ERROR -> {
                                 Icon(
-                                    imageVector = Icons.Rounded.Error,
-                                    contentDescription = "Failed to add",
+                                    imageVector = Icons.Rounded.ErrorOutline,
+                                    contentDescription = "Error adding",
                                     tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Failed",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.error
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                             else -> {}
                         }
-                    }
-                }
-
-                // Queue actions
-                var showMenu by remember { mutableStateOf(false) }
-
-                Box {
-                    IconButton(onClick = { showMenu = true }) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = "More options",
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Play next") },
-                            leadingIcon = {
-                                Icon(Icons.Rounded.PlaylistPlay, contentDescription = null)
-                            },
-                            onClick = {
-                                onAddToQueue(false)
-                                showMenu = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Add to queue") },
-                            leadingIcon = {
-                                Icon(Icons.Rounded.QueueMusic, contentDescription = null)
-                            },
-                            onClick = {
-                                onAddToQueue(true)
-                                showMenu = false
-                            }
-                        )
                     }
                 }
             }
