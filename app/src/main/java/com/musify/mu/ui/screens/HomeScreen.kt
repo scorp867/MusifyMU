@@ -385,10 +385,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Artwork(
                                     data = a.artUri,
-                                    mediaUri = null,
+                                    mediaUri = a.firstTrackMediaId,
                                     albumId = a.albumId,
                                     contentDescription = a.albumName,
-                                    modifier = Modifier.size(48.dp)
+                                    modifier = Modifier.size(48.dp),
+                                    enableOnDemand = true
                                 )
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
@@ -477,7 +478,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                                     mediaUri = t.mediaId,
                                                     albumId = t.albumId,
                                                     contentDescription = t.title,
-                                                    modifier = Modifier.size(40.dp)
+                                                    modifier = Modifier.size(40.dp),
+                                                    enableOnDemand = true
                                                 )
                                             },
                                             modifier = Modifier.clickable {
@@ -541,10 +543,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                             leadingContent = {
                                                 Artwork(
                                                     data = a.artUri,
-                                                    mediaUri = null,
+                                                    mediaUri = a.firstTrackMediaId,
                                                     albumId = a.albumId,
                                                     contentDescription = a.albumName,
-                                                    modifier = Modifier.size(40.dp)
+                                                    modifier = Modifier.size(40.dp),
+                                                    enableOnDemand = true
                                                 )
                                             },
                                             modifier = Modifier.clickable {
@@ -620,7 +623,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             .collectLatest { _ ->
                 val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
                 val uris = visibleTracks.map { it.mediaId }
-                // Simple artwork loading - no preloading needed
+                if (uris.isNotEmpty()) {
+                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(uris)
+                }
             }
     }
 }
