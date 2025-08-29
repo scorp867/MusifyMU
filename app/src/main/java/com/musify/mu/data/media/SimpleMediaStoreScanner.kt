@@ -358,8 +358,8 @@ class SimpleMediaStoreScanner(
 
                             // Basic validation
                             if (duration >= 0) {
-                                // Extract artwork during startup scan (broad query)
-                                val artworkUri = extractAndCacheArtwork(contentUri.toString())
+                                // Skip artwork extraction here as well
+                                val artworkUri: String? = null
                                 
                                 val track = Track(
                                     mediaId = contentUri.toString(),
