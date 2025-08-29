@@ -140,6 +140,22 @@ class PlayerService : MediaLibraryService() {
                         }
                     }
                 }
+
+                override fun onMediaMetadataChanged(metadata: MediaMetadata) {
+                    super.onMediaMetadataChanged(metadata)
+
+                    // Capture artwork bytes unavailable to MediaMetadataRetriever
+                    val bytes = metadata.artworkData
+                    val mediaId = player.currentMediaItem?.mediaId
+                    if (bytes != null && mediaId != null) {
+                        serviceScope.launch(Dispatchers.IO) {
+                            val cached = com.musify.mu.util.OnDemandArtworkLoader.storeArtworkBytes(mediaId, bytes)
+                            if (cached != null) {
+                                try { repo.updateTrackArt(mediaId, cached) } catch (_: Exception) {}
+                            }
+                        }
+                    }
+                }
             })
         } else {
             // If we already have a QueueManager, just update the player reference
