@@ -35,6 +35,8 @@ import androidx.compose.material.ExperimentalMaterialApi
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.util.toMediaItem
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -135,6 +137,22 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 .padding(padding)
                 .fillMaxSize()
         ) {
+            // Prefetch artwork for visible items in playlist
+            LaunchedEffect(reorderState.listState, visualTracks) {
+                snapshotFlow { reorderState.listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                    .distinctUntilChanged()
+                    .collect { visible ->
+                        if (visible.isEmpty() || visualTracks.isEmpty()) return@collect
+                        val min = (visible.minOrNull() ?: 0) - 2
+                        val max = (visible.maxOrNull() ?: 0) + 8
+                        val start = min.coerceAtLeast(0)
+                        val end = max.coerceAtMost(visualTracks.lastIndex)
+                        if (start <= end) {
+                            val ids = visualTracks.subList(start, end + 1).map { it.mediaId }
+                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                        }
+                    }
+            }
             LazyColumn(
                 state = reorderState.listState,
                 modifier = Modifier
@@ -215,6 +233,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                 title = track.title,
                                 subtitle = track.artist,
                                 artData = track.artUri,
+                                mediaUri = track.mediaId,
                                 contentDescription = track.title,
                                 isPlaying = isPlaying,
                                 onClick = { onPlay(visualTracks, idx) },

@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 
 import androidx.compose.material.icons.Icons
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -24,6 +26,7 @@ import com.musify.mu.ui.components.Artwork
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.util.toMediaItem
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -50,8 +53,26 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
             // Choose a single album art (from the album group)
             val albumArt = remember(tracks) { tracks.firstOrNull { it.artUri != null }?.artUri }
 
+            val listState = rememberLazyListState()
+            // Prefetch artwork for visible items
+            LaunchedEffect(listState, tracks) {
+                snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                    .distinctUntilChanged()
+                    .collect { visible ->
+                        if (visible.isEmpty() || tracks.isEmpty()) return@collect
+                        val min = (visible.minOrNull() ?: 0) - 2
+                        val max = (visible.maxOrNull() ?: 0) + 8
+                        val start = min.coerceAtLeast(0)
+                        val end = max.coerceAtMost(tracks.lastIndex)
+                        if (start <= end) {
+                            val ids = tracks.subList(start, end + 1).map { it.mediaId }
+                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                        }
+                    }
+            }
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
+                state = listState,
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 item {
@@ -128,6 +149,7 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                             title = t.title,
                             subtitle = t.artist,
                             artData = t.artUri,
+                            mediaUri = t.mediaId,
                             contentDescription = t.title,
                             isPlaying = isPlaying,
                             useGlass = true,

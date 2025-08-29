@@ -114,6 +114,23 @@ fun LibraryScreen(
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
+    // Prefetch artwork for visible items (and a small window around)
+    LaunchedEffect(listState, visualTracks) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+            .distinctUntilChanged()
+            .collect { visible ->
+                if (visible.isEmpty() || visualTracks.isEmpty()) return@collect
+                val min = (visible.minOrNull() ?: 0) - 2
+                val max = (visible.maxOrNull() ?: 0) + 8
+                val start = min.coerceAtLeast(0)
+                val end = max.coerceAtMost(visualTracks.lastIndex)
+                if (start <= end) {
+                    val ids = visualTracks.subList(start, end + 1).mapNotNull { it.mediaId }
+                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                }
+            }
+    }
+
     // Observe background loading progress and get data from cache
     LaunchedEffect(hasPermissions) {
         android.util.Log.d("LibraryScreen", "LaunchedEffect triggered - hasPermissions: $hasPermissions")
@@ -445,6 +462,7 @@ private fun TrackItem(
                 ) {
                     com.musify.mu.ui.components.SmartArtwork(
                         artworkUri = track.artUri, // Use pre-extracted artwork from database
+                        mediaUri = track.mediaId,
                         contentDescription = track.title,
                         modifier = Modifier.fillMaxSize()
                     )

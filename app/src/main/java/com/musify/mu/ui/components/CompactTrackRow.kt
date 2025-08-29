@@ -83,7 +83,7 @@ fun CompactTrackRow(
                 albumId = null,
                 contentDescription = contentDescription,
                 modifier = Modifier.size(52.dp),
-                enableOnDemand = false
+                enableOnDemand = true
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (showIndicator) {

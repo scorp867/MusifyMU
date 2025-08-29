@@ -33,6 +33,8 @@ import androidx.compose.material.rememberDismissState
 import androidx.compose.material.DismissDirection
 import androidx.compose.material.DismissValue
 import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -87,6 +89,22 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
             val density = LocalDensity.current
 
             Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+                // Prefetch artwork for visible items in favorites list
+                LaunchedEffect(reorderState!!.listState, tracks) {
+                    snapshotFlow { reorderState!!.listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                        .distinctUntilChanged()
+                        .collect { visible ->
+                            if (visible.isEmpty() || tracks.isEmpty()) return@collect
+                            val min = (visible.minOrNull() ?: 0) - 2
+                            val max = (visible.maxOrNull() ?: 0) + 8
+                            val start = min.coerceAtLeast(0)
+                            val end = max.coerceAtMost(tracks.lastIndex)
+                            if (start <= end) {
+                                val ids = tracks.subList(start, end + 1).map { it.mediaId }
+                                com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                            }
+                        }
+                }
                 LazyColumn(
                     state = reorderState!!.listState,
                     modifier = Modifier
@@ -129,6 +147,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                     title = track.title,
                                     subtitle = track.artist,
                                     artData = track.artUri,
+                                    mediaUri = track.mediaId,
                                     contentDescription = track.title,
                                     isPlaying = isPlaying,
                                     showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),
@@ -159,10 +178,28 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         } else {
             val queueOps = rememberQueueOperations()
             val queueOpsScope = rememberCoroutineScope()
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+            // Prefetch artwork for visible items
+            LaunchedEffect(listState, tracks) {
+                snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                    .distinctUntilChanged()
+                    .collect { visible ->
+                        if (visible.isEmpty() || tracks.isEmpty()) return@collect
+                        val min = (visible.minOrNull() ?: 0) - 2
+                        val max = (visible.maxOrNull() ?: 0) + 8
+                        val start = min.coerceAtLeast(0)
+                        val end = max.coerceAtMost(tracks.lastIndex)
+                        if (start <= end) {
+                            val ids = tracks.subList(start, end + 1).map { it.mediaId }
+                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                        }
+                    }
+            }
             LazyColumn(
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize(),
+                state = listState,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -191,6 +228,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                                 title = track.title,
                                 subtitle = track.artist,
                                 artData = track.artUri,
+                                mediaUri = track.mediaId,
                                 contentDescription = track.title,
                                 isPlaying = isPlaying,
                                 showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId),

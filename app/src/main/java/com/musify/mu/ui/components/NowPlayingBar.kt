@@ -189,7 +189,7 @@ fun NowPlayingBar(
                     mediaUri = currentTrack.mediaId,
                     cacheKey = null,
                     albumId = currentTrack.albumId,
-                    enableOnDemand = false
+                    enableOnDemand = true
                 ) {
                     if (isPlaying) {
                         Box(modifier = Modifier.matchParentSize()) {
