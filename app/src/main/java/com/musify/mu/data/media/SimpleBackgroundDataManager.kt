@@ -66,13 +66,10 @@ class SimpleBackgroundDataManager private constructor(
             _loadingState.value = LoadingState.Loading("Scanning music library and extracting artwork...")
             Log.d(TAG, "Starting ONE-TIME app launch initialization with artwork extraction...")
             
-            // Stream results as they scan so UI can show progressively
-            val tracks = mutableListOf<com.musify.mu.data.db.entities.Track>()
-            val final = scanner.scanTracksStreaming { partial ->
-                _cachedTracks.value = partial
-            }
-            tracks.addAll(final)
-            Log.d(TAG, "Initial scan completed: ${tracks.size} tracks with artwork extraction")
+            // Lightweight scan without artwork extraction
+            val tracks = scanner.scanTracks().toMutableList()
+            _cachedTracks.value = tracks
+            Log.d(TAG, "Initial scan completed: ${tracks.size} tracks (no artwork extraction)")
             
             if (tracks.isNotEmpty()) {
                 // Store in memory cache - this is what the UI will use
