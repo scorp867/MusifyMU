@@ -152,6 +152,7 @@ class PlayerService : MediaLibraryService() {
                             val cached = com.musify.mu.util.OnDemandArtworkLoader.storeArtworkBytes(mediaId, bytes)
                             if (cached != null) {
                                 try { repo.updateTrackArt(mediaId, cached) } catch (_: Exception) {}
+                                com.musify.mu.util.OnDemandArtworkLoader.cacheUri(mediaId, cached)
                             }
                         }
                     }
