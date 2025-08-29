@@ -270,6 +270,21 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
 
             // Floating overlay removed per request
         }
+
+        // Prefetch artwork for visible playlist items
+        LaunchedEffect(reorderState.listState, visualTracks) {
+            snapshotFlow { reorderState.listState.layoutInfo.visibleItemsInfo }
+                .distinctUntilChanged()
+                .collectLatest { visibleItems ->
+                    if (visibleItems.isEmpty()) return@collectLatest
+                    val start = (visibleItems.minOf { it.index } - 5).coerceAtLeast(0)
+                    val end = (visibleItems.maxOf { it.index } + 5).coerceAtMost(visualTracks.lastIndex)
+                    if (start <= end && visualTracks.isNotEmpty()) {
+                        val uris = visualTracks.subList(start, end + 1).map { it.mediaId }
+                        com.musify.mu.util.OnDemandArtworkLoader.prefetch(uris)
+                    }
+                }
+        }
     }
 
     if (showPicker) {

@@ -47,7 +47,8 @@ fun TrackPickerSheet(
                                 mediaUri = t.mediaId,
                                 albumId = t.albumId,
                                 contentDescription = t.title,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(40.dp),
+                                enableOnDemand = true
                             )
                         },
                         trailingContent = {
