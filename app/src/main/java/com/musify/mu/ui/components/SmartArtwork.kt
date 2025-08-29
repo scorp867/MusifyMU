@@ -79,11 +79,16 @@ fun SmartArtwork(
         )
 
         var imageData by remember { mutableStateOf<String?>(artworkUri) }
+        var attempted by remember { mutableStateOf(false) }
 
-        // Trigger on-demand load if needed
+        // Trigger on-demand load once per composition to avoid endless retries
         LaunchedEffect(key1 = artworkUri, key2 = mediaUri) {
-            if (imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
-                imageData = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+            if (!attempted && imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
+                attempted = true
+                val loaded = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+                if (!loaded.isNullOrBlank()) {
+                    imageData = loaded
+                }
             }
         }
 

@@ -19,39 +19,39 @@ class SimpleBackgroundDataManager private constructor(
     private val context: Context,
     private val db: AppDatabase
 ) {
-    
+
     companion object {
         private const val TAG = "SimpleBackgroundDataManager"
-        
+
         @Volatile
         private var INSTANCE: SimpleBackgroundDataManager? = null
-        
+
         fun get(context: Context, db: AppDatabase): SimpleBackgroundDataManager {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: SimpleBackgroundDataManager(context, db).also { INSTANCE = it }
             }
         }
     }
-    
+
     // In-memory cache - this is the single source of truth
     private val _cachedTracks = MutableStateFlow<List<Track>>(emptyList())
     val cachedTracks: StateFlow<List<Track>> = _cachedTracks.asStateFlow()
-    
+
     // Loading state
     private val _loadingState = MutableStateFlow<LoadingState>(LoadingState.Idle)
     val loadingState: StateFlow<LoadingState> = _loadingState.asStateFlow()
-    
+
     // Scanner instance
     private val scanner = SimpleMediaStoreScanner(context, db)
-    
+
     // Note: Artwork is handled by ExoPlayer and Coil, not extracted during scan
-    
+
     // Track if we've already initialized
     private var isInitialized = false
-    
+
     // Coroutine scope for background operations
     private val scope = CoroutineScope(SupervisorJob())
-    
+
     /**
      * Initialize data loading ONCE at app launch
      * This is the ONLY time we query MediaStore
@@ -61,39 +61,36 @@ class SimpleBackgroundDataManager private constructor(
             Log.d(TAG, "Already initialized, using cached data")
             return
         }
-        
+
         try {
             _loadingState.value = LoadingState.Loading("Scanning music library and extracting artwork...")
             Log.d(TAG, "Starting ONE-TIME app launch initialization with artwork extraction...")
-            
-            // Stream results as they scan so UI can show progressively
-            val tracks = mutableListOf<com.musify.mu.data.db.entities.Track>()
-            val final = scanner.scanTracksStreaming { partial ->
-                _cachedTracks.value = partial
-            }
-            tracks.addAll(final)
-            Log.d(TAG, "Initial scan completed: ${tracks.size} tracks with artwork extraction")
-            
+
+            // Lightweight scan without artwork extraction
+            val tracks = scanner.scanTracks().toMutableList()
+            _cachedTracks.value = tracks
+            Log.d(TAG, "Initial scan completed: ${tracks.size} tracks (no artwork extraction)")
+
             if (tracks.isNotEmpty()) {
                 // Store in memory cache - this is what the UI will use
                 _cachedTracks.value = tracks
                 Log.d(TAG, "Tracks cached in memory: ${_cachedTracks.value.size}")
-                
+
                 // Log sample track details for debugging
                 val sampleTrack = tracks.first()
                 Log.d(TAG, "Sample track - Title: ${sampleTrack.title}, Artist: ${sampleTrack.artist}, Album: ${sampleTrack.album}, AlbumID: ${sampleTrack.albumId}, ArtworkURI: ${sampleTrack.artUri}")
-                
+
                 // Cache to database for persistence (including artwork URIs)
                 Log.d(TAG, "Caching ${tracks.size} tracks with artwork to database for persistence...")
                 db.dao().upsertTracks(tracks)
-                
+
                 _loadingState.value = LoadingState.Completed(tracks.size)
                 Log.d(TAG, "App launch initialization completed: ${tracks.size} tracks with artwork cached in memory")
             } else {
                 _loadingState.value = LoadingState.Completed(0)
                 Log.w(TAG, "No tracks found during initialization")
             }
-            
+
             // Register content observer for real-time updates ONLY
             scanner.registerContentObserver {
                 Log.d(TAG, "MediaStore changed - refreshing cache...")
@@ -101,16 +98,16 @@ class SimpleBackgroundDataManager private constructor(
                     refreshTracksFromMediaStore()
                 }
             }
-            
+
             isInitialized = true
             Log.d(TAG, "Data manager initialized successfully")
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error during app launch initialization", e)
             _loadingState.value = LoadingState.Error(e.message ?: "Initialization failed")
         }
     }
-    
+
     /**
      * Ensure data manager is initialized - this is called by the UI when needed
      */
@@ -120,7 +117,7 @@ class SimpleBackgroundDataManager private constructor(
             initializeOnAppLaunch()
         }
     }
-    
+
     /**
      * Get all tracks from memory cache - NO database query
      */
@@ -129,28 +126,28 @@ class SimpleBackgroundDataManager private constructor(
         Log.d(TAG, "getAllTracks called, returning ${tracks.size} tracks")
         return tracks
     }
-    
+
     /**
      * Get tracks by album from memory cache - NO database query
      */
     fun getTracksByAlbum(albumId: Long?): List<Track> {
         return _cachedTracks.value.filter { it.albumId == albumId }
     }
-    
+
     /**
      * Search tracks in memory cache - NO database query
      */
     fun searchTracks(query: String): List<Track> {
         if (query.isBlank()) return _cachedTracks.value
-        
+
         val lowercaseQuery = query.lowercase()
         return _cachedTracks.value.filter { track ->
             track.title.lowercase().contains(lowercaseQuery) ||
-            track.artist.lowercase().contains(lowercaseQuery) ||
-            track.album.lowercase().contains(lowercaseQuery)
+                    track.artist.lowercase().contains(lowercaseQuery) ||
+                    track.album.lowercase().contains(lowercaseQuery)
         }
     }
-    
+
     /**
      * Get unique albums from memory cache - NO database query
      */
@@ -170,7 +167,7 @@ class SimpleBackgroundDataManager private constructor(
             }
             .sortedBy { it.albumName.lowercase() }
     }
-    
+
     /**
      * Refresh tracks ONLY when MediaStore actually changes
      * This includes extracting artwork for new tracks and cleaning up deleted tracks
@@ -178,25 +175,25 @@ class SimpleBackgroundDataManager private constructor(
     private suspend fun refreshTracksFromMediaStore() {
         try {
             Log.d(TAG, "Refreshing tracks with artwork extraction due to MediaStore change...")
-            
+
             // Query MediaStore for changes and extract artwork for new tracks
             val newTracks = scanner.scanTracks()
             Log.d(TAG, "Refresh scan completed: ${newTracks.size} tracks with artwork")
-            
+
             // Update memory cache
             _cachedTracks.value = newTracks
-            
+
             // Update database for persistence (including artwork URIs)
             if (newTracks.isNotEmpty()) {
                 db.dao().upsertTracks(newTracks)
                 Log.d(TAG, "Cache and database updated with ${newTracks.size} tracks with artwork")
-                
+
                 // Clean up orphaned database entries for deleted tracks
                 try {
                     val currentTrackIds = newTracks.map { it.mediaId }.toSet()
                     val allDatabaseTracks = db.dao().getAllTracks()
                     val orphanedTrackIds = allDatabaseTracks.map { it.mediaId }.filter { !currentTrackIds.contains(it) }
-                    
+
                     if (orphanedTrackIds.isNotEmpty()) {
                         Log.d(TAG, "Cleaning up ${orphanedTrackIds.size} orphaned tracks from database")
                         // Note: This would require additional DAO methods to clean up related data
@@ -206,14 +203,14 @@ class SimpleBackgroundDataManager private constructor(
                     Log.w(TAG, "Failed to clean up orphaned tracks", e)
                 }
             }
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error refreshing tracks", e)
         }
     }
-    
+
     // Artwork is extracted once during startup and cached permanently
-    
+
     /**
      * Force refresh (for manual refresh button if needed)
      */
@@ -222,12 +219,12 @@ class SimpleBackgroundDataManager private constructor(
             Log.w(TAG, "Cannot force refresh before initialization")
             return
         }
-        
+
         scope.launch {
             refreshTracksFromMediaStore()
         }
     }
-    
+
     /**
      * Clear cache (for testing or memory management)
      */
@@ -235,7 +232,7 @@ class SimpleBackgroundDataManager private constructor(
         _cachedTracks.value = emptyList()
         Log.d(TAG, "Memory cache cleared")
     }
-    
+
     /**
      * Clean up resources
      */
@@ -243,7 +240,7 @@ class SimpleBackgroundDataManager private constructor(
         scanner.unregisterContentObserver()
         Log.d(TAG, "Data manager cleaned up, content observer unregistered")
     }
-    
+
 
 }
 
