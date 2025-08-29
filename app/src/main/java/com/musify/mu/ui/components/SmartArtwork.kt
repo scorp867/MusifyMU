@@ -1,6 +1,7 @@
 package com.musify.mu.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material.icons.Icons
@@ -124,7 +125,7 @@ fun SmartArtwork(
             )
             
             // Display the image
-            androidx.compose.foundation.Image(
+            Image(
                 painter = painter,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
@@ -214,8 +215,8 @@ fun EnhancedSmartArtwork(
         when {
             bitmapFromCache != null -> {
                 // Use bitmap directly from ArtworkManager cache
-                androidx.compose.foundation.Image(
-                    bitmap = androidx.compose.ui.graphics.asImageBitmap(bitmapFromCache!!),
+                Image(
+                    bitmap = bitmapFromCache!!.asImageBitmap(),
                     contentDescription = contentDescription,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -243,7 +244,7 @@ fun EnhancedSmartArtwork(
                         .build()
                 )
                 
-                androidx.compose.foundation.Image(
+                Image(
                     painter = painter,
                     contentDescription = contentDescription,
                     modifier = Modifier.fillMaxSize(),
