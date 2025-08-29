@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.collectAsState
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -80,22 +81,47 @@ fun SmartArtwork(
 
         var imageData by remember { mutableStateOf<String?>(artworkUri) }
 
-        // Trigger on-demand load if needed
-        LaunchedEffect(key1 = artworkUri, key2 = mediaUri) {
+        // Observe Media3/loader-provided artwork for this mediaUri
+        val observedLoaderArt: String? = remember(mediaUri) {
+            if (mediaUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri)
+        }
+        val loaderArtState = if (!mediaUri.isNullOrBlank()) {
+            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri!!).collectAsState(initial = observedLoaderArt)
+        } else {
+            remember { mutableStateOf<String?>(null) }
+        }
+        val loaderFlowValue = loaderArtState.value
+
+        // Prioritize explicit artwork from track, otherwise use loader-provided art
+        LaunchedEffect(artworkUri) {
+            if (!artworkUri.isNullOrBlank()) {
+                imageData = artworkUri
+            }
+        }
+        LaunchedEffect(loaderFlowValue) {
+            if (imageData.isNullOrBlank() && !loaderFlowValue.isNullOrBlank()) {
+                imageData = loaderFlowValue
+            }
+        }
+
+        // Trigger one-time extraction if still missing and mediaUri available
+        LaunchedEffect(key1 = imageData, key2 = mediaUri) {
             if (imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
-                imageData = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+                val extracted = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+                if (!extracted.isNullOrBlank()) imageData = extracted
             }
         }
 
         if (imageData != null) {
             // Create image painter with multiple fallback strategies
+            val enableCrossfade = !imageData.isNullOrBlank()
             val painter = rememberAsyncImagePainter(
                 model = ImageRequest.Builder(context)
                     .data(imageData)
                     .dispatcher(Dispatchers.IO)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
-                    .crossfade(300)
+                    .apply { if (enableCrossfade) crossfade(300) else crossfade(false) }
                     .size(Size.ORIGINAL)
                     .scale(Scale.FIT)
                     .listener(

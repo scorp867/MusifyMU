@@ -24,6 +24,7 @@ import coil.request.ImageRequest
 import coil.request.CachePolicy
 import coil.size.Size
 import coil.size.Scale
+import androidx.compose.runtime.collectAsState
 import com.musify.mu.R
 import android.content.ContentUris
 import android.provider.MediaStore
@@ -56,34 +57,25 @@ fun SimpleArtwork(
         android.util.Log.d("SimpleArtwork", "SimpleArtwork created - albumId: $albumId, trackUri: $trackUri, artUri: $artUri, cacheKey: $cacheKey")
     }
     
-    // Create image data using multiple sources like ExoPlayer does
-    val imageData = remember(artUri, albumId, trackUri) {
+    // Observe loader-provided artwork bound to trackUri (mediaId)
+    val loaderCached = remember(trackUri) {
+        if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(trackUri)
+    }
+    val loaderFlow = remember(trackUri) {
+        if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(trackUri)
+    }
+    val loaderArt by (loaderFlow?.collectAsState(initial = loaderCached)
+        ?: remember { mutableStateOf<String?>(null) })
+
+    // Resolve image data preference: explicit artUri > loaderArt > albumId MediaStore
+    val imageData = remember(artUri, loaderArt, albumId) {
         when {
-            !artUri.isNullOrBlank() -> {
-                // Use cached artwork URI - this is the primary source
-                android.util.Log.d("SimpleArtwork", "Using cached artwork URI: $artUri")
-                android.net.Uri.parse(artUri)
-            }
-            albumId != null -> {
-                // Try ExoPlayer's approach: use MediaStore album art URI directly
-                try {
-                    val albumArtUri = android.net.Uri.parse("content://media/external/audio/albumart/$albumId")
-                    android.util.Log.d("SimpleArtwork", "Using MediaStore album art URI: $albumArtUri for album ID: $albumId")
-                    albumArtUri
-                } catch (e: Exception) {
-                    android.util.Log.w("SimpleArtwork", "Failed to create MediaStore album art URI for album $albumId", e)
-                    R.drawable.ic_music_note
-                }
-            }
-            !trackUri.isNullOrBlank() -> {
-                // Last resort: try to extract artwork from the track URI itself (like ExoPlayer does)
-                android.util.Log.d("SimpleArtwork", "Trying to extract artwork from track URI: $trackUri")
-                android.net.Uri.parse(trackUri)
-            }
-            else -> {
-                android.util.Log.d("SimpleArtwork", "No artwork data available, using default icon")
-                R.drawable.ic_music_note
-            }
+            !artUri.isNullOrBlank() -> android.net.Uri.parse(artUri)
+            !loaderArt.isNullOrBlank() -> android.net.Uri.parse(loaderArt)
+            albumId != null -> try {
+                android.net.Uri.parse("content://media/external/audio/albumart/$albumId")
+            } catch (_: Exception) { R.drawable.ic_music_note }
+            else -> R.drawable.ic_music_note
         }
     }
     
@@ -113,24 +105,22 @@ fun SimpleArtwork(
         AsyncImage(
             model = ImageRequest.Builder(context)
                 .data(imageData)
-                .memoryCacheKey(cacheKey)
-                .diskCacheKey(cacheKey)
+                .apply { if (cacheKey != "unknown") { memoryCacheKey(cacheKey); diskCacheKey(cacheKey) } }
                 .memoryCachePolicy(CachePolicy.ENABLED)
                 .diskCachePolicy(CachePolicy.ENABLED)
                 .dispatcher(Dispatchers.IO)
-                .crossfade(200)
+                .apply {
+                    val enableCrossfade = imageData !is Int
+                    if (enableCrossfade) crossfade(250) else crossfade(false)
+                }
                 .error(R.drawable.ic_music_note)
                 .placeholder(R.drawable.ic_music_note)
                 .fallback(R.drawable.ic_music_note)
                 .size(Size.ORIGINAL)
                 .scale(Scale.FIT)
                 .listener(
-                    onError = { _, _ ->
-                        hasError = true
-                    },
-                    onSuccess = { _, _ ->
-                        hasError = false
-                    }
+                    onError = { _, _ -> hasError = true },
+                    onSuccess = { _, _ -> hasError = false }
                 )
                 .build(),
             contentDescription = contentDescription,
