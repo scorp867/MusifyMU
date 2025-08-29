@@ -12,8 +12,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Efficient data manager that caches tracks in memory and only queries MediaStore once at launch.
- * Uses content observer for real-time updates without constant database queries.
+ * Ultra-responsive data manager optimized for smooth UI performance.
+ * Features:
+ * - Fast initial load without artwork extraction
+ * - Background artwork loading for visible items only
+ * - Immediate UI responsiveness
+ * - Memory-efficient caching
  */
 class SimpleBackgroundDataManager private constructor(
     private val context: Context,
@@ -44,7 +48,7 @@ class SimpleBackgroundDataManager private constructor(
     // Scanner instance
     private val scanner = SimpleMediaStoreScanner(context, db)
     
-    // Note: Artwork is handled by ExoPlayer and Coil, not extracted during scan
+    // Note: Artwork is handled by ArtworkManager on-demand for better UI responsiveness
     
     // Track if we've already initialized
     private var isInitialized = false
@@ -53,8 +57,7 @@ class SimpleBackgroundDataManager private constructor(
     private val scope = CoroutineScope(SupervisorJob())
     
     /**
-     * Initialize data loading ONCE at app launch
-     * This is the ONLY time we query MediaStore
+     * Ultra-fast initialization without artwork extraction for immediate UI response
      */
     suspend fun initializeOnAppLaunch() {
         if (isInitialized) {
@@ -63,16 +66,19 @@ class SimpleBackgroundDataManager private constructor(
         }
         
         try {
-            _loadingState.value = LoadingState.Loading("Scanning music library and extracting artwork...")
-            Log.d(TAG, "Starting ONE-TIME app launch initialization with artwork extraction...")
+            _loadingState.value = LoadingState.Loading("Scanning music library...")
+            Log.d(TAG, "Starting FAST app launch initialization (no artwork extraction)...")
             
-            // Stream results as they scan so UI can show progressively
-            val tracks = mutableListOf<com.musify.mu.data.db.entities.Track>()
-            val final = scanner.scanTracksStreaming { partial ->
-                _cachedTracks.value = partial
+            // First, try to load from database cache for instant UI
+            val cachedTracksFromDb = db.dao().getAllTracks()
+            if (cachedTracksFromDb.isNotEmpty()) {
+                _cachedTracks.value = cachedTracksFromDb
+                Log.d(TAG, "Loaded ${cachedTracksFromDb.size} tracks from database cache for instant UI")
             }
-            tracks.addAll(final)
-            Log.d(TAG, "Initial scan completed: ${tracks.size} tracks with artwork extraction")
+            
+            // Then, perform fast MediaStore scan without artwork extraction
+            val tracks = scanner.scanTracksWithoutArtwork()
+            Log.d(TAG, "Fast scan completed: ${tracks.size} tracks (no artwork extraction)")
             
             if (tracks.isNotEmpty()) {
                 // Store in memory cache - this is what the UI will use
@@ -81,14 +87,14 @@ class SimpleBackgroundDataManager private constructor(
                 
                 // Log sample track details for debugging
                 val sampleTrack = tracks.first()
-                Log.d(TAG, "Sample track - Title: ${sampleTrack.title}, Artist: ${sampleTrack.artist}, Album: ${sampleTrack.album}, AlbumID: ${sampleTrack.albumId}, ArtworkURI: ${sampleTrack.artUri}")
+                Log.d(TAG, "Sample track - Title: ${sampleTrack.title}, Artist: ${sampleTrack.artist}, Album: ${sampleTrack.album}, AlbumID: ${sampleTrack.albumId}")
                 
-                // Cache to database for persistence (including artwork URIs)
-                Log.d(TAG, "Caching ${tracks.size} tracks with artwork to database for persistence...")
+                // Cache to database for persistence (fast, no artwork)
+                Log.d(TAG, "Caching ${tracks.size} tracks to database for persistence...")
                 db.dao().upsertTracks(tracks)
                 
                 _loadingState.value = LoadingState.Completed(tracks.size)
-                Log.d(TAG, "App launch initialization completed: ${tracks.size} tracks with artwork cached in memory")
+                Log.d(TAG, "Fast initialization completed: ${tracks.size} tracks cached (artwork loaded on-demand)")
             } else {
                 _loadingState.value = LoadingState.Completed(0)
                 Log.w(TAG, "No tracks found during initialization")
@@ -164,7 +170,7 @@ class SimpleBackgroundDataManager private constructor(
                     albumName = firstTrack.album,
                     artistName = firstTrack.artist,
                     trackCount = tracks.size,
-                    // Use first track's art URI (extracted during initialization)
+                    // Artwork will be loaded on-demand when needed
                     artUri = firstTrack.artUri
                 )
             }
@@ -172,24 +178,23 @@ class SimpleBackgroundDataManager private constructor(
     }
     
     /**
-     * Refresh tracks ONLY when MediaStore actually changes
-     * This includes extracting artwork for new tracks and cleaning up deleted tracks
+     * Fast refresh when MediaStore changes - no artwork extraction for UI responsiveness
      */
     private suspend fun refreshTracksFromMediaStore() {
         try {
-            Log.d(TAG, "Refreshing tracks with artwork extraction due to MediaStore change...")
+            Log.d(TAG, "Fast refresh due to MediaStore change (no artwork extraction)...")
             
-            // Query MediaStore for changes and extract artwork for new tracks
-            val newTracks = scanner.scanTracks()
-            Log.d(TAG, "Refresh scan completed: ${newTracks.size} tracks with artwork")
+            // Fast scan without artwork extraction for immediate response
+            val newTracks = scanner.scanTracksWithoutArtwork()
+            Log.d(TAG, "Refresh scan completed: ${newTracks.size} tracks (fast mode)")
             
             // Update memory cache
             _cachedTracks.value = newTracks
             
-            // Update database for persistence (including artwork URIs)
+            // Update database for persistence (fast, no artwork)
             if (newTracks.isNotEmpty()) {
                 db.dao().upsertTracks(newTracks)
-                Log.d(TAG, "Cache and database updated with ${newTracks.size} tracks with artwork")
+                Log.d(TAG, "Cache and database updated with ${newTracks.size} tracks (fast mode)")
                 
                 // Clean up orphaned database entries for deleted tracks
                 try {
@@ -212,7 +217,7 @@ class SimpleBackgroundDataManager private constructor(
         }
     }
     
-    // Artwork is extracted once during startup and cached permanently
+    // Artwork is loaded on-demand via ArtworkManager for better performance
     
     /**
      * Force refresh (for manual refresh button if needed)
