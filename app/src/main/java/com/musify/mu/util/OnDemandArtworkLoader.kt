@@ -34,6 +34,14 @@ object OnDemandArtworkLoader {
 
     private val inMemoryCache: LruCache<String, String> = object : LruCache<String, String>(MAX_MEMORY_ENTRIES) {}
 
+    // Sentinel for failed extraction so we don't retry every scroll
+    private const val NONE_SENTINEL = "__NONE__"
+
+    /** Put a uri (or sentinel) directly into memory cache */
+    fun cacheUri(mediaUri: String, artUri: String?) {
+        inMemoryCache.put(mediaUri, artUri ?: NONE_SENTINEL)
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val diskDir: File by lazy {
@@ -62,7 +70,9 @@ object OnDemandArtworkLoader {
     suspend fun loadArtwork(mediaUri: String?): String? {
         if (mediaUri.isNullOrBlank()) return null
         // quick memory lookup
-        inMemoryCache.get(mediaUri)?.let { return it }
+        inMemoryCache.get(mediaUri)?.let { cached ->
+            return if (cached == NONE_SENTINEL) null else cached
+        }
         return withContext(Dispatchers.IO) {
             // disk lookup
             val cacheFile = File(diskDir, mediaUri.md5() + ".jpg")
@@ -78,7 +88,10 @@ object OnDemandArtworkLoader {
                 when {
                     mediaUri.startsWith("content://") -> retriever.setDataSource(appContext, Uri.parse(mediaUri))
                     mediaUri.startsWith("/") -> retriever.setDataSource(mediaUri)
-                    else -> return@withContext null
+                    else -> {
+                        inMemoryCache.put(mediaUri, NONE_SENTINEL)
+                        return@withContext null
+                    }
                 }
                 val artworkBytes = retriever.embeddedPicture ?: return@withContext null
                 val bmp = BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size) ?: return@withContext null
