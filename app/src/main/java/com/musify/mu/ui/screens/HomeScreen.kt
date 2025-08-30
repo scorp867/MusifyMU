@@ -5,7 +5,6 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -98,8 +97,16 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val listState = rememberLazyListState()
 
     // LazyPagingItems for all tracks (alphabetical)
+    // Increase initial load size and enable placeholders for faster perceived loading
     val pagingItems: androidx.paging.compose.LazyPagingItems<Track> = remember {
-        Pager(PagingConfig(pageSize = 40, prefetchDistance = 10)) {
+        Pager(
+            config = PagingConfig(
+                pageSize = 50,
+                prefetchDistance = 20,
+                initialLoadSize = 100, // Load more items initially
+                enablePlaceholders = true // Show placeholders while loading
+            )
+        ) {
             repo.pagingSource()
         }.flow
     }.collectAsLazyPagingItems()
@@ -334,7 +341,51 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         item?.mediaId ?: "placeholder_$i"
                     }) { idx ->
                         val t = pagingItems[idx]
-                        if (t == null) return@items // Placeholder while loading
+                        if (t == null) {
+                            // Show loading placeholder
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(60.dp)
+                                    .padding(horizontal = 12.dp, vertical = 2.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Placeholder for artwork
+                                    Box(
+                                        modifier = Modifier
+                                            .size(52.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        // Placeholder for title
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.7f)
+                                                .height(20.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        // Placeholder for subtitle
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.5f)
+                                                .height(16.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+                                        )
+                                    }
+                                }
+                            }
+                            return@items
+                        }
                         val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
 
                         // Add queue operations for swipe gestures

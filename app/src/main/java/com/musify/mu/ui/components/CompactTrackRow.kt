@@ -83,7 +83,8 @@ fun CompactTrackRow(
                 albumId = null,
                 contentDescription = contentDescription,
                 modifier = Modifier.size(52.dp),
-                enableOnDemand = true
+                enableOnDemand = true,
+                cacheKey = mediaUri // Add stable cache key to prevent re-loading
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (showIndicator) {
