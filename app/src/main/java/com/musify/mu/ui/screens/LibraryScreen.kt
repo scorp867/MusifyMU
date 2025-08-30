@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import com.musify.mu.playback.LocalMediaController
 import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
@@ -445,6 +446,7 @@ private fun TrackItem(
                 ) {
                     com.musify.mu.ui.components.SmartArtwork(
                         artworkUri = track.artUri, // Use pre-extracted artwork from database
+                        mediaUri = track.mediaId,
                         contentDescription = track.title,
                         modifier = Modifier.fillMaxSize()
                     )
@@ -575,6 +577,21 @@ private fun TrackItem(
                 }
             }
         }
+    }
+
+    // Prefetch artwork for items around the viewport
+    LaunchedEffect(listState, visualTracks) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.toList() }
+            .distinctUntilChanged()
+            .collectLatest { visibleItems: List<LazyListItemInfo> ->
+                if (visibleItems.isEmpty()) return@collectLatest
+                val start = (visibleItems.minOf { it.index } - 5).coerceAtLeast(0)
+                val end = (visibleItems.maxOf { it.index } + 5).coerceAtMost(visualTracks.lastIndex)
+                if (start <= end && visualTracks.isNotEmpty()) {
+                    val prefetchUris: List<String> = visualTracks.subList(start, end + 1).map { it.mediaId }
+                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(prefetchUris)
+                }
+            }
     }
 }
 

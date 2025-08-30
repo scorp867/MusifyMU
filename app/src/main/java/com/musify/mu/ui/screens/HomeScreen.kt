@@ -477,7 +477,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                                     mediaUri = t.mediaId,
                                                     albumId = t.albumId,
                                                     contentDescription = t.title,
-                                                    modifier = Modifier.size(40.dp)
+                                                    modifier = Modifier.size(40.dp),
+                                                    enableOnDemand = true
                                                 )
                                             },
                                             modifier = Modifier.clickable {
@@ -620,7 +621,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             .collectLatest { _ ->
                 val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
                 val uris = visibleTracks.map { it.mediaId }
-                // Simple artwork loading - no preloading needed
+                com.musify.mu.util.OnDemandArtworkLoader.prefetch(uris)
             }
     }
 }
@@ -765,6 +766,21 @@ private fun AnimatedCarousel(
                         }
                     )
                 }
+            }
+
+            // Prefetch artwork for visible items in this row (with small lookahead)
+            LaunchedEffect(rowScrollState, data) {
+                snapshotFlow { rowScrollState.layoutInfo.visibleItemsInfo.toList() }
+                    .distinctUntilChanged()
+                    .collectLatest { visibleItems: List<androidx.compose.foundation.lazy.LazyListItemInfo> ->
+                        if (visibleItems.isEmpty()) return@collectLatest
+                        val start = (visibleItems.minOf { it.index } - 3).coerceAtLeast(0)
+                        val end = (visibleItems.maxOf { it.index } + 3).coerceAtMost(data.lastIndex)
+                        if (start <= end && data.isNotEmpty()) {
+                            val uris = data.subList(start, end + 1).map { it.mediaId }
+                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(uris)
+                        }
+                    }
             }
         }
     }
