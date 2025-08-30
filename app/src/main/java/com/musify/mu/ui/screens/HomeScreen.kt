@@ -227,6 +227,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val themeManager = remember { com.musify.mu.ui.theme.AppThemeManager.getInstance(context) }
     val customLayoutEnabled = themeManager.customLayoutEnabled
     val homeLayoutOrder by remember { mutableStateOf(themeManager.homeLayoutConfigState) }
+    val listsMode by themeManager.listsDisplayModeState
 
     // Derived data for section lists
     val tracksFiltered = remember(cachedTracks) { cachedTracks }
@@ -265,10 +266,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         .background(MaterialTheme.colorScheme.surface)
                 ) {
                     val tabs = listOf("LISTS", "SONGS", "ARTISTS", "ALBUMS")
-                    // Prepare lists display mode outside of per-tab loop to avoid composable misuse
-                    val ctxTop = androidx.compose.ui.platform.LocalContext.current
-                    val themeManagerTop = remember(ctxTop) { com.musify.mu.ui.theme.AppThemeManager.getInstance(ctxTop) }
-                    val listsModeTop by themeManagerTop.listsDisplayModeState
 
                     TabRow(
                         selectedTabIndex = selectedSection,
@@ -288,15 +285,15 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             )
                             if (isListsTab) {
                                 DropdownMenu(expanded = showListsModeMenu, onDismissRequest = { showListsModeMenu = false }) {
-                                    if (listsModeTop == "carousel") {
+                                    if (listsMode == "carousel") {
                                         DropdownMenuItem(text = { Text("Switch to List mode") }, onClick = {
                                             showListsModeMenu = false
-                                            scope.launch { themeManagerTop.setListsDisplayMode("list") }
+                                            scope.launch { themeManager.setListsDisplayMode("list") }
                                         })
                                     } else {
                                         DropdownMenuItem(text = { Text("Switch to Carousel mode") }, onClick = {
                                             showListsModeMenu = false
-                                            scope.launch { themeManagerTop.setListsDisplayMode("carousel") }
+                                            scope.launch { themeManager.setListsDisplayMode("carousel") }
                                         })
                                     }
                                 }
@@ -312,8 +309,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         items(3) { ShimmerCarousel() }
                     } else {
                         val listsOrder = if (customLayoutEnabled) homeLayoutOrder.value else listOf("welcome","recentlyPlayed","recentlyAdded","favorites","playlists")
-                        // Reuse lists mode from sticky header
-                        if (listsModeTop == "list") {
+                        // Use top-level lists mode state
+                        if (listsMode == "list") {
                             // Minimal list mode: show only list names, navigate on tap
                             items(listsOrder.size) { idx ->
                                 val key = listsOrder[idx]
