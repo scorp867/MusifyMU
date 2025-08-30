@@ -24,6 +24,7 @@ import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import coil.request.CachePolicy
 import coil.size.Size
+import coil.request.ImageResult
 import com.musify.mu.util.OptimizedArtworkLoader
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -53,7 +54,7 @@ fun OptimizedArtwork(
         } else null
     }
     
-    // Get artwork URI from optimized loader
+    // Get artwork URI from optimized loader (only if not permanently failed)
     val artworkUri by OptimizedArtworkLoader.artworkFlow(mediaUri ?: "").collectAsStateWithLifecycle()
     
     // Determine the best artwork source (custom image has priority)
@@ -61,10 +62,17 @@ fun OptimizedArtwork(
         customImageUri ?: artworkUri ?: albumArtUri
     }
     
-    // Trigger loading if not cached
+    // Stable state to prevent flickering
+    var isLoadingStable by remember { mutableStateOf(false) }
+    
+    // Trigger loading if not cached and not permanently failed
     LaunchedEffect(mediaUri) {
-        if (!mediaUri.isNullOrBlank() && OptimizedArtworkLoader.getCachedUri(mediaUri) == null) {
-            OptimizedArtworkLoader.loadArtwork(mediaUri)
+        if (!mediaUri.isNullOrBlank() && !OptimizedArtworkLoader.hasPermanentlyFailed(mediaUri)) {
+            val cached = OptimizedArtworkLoader.getCachedUri(mediaUri)
+            // Only trigger loading if we don't have anything cached
+            if (cached == null) {
+                OptimizedArtworkLoader.loadArtwork(mediaUri)
+            }
         }
     }
     
@@ -76,11 +84,18 @@ fun OptimizedArtwork(
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
                     .size(Size.ORIGINAL)
-                    .crossfade(150)
+                    .crossfade(if (isLoadingStable) 0 else 150) // Reduce crossfade during loading
+                    .listener(
+                        onStart = { isLoadingStable = true },
+                        onSuccess = { _, _ -> isLoadingStable = false },
+                        onError = { _, _ -> isLoadingStable = false }
+                    )
                     .build(),
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                placeholder = { PlaceholderArtwork() },
+                error = { PlaceholderArtwork() }
             )
         } else {
             PlaceholderArtwork()

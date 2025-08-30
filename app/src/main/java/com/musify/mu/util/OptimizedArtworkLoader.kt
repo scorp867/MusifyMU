@@ -46,6 +46,9 @@ object OptimizedArtworkLoader {
     // Track extraction status to avoid redundant work
     private val extractionStatus = ConcurrentHashMap<String, ExtractionState>()
     
+    // Permanent failure cache - never retry these
+    private val permanentFailures = ConcurrentHashMap.newKeySet<String>()
+    
     // Flows for reactive UI updates
     private val artworkFlows = ConcurrentHashMap<String, MutableStateFlow<String?>>()
     
@@ -93,16 +96,25 @@ object OptimizedArtworkLoader {
     }
     
     /**
+     * Check if artwork extraction has permanently failed for this URI
+     */
+    fun hasPermanentlyFailed(mediaUri: String): Boolean {
+        return permanentFailures.contains(mediaUri) || uriCache.get(mediaUri) == "FAILED"
+    }
+    
+    /**
      * Intelligent prefetch for visible items
      */
     fun prefetch(mediaUris: List<String>) {
         if (!::appContext.isInitialized) return
         
-        // Only prefetch items not already cached or failed
+        // Only prefetch items not already cached, failed, or permanently failed
         val toPrefetch = mediaUris.filter { mediaUri ->
+            !permanentFailures.contains(mediaUri) &&
             uriCache.get(mediaUri) == null && 
-            extractionStatus[mediaUri] != ExtractionState.FAILED
-        }.take(20) // Limit concurrent operations
+            extractionStatus[mediaUri] != ExtractionState.FAILED &&
+            extractionStatus[mediaUri] != ExtractionState.IN_PROGRESS
+        }.take(10) // Reduced limit to prevent overwhelming
         
         if (toPrefetch.isEmpty()) return
         
@@ -124,6 +136,11 @@ object OptimizedArtworkLoader {
     
     private suspend fun loadArtworkInternal(mediaUri: String): String? = withContext(Dispatchers.IO) {
         if (mediaUri.isBlank()) return@withContext null
+        
+        // Check permanent failures first - never retry these
+        if (permanentFailures.contains(mediaUri)) {
+            return@withContext null
+        }
         
         // Check memory cache first
         uriCache.get(mediaUri)?.let { cached ->
@@ -169,10 +186,12 @@ object OptimizedArtworkLoader {
                 extractionStatus[mediaUri] = ExtractionState.COMPLETED
                 return@withContext extractedUri
             } else {
-                // Mark as failed
+                // Mark as permanently failed to prevent retries
                 uriCache.put(mediaUri, "FAILED")
                 extractionStatus[mediaUri] = ExtractionState.FAILED
+                permanentFailures.add(mediaUri) // Add to permanent failure cache
                 artworkFlows[mediaUri]?.value = null
+                android.util.Log.d(TAG, "No artwork found for $mediaUri - marked as permanent failure")
                 return@withContext null
             }
             
@@ -180,6 +199,7 @@ object OptimizedArtworkLoader {
             android.util.Log.w(TAG, "Error loading artwork for $mediaUri", e)
             uriCache.put(mediaUri, "FAILED")
             extractionStatus[mediaUri] = ExtractionState.FAILED
+            permanentFailures.add(mediaUri) // Add to permanent failure cache
             artworkFlows[mediaUri]?.value = null
             return@withContext null
         }
@@ -191,7 +211,15 @@ object OptimizedArtworkLoader {
             if (mediaUri.startsWith("content://media/external/audio/media/")) {
                 val albumId = getAlbumIdFromMediaUri(mediaUri)
                 if (albumId > 0) {
-                    "content://media/external/audio/albumart/$albumId"
+                    val albumArtUri = "content://media/external/audio/albumart/$albumId"
+                    // Quick check if album art actually exists
+                    val cursor = appContext.contentResolver.query(
+                        android.net.Uri.parse(albumArtUri),
+                        null, null, null, null
+                    )
+                    val exists = cursor != null && cursor.count > 0
+                    cursor?.close()
+                    if (exists) albumArtUri else null
                 } else null
             } else null
         } catch (e: Exception) {
@@ -289,6 +317,7 @@ object OptimizedArtworkLoader {
         uriCache.evictAll()
         extractionStatus.clear()
         artworkFlows.clear()
+        permanentFailures.clear()
     }
     
     /**

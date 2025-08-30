@@ -232,7 +232,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     // Keep state on Home reselect (no reset per request)
     
     // List/Carousel mode toggle for LISTS section
-    var listsMode by rememberSaveable { mutableStateOf("carousel") } // "list" or "carousel"
+    var listsMode by rememberSaveable { mutableStateOf("list") } // "list" or "carousel" - default is list mode
     var showListsModeMenu by remember { mutableStateOf(false) }
     val themeManager = remember { com.musify.mu.ui.theme.AppThemeManager.getInstance(context) }
     val customLayoutEnabled = themeManager.customLayoutEnabled
@@ -285,14 +285,27 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                     Tab(
                                         selected = selectedSection == index,
                                         onClick = { selectedSection = index },
-                                        modifier = Modifier.combinedClickable(
-                                            onClick = { selectedSection = index },
-                                            onLongClick = { 
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                showListsModeMenu = true 
+                                        text = { 
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(label)
+                                                IconButton(
+                                                    onClick = { 
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        showListsModeMenu = true 
+                                                    },
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.MoreVert,
+                                                        contentDescription = "Change view mode",
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
                                             }
-                                        ),
-                                        text = { Text(label) }
+                                        }
                                     )
                                     
                                     DropdownMenu(
@@ -348,7 +361,53 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 if (isLoading) {
                     items(3) { ShimmerCarousel() }
                 } else {
-                    if (listsMode == "carousel") {
+                    if (listsMode == "list") {
+                        // List mode - simple list without song details
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                if (recentPlayedMemo.isNotEmpty()) {
+                                    ListModeItem(
+                                        title = "Recently Played",
+                                        icon = Icons.Rounded.History,
+                                        count = recentPlayedMemo.size,
+                                        onClick = { navController.navigate("see_all/recently_played") }
+                                    )
+                                }
+                                
+                                if (recentAddedMemo.isNotEmpty()) {
+                                    ListModeItem(
+                                        title = "Recently Added",
+                                        icon = Icons.Rounded.NewReleases,
+                                        count = recentAddedMemo.size,
+                                        onClick = { navController.navigate("see_all/recently_added") }
+                                    )
+                                }
+                                
+                                if (favoritesMemo.isNotEmpty()) {
+                                    ListModeItem(
+                                        title = "Favourites",
+                                        icon = Icons.Rounded.Favorite,
+                                        count = favoritesMemo.size,
+                                        onClick = { navController.navigate("see_all/favorites") }
+                                    )
+                                }
+                                
+                                customPlaylists.forEach { playlist ->
+                                    ListModeItem(
+                                        title = playlist.name,
+                                        icon = Icons.Rounded.PlaylistPlay,
+                                        count = null, // We don't have track count readily available
+                                        onClick = { navController.navigate("playlist_details/${playlist.id}") }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
                         // Current carousel mode
                         val listsOrder = if (customLayoutEnabled) homeLayoutOrder.value else listOf("welcome","recentlyPlayed","recentlyAdded","favorites","playlists")
                         listsOrder.forEach { sectionKey ->
@@ -795,14 +854,17 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         }
     }
 
-    // Optimized prefetch for visible recent lists
+    // Optimized prefetch for visible recent lists (reduced frequency)
     LaunchedEffect(listState, recentAddedMemo, recentPlayedMemo, favoritesMemo) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
             .distinctUntilChanged()
             .collectLatest { _ ->
-                val visibleTracks = (recentAddedMemo + recentPlayedMemo + favoritesMemo).take(60)
+                // Reduced to prevent overwhelming the system
+                val visibleTracks = (recentAddedMemo + recentPlayedMemo + favoritesMemo).take(20)
                 val uris = visibleTracks.map { it.mediaId }
                 if (uris.isNotEmpty()) {
+                    // Add delay to prevent flooding
+                    kotlinx.coroutines.delay(100)
                     com.musify.mu.util.OptimizedArtworkLoader.prefetch(uris)
                 }
             }
