@@ -108,7 +108,14 @@ fun SmartArtwork(
         // Trigger one-time extraction if still missing and not negatively cached
         LaunchedEffect(key1 = mediaUri) {
             if (enableOnDemand && imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
-                com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+                try {
+                    val extractedArtwork = com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+                    if (!extractedArtwork.isNullOrBlank()) {
+                        imageData = extractedArtwork
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("SmartArtwork", "Failed to load artwork for $mediaUri", e)
+                }
             }
         }
 
@@ -164,12 +171,17 @@ fun SmartArtwork(
 
         // Show icon placeholder when no image or on error
         if (imageData == null || hasError) {
-            Icon(
-                imageVector = Icons.Rounded.MusicNote,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                modifier = Modifier.fillMaxSize(0.4f)
-            )
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.fillMaxSize(0.4f)
+                )
+            }
         }
     }
 }

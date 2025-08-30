@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun CompactTrackRow(
@@ -70,10 +72,10 @@ fun CompactTrackRow(
                         )
                     ) else Modifier
             )
-            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp) // Increase vertical padding
         Row(
             modifier = innerMod
-                .height(60.dp)
+                .height(70.dp) // Increase height for better text visibility
                 .clickable(onClick = onClick),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -82,7 +84,7 @@ fun CompactTrackRow(
                 mediaUri = mediaUri,
                 albumId = null,
                 contentDescription = contentDescription,
-                modifier = Modifier.size(52.dp),
+                modifier = Modifier.size(56.dp), // Slightly increase artwork size
                 enableOnDemand = true,
                 cacheKey = mediaUri // Add stable cache key to prevent re-loading
             ) {
@@ -100,21 +102,29 @@ fun CompactTrackRow(
                 }
             }
 
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(12.dp)) // Increase spacing between artwork and text
 
             Column(Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp
+                    ),
                     color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
-                    modifier = Modifier.basicMarquee()
+                    modifier = Modifier.basicMarquee(),
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    ),
                     color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    maxLines = 1
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 

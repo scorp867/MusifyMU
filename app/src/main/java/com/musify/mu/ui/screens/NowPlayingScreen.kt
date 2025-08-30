@@ -175,14 +175,19 @@ fun NowPlayingScreen(navController: NavController) {
     // Animation states for enhanced visual experience
     val colorTransition = animateColorAsState(
         targetValue = dominantColor,
-        animationSpec = tween(1000, easing = FastOutSlowInEasing),
+        animationSpec = tween(800, easing = FastOutSlowInEasing),
         label = "colorTransition"
     )
     val vibrantTransition = animateColorAsState(
         targetValue = vibrantColor,
-        animationSpec = tween(1000, easing = FastOutSlowInEasing),
+        animationSpec = tween(800, easing = FastOutSlowInEasing),
         label = "vibrantTransition"
     )
+
+    // Debug color transitions
+    LaunchedEffect(colorTransition.value, vibrantTransition.value) {
+        android.util.Log.d("NowPlayingScreen", "Color transition values - Dominant: ${colorTransition.value}, Vibrant: ${vibrantTransition.value}")
+    }
 
     // Pulsing animation for when music is playing
     val pulseAnimation = rememberInfiniteTransition(label = "pulse")
@@ -204,7 +209,8 @@ fun NowPlayingScreen(navController: NavController) {
         currentTrack?.let { track ->
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
+                    android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title} (${track.mediaId})")
+                    android.util.Log.d("NowPlayingScreen", "Artwork URI: ${track.artUri}")
 
                     // Use pre-extracted artwork URI from Track entity
                     val artworkUri = track.artUri
@@ -217,8 +223,14 @@ fun NowPlayingScreen(navController: NavController) {
                             } else {
                                 artworkUri
                             }
-                            android.graphics.BitmapFactory.decodeFile(artworkPath)?.also {
-                                android.util.Log.d("NowPlayingScreen", "Loaded pre-cached artwork for color extraction: $artworkPath")
+                            android.util.Log.d("NowPlayingScreen", "Loading artwork from path: $artworkPath")
+                            val bitmap = android.graphics.BitmapFactory.decodeFile(artworkPath)
+                            if (bitmap != null) {
+                                android.util.Log.d("NowPlayingScreen", "Successfully loaded artwork: ${bitmap.width}x${bitmap.height}")
+                                bitmap
+                            } else {
+                                android.util.Log.w("NowPlayingScreen", "Failed to decode artwork from path: $artworkPath")
+                                null
                             }
                         } catch (e: Exception) {
                             android.util.Log.w("NowPlayingScreen", "Failed to load pre-cached artwork file: $artworkUri", e)
@@ -231,16 +243,21 @@ fun NowPlayingScreen(navController: NavController) {
 
                     // Extract palette colors on background thread
                     val extractedColors = sourceBitmap?.let { bitmap ->
-                        val palette = androidx.palette.graphics.Palette.from(bitmap)
-                            .maximumColorCount(16)
-                            .generate()
+                        try {
+                            val palette = androidx.palette.graphics.Palette.from(bitmap)
+                                .maximumColorCount(16)
+                                .generate()
 
-                        val vibrant = palette.getVibrantColor(0xFF38B6FF.toInt())
-                        val dominant = palette.getDominantColor(0xFF6236FF.toInt())
-                        val darkVibrant = palette.getDarkVibrantColor(dominant)
+                            val vibrant = palette.getVibrantColor(0xFF38B6FF.toInt())
+                            val dominant = palette.getDominantColor(0xFF6236FF.toInt())
+                            val darkVibrant = palette.getDarkVibrantColor(dominant)
 
-                        android.util.Log.d("NowPlayingScreen", "Extracted colors - Dominant: ${Integer.toHexString(dominant)}, Vibrant: ${Integer.toHexString(vibrant)}")
-                        Pair(Color(dominant), Color(vibrant))
+                            android.util.Log.d("NowPlayingScreen", "Extracted colors - Dominant: ${Integer.toHexString(dominant)}, Vibrant: ${Integer.toHexString(vibrant)}")
+                            Pair(Color(dominant), Color(vibrant))
+                        } catch (e: Exception) {
+                            android.util.Log.w("NowPlayingScreen", "Failed to generate palette", e)
+                            Pair(Color(0xFF6236FF), Color(0xFF38B6FF))
+                        }
                     } ?: run {
                         android.util.Log.d("NowPlayingScreen", "Using default colors for ${track.title}")
                         Pair(Color(0xFF6236FF), Color(0xFF38B6FF))
@@ -250,7 +267,7 @@ fun NowPlayingScreen(navController: NavController) {
                     withContext(Dispatchers.Main) {
                         dominantColor = extractedColors.first
                         vibrantColor = extractedColors.second
-                        android.util.Log.d("NowPlayingScreen", "Applied new colors for ${track.title}")
+                        android.util.Log.d("NowPlayingScreen", "Applied new colors for ${track.title} - Dominant: $dominantColor, Vibrant: $vibrantColor")
                     }
 
                 } catch (e: Exception) {
@@ -267,6 +284,13 @@ fun NowPlayingScreen(navController: NavController) {
             dominantColor = Color(0xFF6236FF)
             vibrantColor = Color(0xFF38B6FF)
         }
+    }
+
+    // Force color update when dominantColor or vibrantColor changes
+    LaunchedEffect(dominantColor, vibrantColor) {
+        android.util.Log.d("NowPlayingScreen", "Colors updated - Dominant: $dominantColor, Vibrant: $vibrantColor")
+        // Add a small delay to ensure the animation starts
+        kotlinx.coroutines.delay(100)
     }
 
     // Listen for player state changes with proper lifecycle management
@@ -392,12 +416,29 @@ fun NowPlayingScreen(navController: NavController) {
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Animated background
+        // Animated background with smooth color transitions
         AnimatedBackground(
             isPlaying = isPlaying,
             primaryColor = colorTransition.value,
             secondaryColor = vibrantTransition.value,
             modifier = Modifier.fillMaxSize()
+        )
+
+        // Add a subtle overlay to show color changes
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            colorTransition.value.copy(alpha = 0.05f),
+                            vibrantTransition.value.copy(alpha = 0.03f)
+                        ),
+                        center = Offset(0f, 0f),
+                        radius = 800f
+                    )
+                )
         )
 
         // Scrollable content for the entire screen
@@ -493,17 +534,33 @@ fun NowPlayingScreen(navController: NavController) {
                                 shape = RoundedCornerShape(20.dp)
                             )
                     ) {
-                        // Use key to force recomposition when track changes
+                        // Use key to force recomposition when track changes with smooth crossfade
                         key(track.mediaId) {
-                            com.musify.mu.ui.components.Artwork(
-                                data = track.artUri,
-                                mediaUri = track.mediaId,
-                                albumId = track.albumId,
-                                contentDescription = track.title,
-                                modifier = Modifier.fillMaxSize(),
-                                enableOnDemand = true,
-                                cacheKey = track.mediaId // Stable cache key
-                            )
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = true,
+                                enter = androidx.compose.animation.fadeIn(
+                                    animationSpec = tween(500, easing = FastOutSlowInEasing)
+                                ) + androidx.compose.animation.scaleIn(
+                                    initialScale = 0.8f,
+                                    animationSpec = tween(500, easing = FastOutSlowInEasing)
+                                ),
+                                exit = androidx.compose.animation.fadeOut(
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                ) + androidx.compose.animation.scaleOut(
+                                    targetScale = 1.1f,
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                )
+                            ) {
+                                com.musify.mu.ui.components.Artwork(
+                                    data = track.artUri,
+                                    mediaUri = track.mediaId,
+                                    albumId = track.albumId,
+                                    contentDescription = track.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    enableOnDemand = true,
+                                    cacheKey = track.mediaId // Stable cache key
+                                )
+                            }
                         }
 
                         // Subtle overlay for depth
