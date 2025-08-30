@@ -123,7 +123,7 @@ fun SmartArtwork(
                     .diskCachePolicy(CachePolicy.ENABLED)
                     .memoryCacheKey(imageData) // Use stable memory cache key
                     .diskCacheKey(imageData) // Use stable disk cache key
-                    .apply { if (enableCrossfade) crossfade(300) else crossfade(true) }
+                    .apply { if (enableCrossfade) crossfade(300) else crossfade(false) }
                     .size(Size.ORIGINAL)
                     .scale(Scale.FIT)
                     .listener(
