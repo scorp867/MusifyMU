@@ -148,10 +148,10 @@ class PlayerService : MediaLibraryService() {
                     val mediaId = player.currentMediaItem?.mediaId
                     if (bytes != null && mediaId != null) {
                         serviceScope.launch(Dispatchers.IO) {
-                            val cached = com.musify.mu.util.OnDemandArtworkLoader.storeArtworkBytes(mediaId, bytes)
+                            val cached = com.musify.mu.util.OptimizedArtworkLoader.storeArtworkBytes(mediaId, bytes)
                             if (cached != null) {
                                 try { repo.updateTrackArt(mediaId, cached) } catch (_: Exception) {}
-                                com.musify.mu.util.OnDemandArtworkLoader.cacheUri(mediaId, cached)
+                                com.musify.mu.util.OptimizedArtworkLoader.cacheUri(mediaId, cached)
                             }
                         }
                     } else if (mediaId != null && metadata.artworkUri != null) {
@@ -160,7 +160,7 @@ class PlayerService : MediaLibraryService() {
                             val uriStr = metadata.artworkUri.toString()
                             serviceScope.launch(Dispatchers.IO) {
                                 try { repo.updateTrackArt(mediaId, uriStr) } catch (_: Exception) {}
-                                com.musify.mu.util.OnDemandArtworkLoader.cacheUri(mediaId, uriStr)
+                                com.musify.mu.util.OptimizedArtworkLoader.cacheUri(mediaId, uriStr)
                             }
                         } catch (_: Exception) {}
                     }

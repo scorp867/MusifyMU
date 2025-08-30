@@ -88,8 +88,8 @@ fun SmartArtwork(
 
         // Observe Media3/loader-provided artwork for this mediaUri
         val loaderFlowValue = if (enableOnDemand && !mediaUri.isNullOrBlank()) {
-            val observedLoaderArt = remember(mediaUri) { com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri!!) }
-            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri!!).collectAsState(initial = observedLoaderArt).value
+            val observedLoaderArt = remember(mediaUri) { com.musify.mu.util.OptimizedArtworkLoader.getCachedUri(mediaUri!!) }
+            com.musify.mu.util.OptimizedArtworkLoader.artworkFlow(mediaUri!!).collectAsState(initial = observedLoaderArt).value
         } else null
 
         // Prioritize explicit artwork from track, otherwise use loader-provided art
@@ -108,7 +108,7 @@ fun SmartArtwork(
         // Trigger one-time extraction if still missing and not negatively cached
         LaunchedEffect(key1 = mediaUri) {
             if (enableOnDemand && imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
-                com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+                com.musify.mu.util.OptimizedArtworkLoader.loadArtwork(mediaUri)
             }
         }
 

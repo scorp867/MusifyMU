@@ -19,6 +19,8 @@ fun MoreOptionsMenu(
     isGymModeEnabled: Boolean,
     canEnableGymMode: Boolean,
     onGymModeToggle: () -> Unit,
+    onCustomImageClick: (() -> Unit)? = null,
+    onEditDetailsClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -56,57 +58,108 @@ fun MoreOptionsMenu(
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column {
-                        // Header
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
-                        ) {
-                            Text(
-                                text = "Voice Controls",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                modifier = Modifier.padding(16.dp),
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        // Gym Mode Toggle
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.surface
-                        ) {
-                            Row(
+                        // Custom Image Option
+                        if (onCustomImageClick != null) {
+                            Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                    .clickable { 
+                                        onCustomImageClick()
+                                        expanded = false 
+                                    },
+                                color = MaterialTheme.colorScheme.surface
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Image,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
                                     Text(
-                                        text = "Gym Mode",
+                                        text = "Custom Album Art",
                                         style = MaterialTheme.typography.bodyLarge.copy(
                                             fontWeight = FontWeight.Medium
                                         ),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                }
+                            }
+                            
+                            // Divider
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        }
+                        
+                        // Edit Details Option
+                        if (onEditDetailsClick != null) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { 
+                                        onEditDetailsClick()
+                                        expanded = false 
+                                    },
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Edit,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
                                     Text(
-                                        text = if (canEnableGymMode) {
-                                            "Voice control via headset microphone only"
-                                        } else {
-                                            "Connect headset with microphone to enable"
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (canEnableGymMode) {
-                                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                        } else {
-                                            MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
-                                        }
+                                        text = "Edit Song Details",
+                                        style = MaterialTheme.typography.bodyLarge.copy(
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
+                            }
+                            
+                            // Divider
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                        }
+                        
+                        // Simplified Gym Mode Toggle without header and extra info
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surface,
+                            shape = if (onCustomImageClick != null) RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp) else RoundedCornerShape(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Gym Mode",
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
 
                                 Switch(
                                     checked = isGymModeEnabled,
@@ -119,91 +172,6 @@ fun MoreOptionsMenu(
                                         uncheckedTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                                     )
                                 )
-                            }
-                        }
-
-                        // Divider
-                        HorizontalDivider(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                        )
-
-                        // Voice Commands Help
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.surface
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp)
-                            ) {
-                                Text(
-                                    text = "Voice Commands",
-                                    style = MaterialTheme.typography.titleSmall.copy(
-                                        fontWeight = FontWeight.Medium
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                val commands = listOf(
-                                    "Play/Pause" to "Say 'play' or 'pause'",
-                                    "Skip" to "Say 'next' or 'skip'",
-                                    "Previous" to "Say 'previous' or 'back'",
-                                    "Shuffle" to "Say 'shuffle on/off'",
-                                    "Repeat" to "Say 'repeat one/all/off'",
-                                    "Volume" to "Say 'volume up/down' or 'mute'"
-                                )
-
-                                commands.forEach { (command, instruction) ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 2.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = command,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-                                        )
-                                        Text(
-                                            text = instruction,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // Note about headset microphone
-                        if (canEnableGymMode) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Info,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Uses headset microphone only",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
                             }
                         }
                     }

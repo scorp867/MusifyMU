@@ -6,8 +6,9 @@ import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.AppDao
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.db.entities.*
-import com.musify.mu.data.media.SimpleBackgroundDataManager
+import com.musify.mu.data.media.OptimizedDataManager
 import com.musify.mu.data.media.LoadingState
+import com.musify.mu.util.MetadataPersistence
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.CoroutineScope
@@ -20,9 +21,9 @@ import androidx.paging.PagingState
 
 class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
 
-    // Create data manager instance - this will be initialized by the app
+    // Create optimized data manager instance - this will be initialized by the app
     val dataManager by lazy {
-        SimpleBackgroundDataManager.get(context, db)
+        OptimizedDataManager.get(context, db)
     }
 
     // Background loading progress
@@ -147,9 +148,39 @@ class LibraryRepository private constructor(private val context: Context, privat
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
     suspend fun recordPlayed(mediaId: String) = db.dao().insertPlayHistoryIfNotRecent(mediaId)
+    
+    // Clear methods for recently played and recently added
+    suspend fun clearRecentlyPlayed() = db.dao().clearPlayHistory()
+    suspend fun clearRecentlyAdded() = db.dao().clearRecentlyAdded()
 
     // Artwork cache update from playback metadata
     suspend fun updateTrackArt(mediaId: String, artUri: String?) = db.dao().updateTrackArt(mediaId, artUri)
+    
+    // Update track details with persistence
+    suspend fun updateTrackDetails(track: Track) {
+        // Store in database
+        db.dao().updateTrackDetails(track.mediaId, track.title, track.artist, track.album, track.genre)
+        
+        // Store persistent metadata for cross-app compatibility
+        MetadataPersistence.storeCustomMetadata(
+            context = context,
+            db = db,
+            track = track,
+            customTitle = track.title,
+            customArtist = track.artist,
+            customAlbum = track.album,
+            customGenre = track.genre,
+            customArtUri = track.artUri
+        )
+        
+        // Update the cached track in memory
+        val currentTracks = dataManager.cachedTracks.value.toMutableList()
+        val index = currentTracks.indexOfFirst { it.mediaId == track.mediaId }
+        if (index >= 0) {
+            currentTracks[index] = track
+            dataManager.updateCachedTracks(currentTracks)
+        }
+    }
 
     companion object {
         @Volatile private var INSTANCE: LibraryRepository? = null
