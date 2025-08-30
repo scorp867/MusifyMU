@@ -80,11 +80,8 @@ fun SmartArtwork(
                 )
         )
 
-        // Ignore MediaStore album art content URIs; rely on embedded art or Media3
-        val sanitizedArtworkUri = remember(artworkUri) {
-            artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
-        }
-        var imageData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
+        // Use the artwork URI as is
+        var imageData by remember { mutableStateOf<String?>(artworkUri) }
 
         // Observe Media3/loader-provided artwork for this mediaUri
         val loaderFlowValue = if (enableOnDemand && !mediaUri.isNullOrBlank()) {
@@ -93,9 +90,9 @@ fun SmartArtwork(
         } else null
 
         // Prioritize explicit artwork from track, otherwise use loader-provided art
-        LaunchedEffect(sanitizedArtworkUri) {
-            if (!sanitizedArtworkUri.isNullOrBlank()) {
-                imageData = sanitizedArtworkUri
+        LaunchedEffect(artworkUri) {
+            if (!artworkUri.isNullOrBlank()) {
+                imageData = artworkUri
             }
         }
         LaunchedEffect(loaderFlowValue) {

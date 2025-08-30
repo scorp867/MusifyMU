@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material3.*
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.*
@@ -199,33 +200,50 @@ fun NowPlayingScreen(navController: NavController) {
     val coroutineScope = rememberCoroutineScope()
 
     // Extract colors from pre-cached album artwork on track change
-    // Use both mediaId and artUri as keys to trigger when artwork changes
-    LaunchedEffect(currentTrack?.mediaId, currentTrack?.artUri) {
+    // Create a unique key combining mediaId and artUri to ensure proper triggering
+    val colorExtractionKey = currentTrack?.let { "${it.mediaId}_${it.artUri}" }
+    LaunchedEffect(colorExtractionKey) {
+        android.util.Log.d("NowPlayingScreen", "LaunchedEffect triggered - key: $colorExtractionKey, currentTrack: ${currentTrack?.title}")
         currentTrack?.let { track ->
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
+                    android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title} with artUri: ${track.artUri}")
 
                     // Use pre-extracted artwork URI from Track entity
                     val artworkUri = track.artUri
 
                     val sourceBitmap = if (!artworkUri.isNullOrBlank()) {
                         try {
-                            // Convert file URI to file path and load bitmap
-                            val artworkPath = if (artworkUri.startsWith("file://")) {
-                                artworkUri.substring(7) // Remove "file://" prefix
-                            } else {
-                                artworkUri
-                            }
-                            android.graphics.BitmapFactory.decodeFile(artworkPath)?.also {
-                                android.util.Log.d("NowPlayingScreen", "Loaded pre-cached artwork for color extraction: $artworkPath")
+                            when {
+                                artworkUri.startsWith("content://") -> {
+                                    // Handle content URIs (MediaStore album art)
+                                    val uri = android.net.Uri.parse(artworkUri)
+                                    context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                                        android.graphics.BitmapFactory.decodeStream(inputStream)?.also {
+                                            android.util.Log.d("NowPlayingScreen", "Successfully loaded bitmap from content URI: $artworkUri (${it.width}x${it.height})")
+                                        }
+                                    }
+                                }
+                                artworkUri.startsWith("file://") -> {
+                                    // Handle file URIs
+                                    val artworkPath = artworkUri.substring(7) // Remove "file://" prefix
+                                    android.graphics.BitmapFactory.decodeFile(artworkPath)?.also {
+                                        android.util.Log.d("NowPlayingScreen", "Successfully loaded bitmap from file: $artworkPath (${it.width}x${it.height})")
+                                    }
+                                }
+                                else -> {
+                                    // Assume it's a direct file path
+                                    android.graphics.BitmapFactory.decodeFile(artworkUri)?.also {
+                                        android.util.Log.d("NowPlayingScreen", "Successfully loaded bitmap from path: $artworkUri (${it.width}x${it.height})")
+                                    }
+                                }
                             }
                         } catch (e: Exception) {
-                            android.util.Log.w("NowPlayingScreen", "Failed to load pre-cached artwork file: $artworkUri", e)
+                            android.util.Log.e("NowPlayingScreen", "Failed to load artwork: $artworkUri", e)
                             null
                         }
                     } else {
-                        android.util.Log.d("NowPlayingScreen", "No pre-cached artwork available for ${track.title}")
+                        android.util.Log.d("NowPlayingScreen", "No artwork URI available for ${track.title}")
                         null
                     }
 
@@ -264,8 +282,7 @@ fun NowPlayingScreen(navController: NavController) {
         } ?: run {
             // No track, use default colors
             android.util.Log.d("NowPlayingScreen", "No current track, using default colors")
-            dominantColor = Color(0xFF6236FF)
-            vibrantColor = Color(0xFF38B6FF)
+            // Don't override colors here, keep the previous ones
         }
     }
 
@@ -304,7 +321,9 @@ fun NowPlayingScreen(navController: NavController) {
         // Add listener for real-time updates
         val listener = object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                currentTrack = resolveTrack(mediaItem, repo)
+                val newTrack = resolveTrack(mediaItem, repo)
+                android.util.Log.d("NowPlayingScreen", "onMediaItemTransition - Old track: ${currentTrack?.title} (${currentTrack?.artUri}), New track: ${newTrack?.title} (${newTrack?.artUri})")
+                currentTrack = newTrack
                 currentTrack?.let { t ->
                     // refresh like state on track change
                     coroutineScope.launch {
