@@ -47,9 +47,9 @@ fun SmartArtwork(
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
 
-    // State for tracking load status
-    var isLoading by remember { mutableStateOf(true) }
-    var hasError by remember { mutableStateOf(false) }
+            // State for tracking load status - keyed by artwork URI to prevent re-initialization
+        var isLoading by remember(artworkUri, mediaUri) { mutableStateOf(true) }
+        var hasError by remember(artworkUri, mediaUri) { mutableStateOf(false) }
 
     // Create gradient background colors based on theme
     val gradientColors = listOf(
@@ -121,6 +121,8 @@ fun SmartArtwork(
                     .dispatcher(Dispatchers.IO)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
+                    .memoryCacheKey(imageData) // Use stable memory cache key
+                    .diskCacheKey(imageData) // Use stable disk cache key
                     .apply { if (enableCrossfade) crossfade(300) else crossfade(false) }
                     .size(Size.ORIGINAL)
                     .scale(Scale.FIT)

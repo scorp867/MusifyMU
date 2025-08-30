@@ -199,7 +199,8 @@ fun NowPlayingScreen(navController: NavController) {
     val coroutineScope = rememberCoroutineScope()
 
     // Extract colors from pre-cached album artwork on track change
-    LaunchedEffect(currentTrack?.mediaId) {
+    // Use both mediaId and artUri as keys to trigger when artwork changes
+    LaunchedEffect(currentTrack?.mediaId, currentTrack?.artUri) {
         currentTrack?.let { track ->
             coroutineScope.launch(Dispatchers.IO) {
                 try {
@@ -492,14 +493,18 @@ fun NowPlayingScreen(navController: NavController) {
                                 shape = RoundedCornerShape(20.dp)
                             )
                     ) {
-                        com.musify.mu.ui.components.Artwork(
-                            data = track.artUri,
-                            mediaUri = track.mediaId,
-                            albumId = track.albumId,
-                            contentDescription = track.title,
-                            modifier = Modifier.fillMaxSize(),
-                            enableOnDemand = true
-                        )
+                        // Use key to force recomposition when track changes
+                        key(track.mediaId) {
+                            com.musify.mu.ui.components.Artwork(
+                                data = track.artUri,
+                                mediaUri = track.mediaId,
+                                albumId = track.albumId,
+                                contentDescription = track.title,
+                                modifier = Modifier.fillMaxSize(),
+                                enableOnDemand = true,
+                                cacheKey = track.mediaId // Stable cache key
+                            )
+                        }
 
                         // Subtle overlay for depth
                         Box(

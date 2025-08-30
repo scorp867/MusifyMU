@@ -179,22 +179,25 @@ fun NowPlayingBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // Album artwork with rounded corners (compact)
-                Artwork(
-                    data = currentTrack.artUri,
-                    contentDescription = currentTrack.title,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(10.dp)),
-                    shape = null,
-                    mediaUri = currentTrack.mediaId,
-                    cacheKey = null,
-                    albumId = currentTrack.albumId,
-                    enableOnDemand = true
-                ) {
+                // Use key to force recomposition when track changes
+                key(currentTrack.mediaId) {
+                    Artwork(
+                        data = currentTrack.artUri,
+                        contentDescription = currentTrack.title,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(10.dp)),
+                        shape = null,
+                        mediaUri = currentTrack.mediaId,
+                        cacheKey = currentTrack.mediaId, // Stable cache key
+                        albumId = currentTrack.albumId,
+                        enableOnDemand = true
+                    ) {
                     if (isPlaying) {
                         Box(modifier = Modifier.matchParentSize()) {
                             PlayingIndicator(modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp))
                         }
+                    }
                     }
                 }
 
