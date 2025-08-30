@@ -29,6 +29,10 @@ import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.util.toMediaItem
 import kotlinx.coroutines.launch
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -36,6 +40,26 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var showArtPicker by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            val uriStr = uri.toString()
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    // Apply selected art to all tracks in this album group
+                    tracks.forEach { t ->
+                        try {
+                            repo.updateTrackArt(t.mediaId, uriStr)
+                            com.musify.mu.util.OnDemandArtworkLoader.cacheUri(t.mediaId, uriStr)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(album, artist) {
         val all = repo.getAllTracks()
@@ -102,15 +126,13 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                             Box {
                                 IconButton(onClick = { expanded = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More") }
                                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                    val scope = rememberCoroutineScope()
                                     DropdownMenuItem(text = { Text("Change artwork") }, onClick = {
                                         expanded = false
-                                        // Navigate to NowPlaying's picker-like flow is not ideal here; keep placeholder for future
-                                        // For now, this can be expanded to open an image picker and update all album tracks art
+                                        showArtPicker = true
                                     })
                                     DropdownMenuItem(text = { Text("Edit album info") }, onClick = {
                                         expanded = false
-                                        // Placeholder for future album info edit (no separate album table in current schema)
+                                        showEditDialog = true
                                     })
                                 }
                             }
@@ -178,6 +200,48 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                 }
             }
         }
+    }
+
+    if (showArtPicker) {
+        LaunchedEffect(Unit) {
+            showArtPicker = false
+            pickImageLauncher.launch("image/*")
+        }
+    }
+
+    if (showEditDialog) {
+        var newAlbum by remember { mutableStateOf(album) }
+        var newArtist by remember { mutableStateOf(artist) }
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showEditDialog = false
+                    // Update metadata for all tracks in this album
+                    scope.launch(Dispatchers.IO) {
+                        tracks.forEach { t ->
+                            try {
+                                com.musify.mu.util.MetadataWriter.writeTags(
+                                    context = context,
+                                    mediaUriString = t.mediaId,
+                                    title = null,
+                                    artist = if (newArtist.isNotBlank()) newArtist else null,
+                                    album = if (newAlbum.isNotBlank()) newAlbum else null
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showEditDialog = false }) { Text("Cancel") } },
+            title = { Text("Edit album info") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(value = newAlbum, onValueChange = { newAlbum = it }, label = { Text("Album title") }, singleLine = true)
+                    OutlinedTextField(value = newArtist, onValueChange = { newArtist = it }, label = { Text("Artist") }, singleLine = true)
+                }
+            }
+        )
     }
 }
 

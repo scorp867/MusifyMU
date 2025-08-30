@@ -32,6 +32,10 @@ import com.musify.mu.playback.LocalIsPlaying
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
 import kotlinx.coroutines.launch
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -39,6 +43,25 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var showArtPicker by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            val uriStr = uri.toString()
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    tracks.forEach { t ->
+                        try {
+                            repo.updateTrackArt(t.mediaId, uriStr)
+                            com.musify.mu.util.OnDemandArtworkLoader.cacheUri(t.mediaId, uriStr)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(artist) {
         val all = repo.getAllTracks()
@@ -105,11 +128,11 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                                     DropdownMenuItem(text = { Text("Change artwork") }, onClick = {
                                         expanded = false
-                                        // Placeholder: add image picker to set a custom artist mosaic
+                                        showArtPicker = true
                                     })
                                     DropdownMenuItem(text = { Text("Edit artist info") }, onClick = {
                                         expanded = false
-                                        // Placeholder: future artist info editing (no dedicated artist table currently)
+                                        showEditDialog = true
                                     })
                                 }
                             }
@@ -178,6 +201,46 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                 }
             }
         }
+    }
+
+    if (showArtPicker) {
+        LaunchedEffect(Unit) {
+            showArtPicker = false
+            pickImageLauncher.launch("image/*")
+        }
+    }
+
+    if (showEditDialog) {
+        var newArtist by remember { mutableStateOf(artist) }
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showEditDialog = false
+                    // Update artist tag for all tracks
+                    scope.launch(Dispatchers.IO) {
+                        tracks.forEach { t ->
+                            try {
+                                com.musify.mu.util.MetadataWriter.writeTags(
+                                    context = context,
+                                    mediaUriString = t.mediaId,
+                                    title = null,
+                                    artist = if (newArtist.isNotBlank()) newArtist else null,
+                                    album = null
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showEditDialog = false }) { Text("Cancel") } },
+            title = { Text("Edit artist info") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(value = newArtist, onValueChange = { newArtist = it }, label = { Text("Artist name") }, singleLine = true)
+                }
+            }
+        )
     }
 }
 
