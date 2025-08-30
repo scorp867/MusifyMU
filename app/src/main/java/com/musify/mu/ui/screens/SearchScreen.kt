@@ -103,12 +103,12 @@ fun SearchScreen(
     }
 
     // Prefetch artwork for visible search results
-    LaunchedEffect(lazyListState, searchResults) {
+    LaunchedEffect(lazyListState, results) {
         snapshotFlow { lazyListState.layoutInfo.visibleItemsInfo.map { it.index } }
             .distinctUntilChanged()
             .collectLatest { visibleIndices ->
                 val visibleTracks = visibleIndices.mapNotNull { index ->
-                    searchResults.getOrNull(index)
+                    results.getOrNull(index)
                 }
                 val mediaUris = visibleTracks.mapNotNull { it.mediaId }
                 if (mediaUris.isNotEmpty()) {

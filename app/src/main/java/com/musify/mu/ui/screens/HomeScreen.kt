@@ -385,7 +385,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Artwork(
                                     data = a.artUri,
-                                    mediaUri = a.firstTrackMediaId,
+                                    mediaUri = null,
                                     albumId = a.albumId,
                                     contentDescription = a.albumName,
                                     modifier = Modifier.size(48.dp),
@@ -543,7 +543,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                             leadingContent = {
                                                 Artwork(
                                                     data = a.artUri,
-                                                    mediaUri = a.firstTrackMediaId,
+                                                    mediaUri = null,
                                                     albumId = a.albumId,
                                                     contentDescription = a.albumName,
                                                     modifier = Modifier.size(40.dp),

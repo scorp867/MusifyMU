@@ -160,12 +160,12 @@ fun LibraryScreen(
     }
 
     // Prefetch artwork for visible items
-    LaunchedEffect(listState, filteredTracks) {
+    LaunchedEffect(listState, tracks) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
             .distinctUntilChanged()
             .collectLatest { visibleIndices ->
                 val visibleTracks = visibleIndices.mapNotNull { index ->
-                    filteredTracks.getOrNull(index)
+                    tracks.getOrNull(index)
                 }
                 val mediaUris = visibleTracks.mapNotNull { it.mediaId }
                 if (mediaUris.isNotEmpty()) {
