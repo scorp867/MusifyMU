@@ -434,13 +434,10 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             }
                         ) {
                             Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Artwork(
-                                    data = a.artUri,
-                                    mediaUri = null,
+                                com.musify.mu.ui.components.AlbumArtwork(
                                     albumId = a.albumId,
                                     contentDescription = a.albumName,
-                                    modifier = Modifier.size(48.dp),
-                                    enableOnDemand = true
+                                    modifier = Modifier.size(48.dp)
                                 )
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
@@ -832,32 +829,56 @@ private fun TrackCard(
     track: Track,
     onClick: () -> Unit
 ) {
-    var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.95f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-        label = "scale"
-    )
+    val isCurrent = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId
+    val isPlaying = isCurrent && com.musify.mu.playback.LocalIsPlaying.current
 
-    // Get scroll state from parent LazyRow
-    val scrollState = LocalScrollState.current
-    val scrollOffset = scrollState?.firstVisibleItemScrollOffset ?: 0
+    Column(
+        modifier = Modifier
+            .width(160.dp)
+            .clickable { onClick() },
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(14.dp))
+                .shadow(6.dp, RoundedCornerShape(14.dp))
+        ) {
+            com.musify.mu.ui.components.Artwork(
+                data = track.artUri,
+                mediaUri = track.mediaId,
+                albumId = track.albumId,
+                contentDescription = track.title,
+                modifier = Modifier.fillMaxSize(),
+                enableOnDemand = true
+            ) {
+                if (isCurrent) {
+                    com.musify.mu.ui.components.PlayingIndicator(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(4.dp),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
 
-    // Add queue operations for swipe gestures
-    val queueOps = rememberQueueOperations()
-    val scope = rememberCoroutineScope()
-
-    com.musify.mu.ui.components.CompactTrackRow(
-        title = track.title,
-        subtitle = track.artist,
-        artData = track.artUri,
-        mediaUri = track.mediaId,
-        contentDescription = track.title,
-        isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current,
-        showIndicator = true,
-        onClick = { onClick() },
-        modifier = Modifier.fillMaxWidth()
-    )
+        Text(
+            text = track.title,
+            style = MaterialTheme.typography.titleSmall,
+            color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = track.artist,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
 }
 
 @Composable

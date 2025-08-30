@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import com.musify.mu.R
 import android.content.ContentUris
 import android.provider.MediaStore
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 
 /**
@@ -71,10 +72,17 @@ fun SimpleArtwork(
     val sanitizedArtUri = remember(artUri) {
         artUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
     }
-    val imageData = remember(sanitizedArtUri, loaderArt) {
+    val albumArtContentUri = remember(albumId) {
+        albumId?.let { id ->
+            // Use legacy album art content provider for album thumbnails
+            ContentUris.withAppendedId(Uri.parse("content://media/external/audio/albumart"), id)
+        }
+    }
+    val imageData = remember(sanitizedArtUri, loaderArt, albumArtContentUri) {
         when {
             !sanitizedArtUri.isNullOrBlank() -> android.net.Uri.parse(sanitizedArtUri)
             !loaderArt.isNullOrBlank() -> android.net.Uri.parse(loaderArt)
+            albumArtContentUri != null -> albumArtContentUri
             else -> R.drawable.ic_music_note
         }
     }

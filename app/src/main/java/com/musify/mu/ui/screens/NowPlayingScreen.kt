@@ -198,7 +198,7 @@ fun NowPlayingScreen(navController: NavController) {
 
     val coroutineScope = rememberCoroutineScope()
 
-    // Extract colors from pre-cached album artwork on track change
+    // Extract colors from album art on track change using PaletteUtil
     // Use both mediaId and artUri as keys to trigger when artwork changes
     LaunchedEffect(currentTrack?.mediaId, currentTrack?.artUri) {
         currentTrack?.let { track ->
@@ -206,53 +206,19 @@ fun NowPlayingScreen(navController: NavController) {
                 try {
                     android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
 
-                    // Use pre-extracted artwork URI from Track entity
-                    val artworkUri = track.artUri
+                    val palette = com.musify.mu.util.extractPalette(
+                        LocalContext.current.contentResolver,
+                        track.artUri
+                    )
 
-                    val sourceBitmap = if (!artworkUri.isNullOrBlank()) {
-                        try {
-                            // Convert file URI to file path and load bitmap
-                            val artworkPath = if (artworkUri.startsWith("file://")) {
-                                artworkUri.substring(7) // Remove "file://" prefix
-                            } else {
-                                artworkUri
-                            }
-                            android.graphics.BitmapFactory.decodeFile(artworkPath)?.also {
-                                android.util.Log.d("NowPlayingScreen", "Loaded pre-cached artwork for color extraction: $artworkPath")
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("NowPlayingScreen", "Failed to load pre-cached artwork file: $artworkUri", e)
-                            null
-                        }
-                    } else {
-                        android.util.Log.d("NowPlayingScreen", "No pre-cached artwork available for ${track.title}")
-                        null
-                    }
+                    val dominant = palette?.getDominantColor(0xFF6236FF.toInt()) ?: 0xFF6236FF.toInt()
+                    val vibrant = palette?.getVibrantColor(0xFF38B6FF.toInt()) ?: 0xFF38B6FF.toInt()
 
-                    // Extract palette colors on background thread
-                    val extractedColors = sourceBitmap?.let { bitmap ->
-                        val palette = androidx.palette.graphics.Palette.from(bitmap)
-                            .maximumColorCount(16)
-                            .generate()
-
-                        val vibrant = palette.getVibrantColor(0xFF38B6FF.toInt())
-                        val dominant = palette.getDominantColor(0xFF6236FF.toInt())
-                        val darkVibrant = palette.getDarkVibrantColor(dominant)
-
-                        android.util.Log.d("NowPlayingScreen", "Extracted colors - Dominant: ${Integer.toHexString(dominant)}, Vibrant: ${Integer.toHexString(vibrant)}")
-                        Pair(Color(dominant), Color(vibrant))
-                    } ?: run {
-                        android.util.Log.d("NowPlayingScreen", "Using default colors for ${track.title}")
-                        Pair(Color(0xFF6236FF), Color(0xFF38B6FF))
-                    }
-
-                    // Update colors on main thread
                     withContext(Dispatchers.Main) {
-                        dominantColor = extractedColors.first
-                        vibrantColor = extractedColors.second
+                        dominantColor = Color(dominant)
+                        vibrantColor = Color(vibrant)
                         android.util.Log.d("NowPlayingScreen", "Applied new colors for ${track.title}")
                     }
-
                 } catch (e: Exception) {
                     android.util.Log.w("NowPlayingScreen", "Failed to extract colors for ${track.title}", e)
                     withContext(Dispatchers.Main) {
@@ -493,8 +459,12 @@ fun NowPlayingScreen(navController: NavController) {
                                 shape = RoundedCornerShape(20.dp)
                             )
                     ) {
-                        // Use key to force recomposition when track changes
-                        key(track.mediaId) {
+                        // Smooth crossfade on track artwork change
+                        androidx.compose.animation.Crossfade(
+                            targetState = track.mediaId,
+                            animationSpec = tween(400, easing = FastOutSlowInEasing),
+                            label = "artCrossfade"
+                        ) { _ ->
                             com.musify.mu.ui.components.Artwork(
                                 data = track.artUri,
                                 mediaUri = track.mediaId,
