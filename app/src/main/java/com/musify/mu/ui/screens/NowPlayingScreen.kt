@@ -98,15 +98,17 @@ fun NowPlayingScreen(navController: NavController) {
         }
     }
 
-    // Image picker for changing album art
+    var showEditInfoDialog by remember { mutableStateOf(false) }
+    var editTitle by remember { mutableStateOf("") }
+    var editArtist by remember { mutableStateOf("") }
+    var editAlbum by remember { mutableStateOf("") }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { picked ->
         if (picked != null) {
-            val track = currentTrack
-            if (track != null) {
+            currentTrack?.let { track ->
                 coroutineScope.launch(Dispatchers.IO) {
                     try {
-                        com.musify.mu.data.media.MetadataEditor.requestWriteAccess(context, android.net.Uri.parse(track.mediaId))
-                        val newArtUri = com.musify.mu.data.media.MetadataEditor.embedAlbumArt(context, android.net.Uri.parse(track.mediaId), picked)
+                        MetadataEditor.requestWriteAccess(context, android.net.Uri.parse(track.mediaId))
+                        val newArtUri = MetadataEditor.embedAlbumArt(context, android.net.Uri.parse(track.mediaId), picked)
                         if (newArtUri != null) {
                             repo.updateTrackArt(track.mediaId, newArtUri)
                             com.musify.mu.util.OnDemandArtworkLoader.cacheUri(track.mediaId, newArtUri)
@@ -116,14 +118,14 @@ fun NowPlayingScreen(navController: NavController) {
             }
         }
     }
-
-    var showEditInfoDialog by remember { mutableStateOf(false) }
     if (showEditInfoDialog) {
         val t = currentTrack
         if (t != null) {
-            var newTitle by remember { mutableStateOf(t.title) }
-            var newArtist by remember { mutableStateOf(t.artist) }
-            var newAlbum by remember { mutableStateOf(t.album) }
+            if (editTitle.isEmpty() && editArtist.isEmpty() && editAlbum.isEmpty()) {
+                editTitle = t.title
+                editArtist = t.artist
+                editAlbum = t.album
+            }
             AlertDialog(
                 onDismissRequest = { showEditInfoDialog = false },
                 confirmButton = {
@@ -131,7 +133,7 @@ fun NowPlayingScreen(navController: NavController) {
                         showEditInfoDialog = false
                         coroutineScope.launch(Dispatchers.IO) {
                             MetadataEditor.requestWriteAccess(context, android.net.Uri.parse(t.mediaId))
-                            MetadataEditor.editBasicTags(context, android.net.Uri.parse(t.mediaId), newTitle, newArtist, newAlbum)
+                            MetadataEditor.editBasicTags(context, android.net.Uri.parse(t.mediaId), editTitle, editArtist, editAlbum)
                         }
                     }) { Text("Save") }
                 },
@@ -139,9 +141,9 @@ fun NowPlayingScreen(navController: NavController) {
                 title = { Text("Edit song info") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(value = newTitle, onValueChange = { newTitle = it }, label = { Text("Title") })
-                        OutlinedTextField(value = newArtist, onValueChange = { newArtist = it }, label = { Text("Artist") })
-                        OutlinedTextField(value = newAlbum, onValueChange = { newAlbum = it }, label = { Text("Album") })
+                        OutlinedTextField(value = editTitle, onValueChange = { editTitle = it }, label = { Text("Title") })
+                        OutlinedTextField(value = editArtist, onValueChange = { editArtist = it }, label = { Text("Artist") })
+                        OutlinedTextField(value = editAlbum, onValueChange = { editAlbum = it }, label = { Text("Album") })
                     }
                 }
             )
