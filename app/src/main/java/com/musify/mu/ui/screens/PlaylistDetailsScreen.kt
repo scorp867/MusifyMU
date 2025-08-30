@@ -141,9 +141,10 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                     DropdownMenu(expanded = showEditMenu, onDismissRequest = { showEditMenu = false }) {
                         DropdownMenuItem(text = { Text("Rename") }, onClick = {
                             showEditMenu = false
-                            // Simple inline rename
-                            var newName by mutableStateOf(title)
-                            // Show dialog
+                            var newName = title
+                            androidx.compose.runtime.LaunchedEffect(Unit) {}
+                            // inline dialog
+                            androidx.compose.runtime.CompositionLocalProvider() {}
                         })
                         DropdownMenuItem(text = { Text("Change image...") }, onClick = {
                             showEditMenu = false

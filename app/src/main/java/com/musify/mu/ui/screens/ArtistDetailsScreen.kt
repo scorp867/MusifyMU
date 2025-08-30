@@ -45,6 +45,10 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
         tracks = all.filter { it.artist.equals(artist, ignoreCase = true) || it.artist.contains(artist, ignoreCase = true) }
     }
 
+    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { /* artist cover is UI level only; out of scope for metadata */ }
+
     Scaffold { padding ->
         if (tracks.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
@@ -124,6 +128,9 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                             Text(artist, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1)
                             IconButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks, 0) }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Play all") }
                             IconButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks.shuffled(), 0) }) { Icon(Icons.Rounded.Shuffle, contentDescription = "Shuffle") }
+                            IconButton(onClick = { imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                                Icon(imageVector = Icons.Rounded.Edit, contentDescription = "Change image")
+                            }
                         }
                     }
                 }

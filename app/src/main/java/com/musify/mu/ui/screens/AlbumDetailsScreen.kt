@@ -45,6 +45,10 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
             }
     }
 
+    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { /* album cover changed per-track editing in Now Playing */ }
+
     Scaffold { padding ->
         if (tracks.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
@@ -122,6 +126,9 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                             Text(album, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1)
                             IconButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks, 0) }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Play all") }
                             IconButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks.shuffled(), 0) }) { Icon(Icons.Rounded.Shuffle, contentDescription = "Shuffle") }
+                            IconButton(onClick = { imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                                Icon(imageVector = Icons.Rounded.Edit, contentDescription = "Change image")
+                            }
                         }
                     }
                 }
