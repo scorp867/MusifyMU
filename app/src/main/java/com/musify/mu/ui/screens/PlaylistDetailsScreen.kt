@@ -141,10 +141,23 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                     DropdownMenu(expanded = showEditMenu, onDismissRequest = { showEditMenu = false }) {
                         DropdownMenuItem(text = { Text("Rename") }, onClick = {
                             showEditMenu = false
-                            var newName = title
-                            androidx.compose.runtime.LaunchedEffect(Unit) {}
-                            // inline dialog
-                            androidx.compose.runtime.CompositionLocalProvider() {}
+                            // Present a transient dialog at this composable level
+                            var open by remember { mutableStateOf(true) }
+                            var newName by remember { mutableStateOf(title) }
+                            if (open) {
+                                AlertDialog(
+                                    onDismissRequest = { open = false },
+                                    confirmButton = {
+                                        TextButton(onClick = {
+                                            open = false
+                                            scope.launch { repo.renamePlaylist(playlistId, newName); title = newName }
+                                        }) { Text("Save") }
+                                    },
+                                    dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
+                                    title = { Text("Rename playlist") },
+                                    text = { OutlinedTextField(value = newName, onValueChange = { newName = it }, label = { Text("Name") }) }
+                                )
+                            }
                         })
                         DropdownMenuItem(text = { Text("Change image...") }, onClick = {
                             showEditMenu = false

@@ -159,6 +159,16 @@ class LibraryRepository private constructor(private val context: Context, privat
     // Clear play history (recently played)
     suspend fun clearRecentlyPlayed() = db.dao().clearPlayHistory()
 
+    // Art override helpers
+    suspend fun setArtistArt(artist: String, imageUri: String) = db.dao().upsertArtOverride(
+        com.musify.mu.data.db.entities.ArtOverride("artist", artist, imageUri)
+    )
+    suspend fun setAlbumArt(album: String, artist: String, imageUri: String) = db.dao().upsertArtOverride(
+        com.musify.mu.data.db.entities.ArtOverride("album", "$album|$artist", imageUri)
+    )
+    suspend fun getArtistArt(artist: String): String? = db.dao().getArtOverride("artist", artist)?.imageUri
+    suspend fun getAlbumArt(album: String, artist: String): String? = db.dao().getArtOverride("album", "$album|$artist")?.imageUri
+
     companion object {
         @Volatile private var INSTANCE: LibraryRepository? = null
         fun get(context: Context): LibraryRepository =

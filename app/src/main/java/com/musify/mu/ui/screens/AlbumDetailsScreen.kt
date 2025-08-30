@@ -47,7 +47,14 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
 
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
-    ) { /* album cover changed per-track editing in Now Playing */ }
+    ) { picked ->
+        if (picked != null) {
+            val uriStr = picked.toString()
+            androidx.compose.runtime.rememberCoroutineScope().launch {
+                repo.setAlbumArt(album, artist, uriStr)
+            }
+        }
+    }
 
     Scaffold { padding ->
         if (tracks.isEmpty()) {
@@ -55,8 +62,14 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                 Text("No songs found")
             }
         } else {
-            // Choose a single album art (from the album group)
-            val albumArt = remember(tracks) { tracks.firstOrNull { it.artUri != null }?.artUri }
+            // Resolve album art override or fallback to any track art
+            var albumArt by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(tracks, album, artist) {
+                val override = repo.getAlbumArt(album, artist)
+                if (override != null) albumArt = override else {
+                    albumArt = tracks.firstOrNull { it.artUri != null }?.artUri
+                }
+            }
 
             val listState = rememberLazyListState()
 

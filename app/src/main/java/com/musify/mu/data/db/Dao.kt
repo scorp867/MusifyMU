@@ -139,6 +139,13 @@ interface AppDao {
 
     @Query("SELECT * FROM track WHERE album = :album AND artist = :artist")
     suspend fun getTracksByAlbum(album: String, artist: String): List<Track>
+
+    // Art overrides for artist/album mosaics
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertArtOverride(item: ArtOverride)
+
+    @Query("SELECT * FROM art_override WHERE type = :type AND key = :key")
+    suspend fun getArtOverride(type: String, key: String): ArtOverride?
 }
 
 // Simple data class for album info
