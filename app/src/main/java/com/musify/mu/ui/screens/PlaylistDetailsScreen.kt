@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 import com.musify.mu.ui.components.TrackPickerSheet
 import org.burnoutcrew.reorderable.*
 import org.burnoutcrew.reorderable.ItemPosition
- 
+
 import android.content.ContentUris
 import android.provider.MediaStore
 
@@ -35,6 +35,8 @@ import androidx.compose.material.ExperimentalMaterialApi
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.util.toMediaItem
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -58,7 +60,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     // Separate visual state from actual data state for playlists
     var visualTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var isDragging by remember { mutableStateOf(false) }
-    
+
     // Visual state for remove operations
     var removeOperations by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isProcessingRemoval by remember { mutableStateOf(false) }
@@ -84,8 +86,8 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     val reorderState = rememberReorderableLazyListState(
         onMove = { from, to ->
             // Update ONLY visual state for smooth UI feedback
-            visualTracks = visualTracks.toMutableList().apply { 
-                add(to.index, removeAt(from.index)) 
+            visualTracks = visualTracks.toMutableList().apply {
+                add(to.index, removeAt(from.index))
             }
             isDragging = true
         },
@@ -135,6 +137,22 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 .padding(padding)
                 .fillMaxSize()
         ) {
+            // Prefetch artwork for visible items in playlist
+            LaunchedEffect(reorderState.listState, visualTracks) {
+                snapshotFlow { reorderState.listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                    .distinctUntilChanged()
+                    .collect { visible ->
+                        if (visible.isEmpty() || visualTracks.isEmpty()) return@collect
+                        val min = (visible.minOrNull() ?: 0) - 2
+                        val max = (visible.maxOrNull() ?: 0) + 8
+                        val start = min.coerceAtLeast(0)
+                        val end = max.coerceAtMost(visualTracks.lastIndex)
+                        if (start <= end) {
+                            val ids = visualTracks.subList(start, end + 1).map { it.mediaId }
+                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                        }
+                    }
+            }
             LazyColumn(
                 state = reorderState.listState,
                 modifier = Modifier
@@ -143,129 +161,130 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-            items(visualTracks.size, key = { idx -> "playlist_${playlistId}_${visualTracks[idx].mediaId}" }) { idx ->
-                val track = visualTracks[idx]
-                var showMenu by remember { mutableStateOf(false) }
-                
-                ReorderableItem(reorderState, key = "playlist_${playlistId}_${track.mediaId}") { isDragging ->
-                    com.musify.mu.ui.components.EnhancedSwipeableItem(
-                        onSwipeRight = {
-                            // Right swipe: Play Next
-                            val ctx = QueueContextHelper.createPlaylistContext(playlistId.toString(), title)
-                            scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-                        },
-                        onSwipeLeft = {
-                            // Left swipe: Add to User Queue
-                            val ctx = QueueContextHelper.createPlaylistContext(playlistId.toString(), title)
-                            scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
-                        },
-                        isInQueue = false,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Card(
-                            modifier = Modifier
-                                .zIndex(if (isDragging) 1f else 0f)
-                                .fillMaxWidth()
-                                .graphicsLayer {
-                                    // Hardware acceleration for smooth drag animations
-                                    if (dragConfig.enableHardwareAcceleration) {
-                                        compositingStrategy = if (isDragging) {
-                                            CompositingStrategy.Offscreen
-                                        } else {
-                                            CompositingStrategy.Auto
-                                        }
-                                    }
-                                    scaleX = if (isDragging) 1.02f else 1f
-                                    scaleY = if (isDragging) 1.02f else 1f
-                                    // Keep original visible during drag per request
-                                    alpha = 1f
-                                },
-                            elevation = CardDefaults.cardElevation(
-                                defaultElevation = if (isDragging) {
-                                    if (dragConfig.enableLightweightShadow) 6.dp else 8.dp
-                                } else 2.dp
-                            ),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isDragging) 
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                                else 
-                                    MaterialTheme.colorScheme.surface
-                            )
+                items(visualTracks.size, key = { idx -> "playlist_${playlistId}_${visualTracks[idx].mediaId}" }) { idx ->
+                    val track = visualTracks[idx]
+                    var showMenu by remember { mutableStateOf(false) }
+
+                    ReorderableItem(reorderState, key = "playlist_${playlistId}_${track.mediaId}") { isDragging ->
+                        com.musify.mu.ui.components.EnhancedSwipeableItem(
+                            onSwipeRight = {
+                                // Right swipe: Play Next
+                                val ctx = QueueContextHelper.createPlaylistContext(playlistId.toString(), title)
+                                scope.launch { queueOps.playNextWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                            },
+                            onSwipeLeft = {
+                                // Left swipe: Add to User Queue
+                                val ctx = QueueContextHelper.createPlaylistContext(playlistId.toString(), title)
+                                scope.launch { queueOps.addToUserQueueWithContext(items = listOf(track.toMediaItem()), context = ctx) }
+                            },
+                            isInQueue = false,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            // Update overlay source on drag state changes
-                            LaunchedEffect(isDragging) {
-                                val key = "playlist_${playlistId}_${track.mediaId}"
-                                if (isDragging) {
-                                    dragOverlayKey = key
-                                    dragOverlayTrack = track
-                                    dragOverlayIndex = idx
-                                } else if (dragOverlayKey == key) {
-                                    dragOverlayKey = null
-                                    dragOverlayTrack = null
-                                }
-                            }
-                            // Capture bounds for overlay placement
-                            Box(
-                                modifier = Modifier.onGloballyPositioned { coords ->
-                                    itemBounds["playlist_${playlistId}_${track.mediaId}"] = coords.boundsInRoot()
-                                }
+                            Card(
+                                modifier = Modifier
+                                    .zIndex(if (isDragging) 1f else 0f)
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        // Hardware acceleration for smooth drag animations
+                                        if (dragConfig.enableHardwareAcceleration) {
+                                            compositingStrategy = if (isDragging) {
+                                                CompositingStrategy.Offscreen
+                                            } else {
+                                                CompositingStrategy.Auto
+                                            }
+                                        }
+                                        scaleX = if (isDragging) 1.02f else 1f
+                                        scaleY = if (isDragging) 1.02f else 1f
+                                        // Keep original visible during drag per request
+                                        alpha = 1f
+                                    },
+                                elevation = CardDefaults.cardElevation(
+                                    defaultElevation = if (isDragging) {
+                                        if (dragConfig.enableLightweightShadow) 6.dp else 8.dp
+                                    } else 2.dp
+                                ),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDragging)
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                    else
+                                        MaterialTheme.colorScheme.surface
+                                )
                             ) {
-                            val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
-                            com.musify.mu.ui.components.CompactTrackRow(
-                                title = track.title,
-                                subtitle = track.artist,
-                                artData = track.artUri,
-                                contentDescription = track.title,
-                                isPlaying = isPlaying,
-                                onClick = { onPlay(visualTracks, idx) },
-                                trailingContent = {
-                                    Box {
-                                        IconButton(onClick = { showMenu = true }) {
-                                            Icon(Icons.Default.MoreVert, contentDescription = "More")
-                                        }
-                                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                            DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = {
-                                                // Visual-only removal - immediate UI feedback
-                                                removeOperations = removeOperations + track.mediaId
-                                                visualTracks = visualTracks.filter { it.mediaId != track.mediaId }
-                                                showMenu = false
-                                                
-                                                // Perform actual removal in background
-                                                scope.launch {
-                                                    try {
-                                                    repo.removeFromPlaylist(playlistId, track.mediaId)
-                                                        // Reload actual tracks from database
-                                                        val newTracks = repo.playlistTracks(playlistId)
-                                                        tracks = newTracks
-                                                        // Success - remove from pending operations
-                                                        removeOperations = removeOperations - track.mediaId
-                                                    } catch (e: Exception) {
-                                                        // On failure, revert visual state
-                                                        visualTracks = tracks
-                                                        removeOperations = removeOperations - track.mediaId
-                                                        // Show error feedback
-                                                    }
-                                                }
-                                            })
-                                        }
+                                // Update overlay source on drag state changes
+                                LaunchedEffect(isDragging) {
+                                    val key = "playlist_${playlistId}_${track.mediaId}"
+                                    if (isDragging) {
+                                        dragOverlayKey = key
+                                        dragOverlayTrack = track
+                                        dragOverlayIndex = idx
+                                    } else if (dragOverlayKey == key) {
+                                        dragOverlayKey = null
+                                        dragOverlayTrack = null
                                     }
                                 }
-                            )
-                            IconButton(
-                                onClick = { },
-                                modifier = Modifier.detectReorderAfterLongPress(reorderState)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.DragHandle,
-                                    contentDescription = "Drag to reorder",
-                                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                )
-                            }
+                                // Capture bounds for overlay placement
+                                Box(
+                                    modifier = Modifier.onGloballyPositioned { coords ->
+                                        itemBounds["playlist_${playlistId}_${track.mediaId}"] = coords.boundsInRoot()
+                                    }
+                                ) {
+                                    val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                                    com.musify.mu.ui.components.CompactTrackRow(
+                                        title = track.title,
+                                        subtitle = track.artist,
+                                        artData = track.artUri,
+                                        mediaUri = track.mediaId,
+                                        contentDescription = track.title,
+                                        isPlaying = isPlaying,
+                                        onClick = { onPlay(visualTracks, idx) },
+                                        trailingContent = {
+                                            Box {
+                                                IconButton(onClick = { showMenu = true }) {
+                                                    Icon(Icons.Default.MoreVert, contentDescription = "More")
+                                                }
+                                                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                                    DropdownMenuItem(text = { Text("Remove from playlist") }, onClick = {
+                                                        // Visual-only removal - immediate UI feedback
+                                                        removeOperations = removeOperations + track.mediaId
+                                                        visualTracks = visualTracks.filter { it.mediaId != track.mediaId }
+                                                        showMenu = false
+
+                                                        // Perform actual removal in background
+                                                        scope.launch {
+                                                            try {
+                                                                repo.removeFromPlaylist(playlistId, track.mediaId)
+                                                                // Reload actual tracks from database
+                                                                val newTracks = repo.playlistTracks(playlistId)
+                                                                tracks = newTracks
+                                                                // Success - remove from pending operations
+                                                                removeOperations = removeOperations - track.mediaId
+                                                            } catch (e: Exception) {
+                                                                // On failure, revert visual state
+                                                                visualTracks = tracks
+                                                                removeOperations = removeOperations - track.mediaId
+                                                                // Show error feedback
+                                                            }
+                                                        }
+                                                    })
+                                                }
+                                            }
+                                        }
+                                    )
+                                    IconButton(
+                                        onClick = { },
+                                        modifier = Modifier.detectReorderAfterLongPress(reorderState)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DragHandle,
+                                            contentDescription = "Drag to reorder",
+                                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
-            }
             }
 
             // Floating overlay removed per request
