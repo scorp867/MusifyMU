@@ -401,14 +401,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                     ListModeItem(
                                         title = playlist.name,
                                         icon = Icons.Rounded.PlaylistPlay,
-                                        count = null, // We don't have track count readily available
+                                        count = null,
                                         onClick = { navController.navigate("playlist_details/${playlist.id}") }
                                     )
                                 }
                             }
                         }
                     } else {
-                        // Current carousel mode
+                        // Carousel mode
                         val listsOrder = if (customLayoutEnabled) homeLayoutOrder.value else listOf("welcome","recentlyPlayed","recentlyAdded","favorites","playlists")
                         listsOrder.forEach { sectionKey ->
                             when (sectionKey) {
@@ -475,52 +475,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                         navController = navController,
                                         haptic = haptic,
                                         onRefresh = { refreshTrigger++ }
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        // List mode - simple list without song details
-                        item {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                if (recentPlayedMemo.isNotEmpty()) {
-                                    ListModeItem(
-                                        title = "Recently Played",
-                                        icon = Icons.Rounded.History,
-                                        count = recentPlayedMemo.size,
-                                        onClick = { navController.navigate("see_all/recently_played") }
-                                    )
-                                }
-                                
-                                if (recentAddedMemo.isNotEmpty()) {
-                                    ListModeItem(
-                                        title = "Recently Added",
-                                        icon = Icons.Rounded.NewReleases,
-                                        count = recentAddedMemo.size,
-                                        onClick = { navController.navigate("see_all/recently_added") }
-                                    )
-                                }
-                                
-                                if (favoritesMemo.isNotEmpty()) {
-                                    ListModeItem(
-                                        title = "Favourites",
-                                        icon = Icons.Rounded.Favorite,
-                                        count = favoritesMemo.size,
-                                        onClick = { navController.navigate("see_all/favorites") }
-                                    )
-                                }
-                                
-                                customPlaylists.forEach { playlist ->
-                                    ListModeItem(
-                                        title = playlist.name,
-                                        icon = Icons.Rounded.PlaylistPlay,
-                                        count = null, // We don't have track count readily available
-                                        onClick = { navController.navigate("playlist_details/${playlist.id}") }
                                     )
                                 }
                             }
