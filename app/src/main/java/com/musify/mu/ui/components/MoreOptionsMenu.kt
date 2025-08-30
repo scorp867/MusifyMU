@@ -19,6 +19,8 @@ fun MoreOptionsMenu(
     isGymModeEnabled: Boolean,
     canEnableGymMode: Boolean,
     onGymModeToggle: () -> Unit,
+    onChangeArtwork: (() -> Unit)? = null,
+    onEditSongInfo: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -103,6 +105,34 @@ fun MoreOptionsMenu(
                                         uncheckedTrackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
                                     )
                                 )
+                            }
+                        }
+
+                        // Optional actions
+                        if (onChangeArtwork != null || onEditSongInfo != null) {
+                            HorizontalDivider(
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                            )
+                            if (onChangeArtwork != null) {
+                                TextButton(
+                                    onClick = { expanded = false; onChangeArtwork() },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Rounded.Image, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Change artwork")
+                                }
+                            }
+                            if (onEditSongInfo != null) {
+                                TextButton(
+                                    onClick = { expanded = false; onEditSongInfo() },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(Icons.Rounded.Edit, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Edit song info")
+                                }
                             }
                         }
                     }
