@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
@@ -78,7 +79,7 @@ fun OptimizedArtwork(
     
     Box(modifier = finalModifier) {
         if (imageData != null) {
-            AsyncImage(
+            val painter = rememberAsyncImagePainter(
                 model = ImageRequest.Builder(context)
                     .data(imageData)
                     .memoryCachePolicy(CachePolicy.ENABLED)
@@ -90,13 +91,21 @@ fun OptimizedArtwork(
                         onSuccess = { _, _ -> isLoadingStable = false },
                         onError = { _, _ -> isLoadingStable = false }
                     )
-                    .build(),
+                    .build()
+            )
+            
+            Image(
+                painter = painter,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                placeholder = { PlaceholderArtwork() },
-                error = { PlaceholderArtwork() }
+                contentScale = ContentScale.Crop
             )
+            
+            // Show placeholder when loading or on error
+            if (painter.state is AsyncImagePainter.State.Loading || 
+                painter.state is AsyncImagePainter.State.Error) {
+                PlaceholderArtwork()
+            }
         } else {
             PlaceholderArtwork()
         }
