@@ -63,6 +63,7 @@ import com.musify.mu.ui.components.GymModeIndicator
 import com.musify.mu.util.PermissionHelper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.ExperimentalMaterialApi
@@ -70,6 +71,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.flow.distinctUntilChanged
+import com.musify.mu.data.media.MetadataEditor
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
     ExperimentalMaterialApi::class
@@ -93,6 +95,56 @@ fun NowPlayingScreen(navController: NavController) {
             voiceControlManager?.toggleGymMode()
         } else {
             android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    // Image picker for changing album art
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { picked ->
+        if (picked != null) {
+            val track = currentTrack
+            if (track != null) {
+                coroutineScope.launch(Dispatchers.IO) {
+                    try {
+                        com.musify.mu.data.media.MetadataEditor.requestWriteAccess(context, android.net.Uri.parse(track.mediaId))
+                        val newArtUri = com.musify.mu.data.media.MetadataEditor.embedAlbumArt(context, android.net.Uri.parse(track.mediaId), picked)
+                        if (newArtUri != null) {
+                            repo.updateTrackArt(track.mediaId, newArtUri)
+                            com.musify.mu.util.OnDemandArtworkLoader.cacheUri(track.mediaId, newArtUri)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
+    var showEditInfoDialog by remember { mutableStateOf(false) }
+    if (showEditInfoDialog) {
+        val t = currentTrack
+        if (t != null) {
+            var newTitle by remember { mutableStateOf(t.title) }
+            var newArtist by remember { mutableStateOf(t.artist) }
+            var newAlbum by remember { mutableStateOf(t.album) }
+            AlertDialog(
+                onDismissRequest = { showEditInfoDialog = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showEditInfoDialog = false
+                        coroutineScope.launch(Dispatchers.IO) {
+                            MetadataEditor.requestWriteAccess(context, android.net.Uri.parse(t.mediaId))
+                            MetadataEditor.editBasicTags(context, android.net.Uri.parse(t.mediaId), newTitle, newArtist, newAlbum)
+                        }
+                    }) { Text("Save") }
+                },
+                dismissButton = { TextButton(onClick = { showEditInfoDialog = false }) { Text("Cancel") } },
+                title = { Text("Edit song info") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(value = newTitle, onValueChange = { newTitle = it }, label = { Text("Title") })
+                        OutlinedTextField(value = newArtist, onValueChange = { newArtist = it }, label = { Text("Artist") })
+                        OutlinedTextField(value = newAlbum, onValueChange = { newAlbum = it }, label = { Text("Album") })
+                    }
+                }
+            )
         }
     }
 
@@ -417,7 +469,11 @@ fun NowPlayingScreen(navController: NavController) {
                                 isGymModeEnabled = !isGymModeEnabled
                                 voiceControlManager?.toggleGymMode()
                             }
-                        }
+                        },
+                        onChangeAlbumArt = {
+                            imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        onEditSongInfo = { showEditInfoDialog = true }
                     )
                 }
 

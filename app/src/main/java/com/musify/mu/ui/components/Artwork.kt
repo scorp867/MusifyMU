@@ -23,8 +23,8 @@ fun Artwork(
     enableOnDemand: Boolean = false,
     overlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
-    // data should be the pre-extracted artwork URI from Track.artUri
-    val artworkUri = (data as? String)?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
+    // data should be the pre-extracted artwork URI from Track.artUri (allow MediaStore albumart provider)
+    val artworkUri = (data as? String)
 
     Box(modifier = modifier) {
         SmartArtwork(

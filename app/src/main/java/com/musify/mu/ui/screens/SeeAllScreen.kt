@@ -77,7 +77,24 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(title) })
+            TopAppBar(title = {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(title, modifier = Modifier.weight(1f))
+                    var expanded by remember { mutableStateOf(false) }
+                    IconButton(onClick = { expanded = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More") }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        if (type == "recently_played") {
+                            val context = androidx.compose.ui.platform.LocalContext.current
+                            val repo = remember { LibraryRepository.get(context) }
+                            val scope = rememberCoroutineScope()
+                            DropdownMenuItem(text = { Text("Clear") }, onClick = {
+                                scope.launch { repo.clearRecentlyPlayed() }
+                                expanded = false
+                            })
+                        }
+                    }
+                }
+            })
         }
     ) { padding ->
         if (type == "favorites") {

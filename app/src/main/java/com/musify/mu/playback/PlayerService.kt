@@ -164,6 +164,14 @@ class PlayerService : MediaLibraryService() {
                             }
                         } catch (_: Exception) {}
                     }
+
+                    // Ensure play record is inserted (DAO will ignore duplicates)
+                    val currentId = mediaId
+                    if (currentId != null) {
+                        serviceScope.launch(Dispatchers.IO) {
+                            try { repo.recordPlayed(currentId) } catch (_: Exception) {}
+                        }
+                    }
                 }
             })
         } else {

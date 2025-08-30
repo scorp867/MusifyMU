@@ -143,3 +143,23 @@ class AppThemeManager private constructor(context: Context) {
         }
     }
 }
+
+object ListsModePreference {
+    enum class Mode { List, Carousel }
+
+    private const val PREFS_NAME = "musify_lists_mode"
+    private const val KEY_MODE = "lists_mode"
+
+    fun get(context: Context): Mode {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return when (prefs.getString(KEY_MODE, Mode.List.name)) {
+            Mode.Carousel.name -> Mode.Carousel
+            else -> Mode.List
+        }
+    }
+
+    fun set(context: Context, mode: Mode) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_MODE, mode.name).apply()
+    }
+}

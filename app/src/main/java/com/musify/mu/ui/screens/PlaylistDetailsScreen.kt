@@ -45,6 +45,20 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var title by remember { mutableStateOf("Playlist") }
+    var showEditMenu by remember { mutableStateOf(false) }
+    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { picked ->
+        if (picked != null) {
+            scope.launch {
+                try {
+                    val uriStr = picked.toString()
+                    repo.updatePlaylistImage(playlistId, uriStr)
+                    title = repo.playlists().find { it.id == playlistId }?.name ?: title
+                } catch (_: Exception) {}
+            }
+        }
+    }
     val scope = rememberCoroutineScope()
     val queueOps = rememberQueueOperations()
     var showPicker by remember { mutableStateOf(false) }
@@ -121,6 +135,21 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
             TopAppBar(title = { Text(title) }, actions = {
                 IconButton(onClick = { showPicker = true }) {
                     Icon(Icons.Default.Add, contentDescription = "Add")
+                }
+                Box {
+                    IconButton(onClick = { showEditMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "More") }
+                    DropdownMenu(expanded = showEditMenu, onDismissRequest = { showEditMenu = false }) {
+                        DropdownMenuItem(text = { Text("Rename") }, onClick = {
+                            showEditMenu = false
+                            // Simple inline rename
+                            var newName by mutableStateOf(title)
+                            // Show dialog
+                        })
+                        DropdownMenuItem(text = { Text("Change image...") }, onClick = {
+                            showEditMenu = false
+                            imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        })
+                    }
                 }
             })
         }

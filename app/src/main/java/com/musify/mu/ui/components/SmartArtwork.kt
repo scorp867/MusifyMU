@@ -80,10 +80,8 @@ fun SmartArtwork(
                 )
         )
 
-        // Ignore MediaStore album art content URIs; rely on embedded art or Media3
-        val sanitizedArtworkUri = remember(artworkUri) {
-            artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
-        }
+        // Allow legacy MediaStore album art provider URIs as a fast path
+        val sanitizedArtworkUri = remember(artworkUri) { artworkUri }
         var imageData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
 
         // Observe Media3/loader-provided artwork for this mediaUri
