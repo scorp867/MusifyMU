@@ -21,6 +21,7 @@ fun Artwork(
     cacheKey: String? = null, // Not needed with new approach
     albumId: Long? = null, // Not used for artwork lookup anymore
     enableOnDemand: Boolean = false,
+    holdPreviousOnLoading: Boolean = true,
     overlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
     // data should be the pre-extracted artwork URI from Track.artUri
@@ -33,7 +34,8 @@ fun Artwork(
             contentDescription = contentDescription,
             modifier = Modifier.matchParentSize(),
             shape = shape,
-            enableOnDemand = enableOnDemand
+            enableOnDemand = enableOnDemand,
+            holdPreviousOnLoading = holdPreviousOnLoading
         )
         if (overlay != null) {
             overlay()

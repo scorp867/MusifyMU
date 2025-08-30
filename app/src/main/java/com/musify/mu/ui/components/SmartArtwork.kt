@@ -42,7 +42,8 @@ fun SmartArtwork(
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
     shape: Shape? = null,
-    enableOnDemand: Boolean = true
+    enableOnDemand: Boolean = true,
+    holdPreviousOnLoading: Boolean = true
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
@@ -84,6 +85,7 @@ fun SmartArtwork(
         val sanitizedArtworkUri = remember(artworkUri) {
             artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
         }
+        // Keep showing the last good artwork until a new one is ready to avoid flicker
         var imageData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
 
         // Observe Media3/loader-provided artwork for this mediaUri
@@ -94,12 +96,13 @@ fun SmartArtwork(
 
         // Prioritize explicit artwork from track, otherwise use loader-provided art
         LaunchedEffect(sanitizedArtworkUri) {
-            if (!sanitizedArtworkUri.isNullOrBlank()) {
+            if (!sanitizedArtworkUri.isNullOrBlank() && imageData != sanitizedArtworkUri) {
                 imageData = sanitizedArtworkUri
             }
         }
+        // Always adopt loader-provided artwork when it becomes available; rely on coil crossfade to prevent jank
         LaunchedEffect(loaderFlowValue) {
-            if (imageData.isNullOrBlank() && !loaderFlowValue.isNullOrBlank()) {
+            if (!loaderFlowValue.isNullOrBlank() && imageData != loaderFlowValue) {
                 imageData = loaderFlowValue
             }
         }
@@ -112,16 +115,18 @@ fun SmartArtwork(
             }
         }
 
+        // Track the last successfully shown artwork
+        var lastSuccessfulData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
+
         if (imageData != null) {
             // Create image painter with multiple fallback strategies
-            val enableCrossfade = !imageData.isNullOrBlank()
-            val painter = rememberAsyncImagePainter(
-                model = ImageRequest.Builder(context)
+            val request = remember(imageData) {
+                ImageRequest.Builder(context)
                     .data(imageData)
                     .dispatcher(Dispatchers.IO)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
-                    .apply { if (enableCrossfade) crossfade(300) else crossfade(false) }
+                    .crossfade(false) // avoid perceived flicker on track change
                     .size(Size.ORIGINAL)
                     .scale(Scale.FIT)
                     .listener(
@@ -132,6 +137,8 @@ fun SmartArtwork(
                         onSuccess = { _, _ ->
                             isLoading = false
                             hasError = false
+                            // Commit displayed data only after new art is ready
+                            lastSuccessfulData = imageData
                         },
                         onError = { _, _ ->
                             isLoading = false
@@ -139,23 +146,41 @@ fun SmartArtwork(
                         }
                     )
                     .build()
-            )
+            }
+            val painter = rememberAsyncImagePainter(model = request)
 
-            // Display the image
-            androidx.compose.foundation.Image(
-                painter = painter,
-                contentDescription = contentDescription,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alpha = if (isLoading) 0.7f else 1f
-            )
+            // Only use previous artwork as a placeholder if enabled and the incoming track already had art
+            val allowPreviousAsPlaceholder = remember(sanitizedArtworkUri, holdPreviousOnLoading) { holdPreviousOnLoading && !sanitizedArtworkUri.isNullOrBlank() }
 
-            // Loading state overlay
-            if (painter.state is AsyncImagePainter.State.Loading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.2f))
+            // Draw previous successful art underneath while the new one is loading
+            if (allowPreviousAsPlaceholder && painter.state is AsyncImagePainter.State.Loading && !lastSuccessfulData.isNullOrBlank()) {
+                val lastReq = remember(lastSuccessfulData) {
+                    ImageRequest.Builder(context)
+                        .data(lastSuccessfulData)
+                        .dispatcher(Dispatchers.IO)
+                        .memoryCachePolicy(CachePolicy.ENABLED)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .crossfade(false)
+                        .size(Size.ORIGINAL)
+                        .scale(Scale.FIT)
+                        .build()
+                }
+                val lastPainter = rememberAsyncImagePainter(model = lastReq)
+                androidx.compose.foundation.Image(
+                    painter = lastPainter,
+                    contentDescription = contentDescription,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            // Draw the new image only when ready (Success) to avoid a brief blank reload
+            if (painter.state is AsyncImagePainter.State.Success) {
+                androidx.compose.foundation.Image(
+                    painter = painter,
+                    contentDescription = contentDescription,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
                 )
             }
         }
