@@ -99,6 +99,20 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(onClick = { onPlay(tracks, 0) }) { Text("Play all") }
                             OutlinedButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks.shuffled(), 0) }) { Text("Shuffle") }
+                            var expanded by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(onClick = { expanded = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More") }
+                                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                                    DropdownMenuItem(text = { Text("Change artwork") }, onClick = {
+                                        expanded = false
+                                        // Placeholder: add image picker to set a custom artist mosaic
+                                    })
+                                    DropdownMenuItem(text = { Text("Edit artist info") }, onClick = {
+                                        expanded = false
+                                        // Placeholder: future artist info editing (no dedicated artist table currently)
+                                    })
+                                }
+                            }
                         }
                     }
                 }

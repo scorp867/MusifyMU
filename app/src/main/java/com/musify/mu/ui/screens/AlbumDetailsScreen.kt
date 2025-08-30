@@ -98,6 +98,22 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(onClick = { onPlay(tracks, 0) }) { Text("Play all") }
                             OutlinedButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks.shuffled(), 0) }) { Text("Shuffle") }
+                            var expanded by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(onClick = { expanded = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More") }
+                                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                                    val scope = rememberCoroutineScope()
+                                    DropdownMenuItem(text = { Text("Change artwork") }, onClick = {
+                                        expanded = false
+                                        // Navigate to NowPlaying's picker-like flow is not ideal here; keep placeholder for future
+                                        // For now, this can be expanded to open an image picker and update all album tracks art
+                                    })
+                                    DropdownMenuItem(text = { Text("Edit album info") }, onClick = {
+                                        expanded = false
+                                        // Placeholder for future album info edit (no separate album table in current schema)
+                                    })
+                                }
+                            }
                         }
                     }
                 }
