@@ -198,73 +198,58 @@ fun NowPlayingScreen(navController: NavController) {
 
     val coroutineScope = rememberCoroutineScope()
 
-    // Extract colors from pre-cached album artwork on track change
-    LaunchedEffect(currentTrack?.mediaId) {
-        currentTrack?.let { track ->
-            coroutineScope.launch(Dispatchers.IO) {
+    // Extract colors from artwork and react to on-demand loader updates
+
+    LaunchedEffect(currentTrack?.mediaId, currentTrack?.artUri) {
+        val track = currentTrack
+        if (track == null) {
+            dominantColor = Color(0xFF6236FF)
+            vibrantColor = Color(0xFF38B6FF)
+            return@LaunchedEffect
+        }
+
+        suspend fun extractAndApply(fromUri: String?) {
+            withContext(Dispatchers.IO) {
                 try {
-                    android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
-
-                    // Use pre-extracted artwork URI from Track entity
-                    val artworkUri = track.artUri
-
-                    val sourceBitmap = if (!artworkUri.isNullOrBlank()) {
-                        try {
-                            // Convert file URI to file path and load bitmap
-                            val artworkPath = if (artworkUri.startsWith("file://")) {
-                                artworkUri.substring(7) // Remove "file://" prefix
-                            } else {
-                                artworkUri
-                            }
-                            android.graphics.BitmapFactory.decodeFile(artworkPath)?.also {
-                                android.util.Log.d("NowPlayingScreen", "Loaded pre-cached artwork for color extraction: $artworkPath")
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("NowPlayingScreen", "Failed to load pre-cached artwork file: $artworkUri", e)
-                            null
-                        }
-                    } else {
-                        android.util.Log.d("NowPlayingScreen", "No pre-cached artwork available for ${track.title}")
-                        null
-                    }
-
-                    // Extract palette colors on background thread
-                    val extractedColors = sourceBitmap?.let { bitmap ->
+                    val uri = fromUri
+                    val bmp: android.graphics.Bitmap? = if (!uri.isNullOrBlank()) {
+                        val path = if (uri.startsWith("file://")) uri.substring(7) else uri
+                        android.graphics.BitmapFactory.decodeFile(path)
+                    } else null
+                    val colors = bmp?.let { bitmap ->
                         val palette = androidx.palette.graphics.Palette.from(bitmap)
                             .maximumColorCount(16)
                             .generate()
-
                         val vibrant = palette.getVibrantColor(0xFF38B6FF.toInt())
                         val dominant = palette.getDominantColor(0xFF6236FF.toInt())
-                        val darkVibrant = palette.getDarkVibrantColor(dominant)
-
-                        android.util.Log.d("NowPlayingScreen", "Extracted colors - Dominant: ${Integer.toHexString(dominant)}, Vibrant: ${Integer.toHexString(vibrant)}")
                         Pair(Color(dominant), Color(vibrant))
-                    } ?: run {
-                        android.util.Log.d("NowPlayingScreen", "Using default colors for ${track.title}")
-                        Pair(Color(0xFF6236FF), Color(0xFF38B6FF))
-                    }
-
-                    // Update colors on main thread
+                    } ?: Pair(Color(0xFF6236FF), Color(0xFF38B6FF))
                     withContext(Dispatchers.Main) {
-                        dominantColor = extractedColors.first
-                        vibrantColor = extractedColors.second
-                        android.util.Log.d("NowPlayingScreen", "Applied new colors for ${track.title}")
+                        dominantColor = colors.first
+                        vibrantColor = colors.second
                     }
-
-                } catch (e: Exception) {
-                    android.util.Log.w("NowPlayingScreen", "Failed to extract colors for ${track.title}", e)
+                } catch (_: Exception) {
                     withContext(Dispatchers.Main) {
                         dominantColor = Color(0xFF6236FF)
                         vibrantColor = Color(0xFF38B6FF)
                     }
                 }
             }
-        } ?: run {
-            // No track, use default colors
-            android.util.Log.d("NowPlayingScreen", "No current track, using default colors")
-            dominantColor = Color(0xFF6236FF)
-            vibrantColor = Color(0xFF38B6FF)
+        }
+
+        // Prefer track.artUri; if missing, try loader cache; palette updates again when loader later fills
+        val initial = track.artUri ?: com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(track.mediaId)
+        extractAndApply(initial)
+
+        // Also subscribe for future updates from loader and update colors instantly
+        if (!track.mediaId.isNullOrBlank()) {
+            coroutineScope.launch {
+                com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(track.mediaId).collect { newUri ->
+                    if (!newUri.isNullOrBlank()) {
+                        extractAndApply(newUri)
+                    }
+                }
+            }
         }
     }
 

@@ -71,7 +71,7 @@ class LibraryRepository private constructor(private val context: Context, privat
         }
     }
 
-    fun pagingSource(): PagingSource<Int, Track> = TrackPagingSource(db.dao())
+    fun pagingSource(): PagingSource<Int, Track> = db.dao().pagingTracks()
 
     // Search in cached data - NO database query
     fun search(q: String): List<Track> = dataManager.searchTracks(q)

@@ -84,6 +84,7 @@ fun SmartArtwork(
         val sanitizedArtworkUri = remember(artworkUri) {
             artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
         }
+        // Keep showing the last good artwork until a new one is ready to avoid flicker
         var imageData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
 
         // Observe Media3/loader-provided artwork for this mediaUri
@@ -94,12 +95,13 @@ fun SmartArtwork(
 
         // Prioritize explicit artwork from track, otherwise use loader-provided art
         LaunchedEffect(sanitizedArtworkUri) {
-            if (!sanitizedArtworkUri.isNullOrBlank()) {
+            if (!sanitizedArtworkUri.isNullOrBlank() && imageData != sanitizedArtworkUri) {
                 imageData = sanitizedArtworkUri
             }
         }
+        // Always adopt loader-provided artwork when it becomes available; rely on coil crossfade to prevent jank
         LaunchedEffect(loaderFlowValue) {
-            if (imageData.isNullOrBlank() && !loaderFlowValue.isNullOrBlank()) {
+            if (!loaderFlowValue.isNullOrBlank() && imageData != loaderFlowValue) {
                 imageData = loaderFlowValue
             }
         }
@@ -146,18 +148,8 @@ fun SmartArtwork(
                 painter = painter,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alpha = if (isLoading) 0.7f else 1f
+                contentScale = ContentScale.Crop
             )
-
-            // Loading state overlay
-            if (painter.state is AsyncImagePainter.State.Loading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.2f))
-                )
-            }
         }
 
         // Show icon placeholder when no image or on error
