@@ -770,9 +770,9 @@ private fun AnimatedCarousel(
 
             // Prefetch artwork for visible items in this row (with small lookahead)
             LaunchedEffect(rowScrollState, data) {
-                snapshotFlow { rowScrollState.layoutInfo.visibleItemsInfo }
+                snapshotFlow { rowScrollState.layoutInfo.visibleItemsInfo.toList() }
                     .distinctUntilChanged()
-                    .collectLatest { visibleItems ->
+                    .collectLatest { visibleItems: List<androidx.compose.foundation.lazy.LazyListItemInfo> ->
                         if (visibleItems.isEmpty()) return@collectLatest
                         val start = (visibleItems.minOf { it.index } - 3).coerceAtLeast(0)
                         val end = (visibleItems.maxOf { it.index } + 3).coerceAtMost(data.lastIndex)
