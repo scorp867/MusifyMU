@@ -72,10 +72,6 @@ import androidx.paging.compose.LazyPagingItems
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 
 // Composition local to provide scroll state to child components
 val LocalScrollState = compositionLocalOf<LazyListState?> { null }
@@ -276,7 +272,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         tabs.forEachIndexed { index, label ->
                             var showListsModeMenu by remember { mutableStateOf(false) }
                             val isListsTab = index == 0
-                            val themeManager = remember { com.musify.mu.ui.theme.AppThemeManager.getInstance(androidx.compose.ui.platform.LocalContext.current) }
+                            val ctx = androidx.compose.ui.platform.LocalContext.current
+                            val themeManager = remember(ctx) { com.musify.mu.ui.theme.AppThemeManager.getInstance(ctx) }
                             val listsMode by themeManager.listsDisplayModeState
                             Tab(
                                 selected = selectedSection == index,
@@ -314,7 +311,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         items(3) { ShimmerCarousel() }
                     } else {
                         val listsOrder = if (customLayoutEnabled) homeLayoutOrder.value else listOf("welcome","recentlyPlayed","recentlyAdded","favorites","playlists")
-                        val themeManager = remember { com.musify.mu.ui.theme.AppThemeManager.getInstance(androidx.compose.ui.platform.LocalContext.current) }
+                        val ctx2 = androidx.compose.ui.platform.LocalContext.current
+                        val themeManager = remember(ctx2) { com.musify.mu.ui.theme.AppThemeManager.getInstance(ctx2) }
                         val listsMode by themeManager.listsDisplayModeState
                         if (listsMode == "list") {
                             // Minimal list mode: show only list names, navigate on tap
@@ -324,7 +322,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                     "recentlyPlayed" -> "Recently Played"
                                     "recentlyAdded" -> "Recently Added"
                                     "favorites" -> "Favourites"
-                                    "playlists" -> "Playlists"
+                                    "playlists" -> null
                                     else -> null
                                 }
                                 if (title != null) {
@@ -333,7 +331,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                             "recentlyPlayed" -> navController.navigate("see_all/recently_played")
                                             "recentlyAdded" -> navController.navigate("see_all/recently_added")
                                             "favorites" -> navController.navigate("see_all/favorites")
-                                            "playlists" -> navController.navigate(com.musify.mu.ui.navigation.Screen.Playlist.route)
+                                            else -> {}
                                         }
                                     }
                                 }
