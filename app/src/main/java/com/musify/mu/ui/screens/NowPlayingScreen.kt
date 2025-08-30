@@ -207,7 +207,7 @@ fun NowPlayingScreen(navController: NavController) {
                     android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
 
                     val palette = com.musify.mu.util.extractPalette(
-                        LocalContext.current.contentResolver,
+                        context.contentResolver,
                         track.artUri
                     )
 
