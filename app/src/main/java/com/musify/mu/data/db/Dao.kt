@@ -40,6 +40,18 @@ interface AppDao {
     """)
     suspend fun insertPlayHistoryIfNotRecent(mediaId: String, playedAt: Long = System.currentTimeMillis())
 
+    // Insert only the first play for a mediaId; subsequent plays are ignored entirely
+    @Query(
+        """
+        INSERT OR IGNORE INTO play_history (mediaId, playedAt)
+        SELECT :mediaId, :playedAt
+        WHERE NOT EXISTS (
+            SELECT 1 FROM play_history WHERE mediaId = :mediaId
+        )
+        """
+    )
+    suspend fun insertPlayHistoryIfAbsent(mediaId: String, playedAt: Long = System.currentTimeMillis())
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertPlayHistory(entry: PlayHistory)
 
@@ -58,6 +70,10 @@ interface AppDao {
         """
     )
     suspend fun getRecentlyPlayed(limit: Int): List<Track>
+
+    // Clear all play history (used to clear Recently Played section)
+    @Query("DELETE FROM play_history")
+    suspend fun clearPlayHistory()
 
 
     // Playlists

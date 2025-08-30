@@ -146,7 +146,12 @@ class LibraryRepository private constructor(private val context: Context, privat
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
-    suspend fun recordPlayed(mediaId: String) = db.dao().insertPlayHistoryIfNotRecent(mediaId)
+    // Record a play event depending on policy. For new policy, persist only first occurrence
+    suspend fun recordPlayed(mediaId: String, onlyOnce: Boolean = true) {
+        if (onlyOnce) db.dao().insertPlayHistoryIfAbsent(mediaId) else db.dao().insertPlayHistoryIfNotRecent(mediaId)
+    }
+
+    suspend fun clearRecentlyPlayed() = db.dao().clearPlayHistory()
 
     // Artwork cache update from playback metadata
     suspend fun updateTrackArt(mediaId: String, artUri: String?) = db.dao().updateTrackArt(mediaId, artUri)
