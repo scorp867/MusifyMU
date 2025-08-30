@@ -29,6 +29,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.runtime.snapshotFlow
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.data.media.LoadingState
@@ -156,7 +159,20 @@ fun LibraryScreen(
         }
     }
 
-    // No artwork prefetching needed - all artwork is extracted at app startup
+    // Prefetch artwork for visible items
+    LaunchedEffect(listState, tracks) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+            .distinctUntilChanged()
+            .collectLatest { visibleIndices ->
+                val visibleTracks = visibleIndices.mapNotNull { index ->
+                    tracks.getOrNull(index)
+                }
+                val mediaUris = visibleTracks.mapNotNull { it.mediaId }
+                if (mediaUris.isNotEmpty()) {
+                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(mediaUris)
+                }
+            }
+    }
 
     // Background gradient
     val backgroundGradient = Brush.verticalGradient(
@@ -445,8 +461,10 @@ private fun TrackItem(
                 ) {
                     com.musify.mu.ui.components.SmartArtwork(
                         artworkUri = track.artUri, // Use pre-extracted artwork from database
+                        mediaUri = track.mediaId, // Enable on-demand loading for visible items
                         contentDescription = track.title,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        enableOnDemand = true
                     )
                 }
 

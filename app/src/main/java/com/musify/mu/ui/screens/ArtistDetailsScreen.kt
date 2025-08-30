@@ -6,6 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import com.musify.mu.util.toMediaItem
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
@@ -54,7 +58,26 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                 top?.firstOrNull { it.artUri != null }?.artUri
             }
 
+            val listState = rememberLazyListState()
+
+            // Prefetch artwork for visible tracks
+            LaunchedEffect(listState, tracks) {
+                snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                    .distinctUntilChanged()
+                    .collectLatest { visibleIndices ->
+                        val visibleTracks = visibleIndices.mapNotNull { index ->
+                            // Account for header item
+                            tracks.getOrNull(index - 1)
+                        }
+                        val mediaUris = visibleTracks.mapNotNull { it.mediaId }
+                        if (mediaUris.isNotEmpty()) {
+                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(mediaUris)
+                        }
+                    }
+            }
+
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize().padding(padding),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -63,7 +86,7 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
                             if (albumArt != null) {
-                                Artwork(data = albumArt, mediaUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
+                                Artwork(data = albumArt, mediaUri = tracks.firstOrNull()?.mediaId, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize(), enableOnDemand = true)
                             } else {
                                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
                             }
@@ -92,7 +115,7 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                             // Compact mosaic indicator
                             Box(modifier = Modifier.size(32.dp)) {
                                 if (albumArt != null) {
-                                    Artwork(data = albumArt, mediaUri = null, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize())
+                                    Artwork(data = albumArt, mediaUri = tracks.firstOrNull()?.mediaId, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize(), enableOnDemand = true)
                                 } else {
                                     Box(Modifier.fillMaxSize().background(Color.LightGray))
                                 }
@@ -130,6 +153,7 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                             title = t.title,
                             subtitle = t.album,
                             artData = t.artUri,
+                            mediaUri = t.mediaId,
                             contentDescription = t.title,
                             isPlaying = isPlaying,
                             useGlass = true,

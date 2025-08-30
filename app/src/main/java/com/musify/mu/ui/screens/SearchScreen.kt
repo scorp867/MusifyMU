@@ -28,6 +28,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.navigation.Screen
@@ -97,6 +100,21 @@ fun SearchScreen(
     LaunchedEffect(Unit) {
         delay(100) // Small delay to ensure UI is ready
         focusRequester.requestFocus()
+    }
+
+    // Prefetch artwork for visible search results
+    LaunchedEffect(lazyListState, results) {
+        snapshotFlow { lazyListState.layoutInfo.visibleItemsInfo.map { it.index } }
+            .distinctUntilChanged()
+            .collectLatest { visibleIndices ->
+                val visibleTracks = visibleIndices.mapNotNull { index ->
+                    results.getOrNull(index)
+                }
+                val mediaUris = visibleTracks.mapNotNull { it.mediaId }
+                if (mediaUris.isNotEmpty()) {
+                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(mediaUris)
+                }
+            }
     }
 
     Scaffold(
@@ -313,14 +331,21 @@ private fun SearchResultItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Album artwork
-            AsyncImage(
-                model = track.artUri,
-                contentDescription = track.title,
+            Box(
                 modifier = Modifier
                     .size(56.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
-            )
+            ) {
+                com.musify.mu.ui.components.Artwork(
+                    data = track.artUri,
+                    mediaUri = track.mediaId,
+                    albumId = track.albumId,
+                    contentDescription = track.title,
+                    modifier = Modifier.fillMaxSize(),
+                    enableOnDemand = true
+                )
+            }
 
             Spacer(modifier = Modifier.width(12.dp))
 
