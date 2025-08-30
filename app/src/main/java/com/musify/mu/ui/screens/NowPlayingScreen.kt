@@ -82,25 +82,7 @@ fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
-    // Edit states
-    var showArtworkPicker by remember { mutableStateOf(false) }
-    var showEditSongDialog by remember { mutableStateOf(false) }
-    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let {
-            // Update artwork for current track
-            val mediaId = currentTrack?.mediaId
-            if (mediaId != null) {
-                val uriStr = uri.toString()
-                // Update DB art and in-memory loader cache; writing tags handled by metadata writer utility
-                kotlinx.coroutines.GlobalScope.launch(Dispatchers.Main) {
-                    try {
-                        withContext(Dispatchers.IO) { repo.updateTrackArt(mediaId, uriStr) }
-                        com.musify.mu.util.OnDemandArtworkLoader.cacheUri(mediaId, uriStr)
-                    } catch (_: Exception) {}
-                }
-            }
-        }
-    }
+    // Edit states (declared after track state below for clarity)
 
     // Launchers and dialogs
     if (showArtworkPicker) {
@@ -229,6 +211,26 @@ fun NowPlayingScreen(navController: NavController) {
     var duration by remember { mutableStateOf(0L) }
     var isLiked by remember { mutableStateOf(false) }
     var userSeeking by remember { mutableStateOf(false) }
+
+    // Edit states
+    var showArtworkPicker by remember { mutableStateOf(false) }
+    var showEditSongDialog by remember { mutableStateOf(false) }
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            // Update artwork for current track
+            val mediaId = currentTrack?.mediaId
+            if (mediaId != null) {
+                val uriStr = uri.toString()
+                // Update DB art and in-memory loader cache; writing tags handled by metadata writer utility
+                kotlinx.coroutines.GlobalScope.launch(Dispatchers.Main) {
+                    try {
+                        withContext(Dispatchers.IO) { repo.updateTrackArt(mediaId, uriStr) }
+                        com.musify.mu.util.OnDemandArtworkLoader.cacheUri(mediaId, uriStr)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
 
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
