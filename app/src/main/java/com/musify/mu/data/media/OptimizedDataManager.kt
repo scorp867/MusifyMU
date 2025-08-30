@@ -210,6 +210,16 @@ class OptimizedDataManager private constructor(
     fun updateCachedTracks(tracks: List<Track>) {
         _cachedTracks.value = tracks
     }
+    
+    /**
+     * Ensure data manager is initialized
+     */
+    suspend fun ensureInitialized() {
+        if (!isInitialized) {
+            Log.d(TAG, "Data manager not initialized, initializing now...")
+            initializeOnAppLaunch()
+        }
+    }
 }
 
 // Album info data class

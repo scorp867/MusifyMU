@@ -63,8 +63,16 @@ interface AppDao {
     @Query("DELETE FROM play_history")
     suspend fun clearPlayHistory()
     
-    @Query("UPDATE track SET dateAddedSec = 0")
-    suspend fun clearRecentlyAdded()
+    @Query("INSERT OR REPLACE INTO hidden_recently_added (mediaId, hiddenAt) SELECT mediaId, :hiddenAt FROM track ORDER BY dateAddedSec DESC LIMIT 200")
+    suspend fun clearRecentlyAdded(hiddenAt: Long = System.currentTimeMillis())
+    
+    @Query("""
+        SELECT * FROM track 
+        WHERE mediaId NOT IN (SELECT mediaId FROM hidden_recently_added)
+        ORDER BY dateAddedSec DESC 
+        LIMIT :limit
+    """)
+    suspend fun getRecentlyAddedFiltered(limit: Int): List<Track>
 
     // Playlists
     @Insert

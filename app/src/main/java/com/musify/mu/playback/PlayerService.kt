@@ -143,24 +143,14 @@ class PlayerService : MediaLibraryService() {
                 override fun onMediaMetadataChanged(metadata: MediaMetadata) {
                     super.onMediaMetadataChanged(metadata)
 
-                    // Capture artwork bytes unavailable to MediaMetadataRetriever
-                    val bytes = metadata.artworkData
+                    // Capture artwork from Media3 metadata
                     val mediaId = player.currentMediaItem?.mediaId
-                    if (bytes != null && mediaId != null) {
-                        serviceScope.launch(Dispatchers.IO) {
-                            val cached = com.musify.mu.util.OptimizedArtworkLoader.storeArtworkBytes(mediaId, bytes)
-                            if (cached != null) {
-                                try { repo.updateTrackArt(mediaId, cached) } catch (_: Exception) {}
-                                com.musify.mu.util.OptimizedArtworkLoader.cacheUri(mediaId, cached)
-                            }
-                        }
-                    } else if (mediaId != null && metadata.artworkUri != null) {
-                        // Use Media3 artworkUri if present (e.g., notification extracted)
+                    if (mediaId != null && metadata.artworkUri != null) {
+                        // Use Media3 artworkUri if present
                         try {
                             val uriStr = metadata.artworkUri.toString()
                             serviceScope.launch(Dispatchers.IO) {
                                 try { repo.updateTrackArt(mediaId, uriStr) } catch (_: Exception) {}
-                                com.musify.mu.util.OptimizedArtworkLoader.cacheUri(mediaId, uriStr)
                             }
                         } catch (_: Exception) {}
                     }

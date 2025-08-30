@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.AnimatedBackground
 import com.musify.mu.ui.components.EnhancedLyricsView
@@ -170,6 +171,8 @@ fun NowPlayingScreen(navController: NavController) {
     var duration by remember { mutableStateOf(0L) }
     var isLiked by remember { mutableStateOf(false) }
     var userSeeking by remember { mutableStateOf(false) }
+    
+    val scope = rememberCoroutineScope()
     
     // Custom image picker functionality
     val imagePicker = rememberImagePicker { uri ->

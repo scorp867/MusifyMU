@@ -282,16 +282,6 @@ object OptimizedArtworkLoader {
         artworkFlows[mediaUri]?.value = artworkUri
     }
     
-    private fun generateCacheKey(input: String): String {
-        return try {
-            val digest = MessageDigest.getInstance("MD5")
-            val hashBytes = digest.digest(input.toByteArray())
-            hashBytes.joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) {
-            input.hashCode().toString()
-        }
-    }
-    
     /**
      * Clear caches to free memory
      */
@@ -304,7 +294,7 @@ object OptimizedArtworkLoader {
     /**
      * Generate cache key for artwork
      */
-    fun generateCacheKey(input: String): String {
+    private fun generateCacheKey(input: String): String {
         return try {
             val digest = MessageDigest.getInstance("MD5")
             val hashBytes = digest.digest(input.toByteArray())
@@ -315,4 +305,12 @@ object OptimizedArtworkLoader {
     }
 }
 
-private fun String.md5(): String = OptimizedArtworkLoader.generateCacheKey(this)
+private fun String.md5(): String {
+    return try {
+        val digest = MessageDigest.getInstance("MD5")
+        val hashBytes = digest.digest(this.toByteArray())
+        hashBytes.joinToString("") { "%02x".format(it) }
+    } catch (e: Exception) {
+        this.hashCode().toString()
+    }
+}

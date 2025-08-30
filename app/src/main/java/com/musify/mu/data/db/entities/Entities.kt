@@ -69,3 +69,9 @@ data class PlayHistory(
     val mediaId: String,
     val playedAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "hidden_recently_added")
+data class HiddenRecentlyAdded(
+    @PrimaryKey val mediaId: String,
+    val hiddenAt: Long = System.currentTimeMillis()
+)

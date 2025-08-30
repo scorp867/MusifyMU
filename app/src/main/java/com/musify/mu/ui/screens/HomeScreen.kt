@@ -45,6 +45,7 @@ import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.Artwork
 import com.musify.mu.ui.components.OptimizedArtwork
 import com.musify.mu.ui.components.AlbumArtwork
+import com.musify.mu.data.media.AlbumInfo
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.data.db.entities.Playlist

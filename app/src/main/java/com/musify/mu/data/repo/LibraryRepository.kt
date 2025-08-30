@@ -137,7 +137,7 @@ class LibraryRepository private constructor(private val context: Context, privat
     // Get recently added/played from database (these track user interactions, not cached)
     // Filter out deleted tracks by checking against current cached tracks
     suspend fun recentlyAdded(limit: Int = 20): List<Track> {
-        val databaseRecent = db.dao().getRecentlyAdded(limit)
+        val databaseRecent = db.dao().getRecentlyAddedFiltered(limit)
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
