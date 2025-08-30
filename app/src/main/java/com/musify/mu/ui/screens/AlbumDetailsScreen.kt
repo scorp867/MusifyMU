@@ -37,6 +37,7 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(album, artist) {
         val all = repo.getAllTracks()
@@ -51,9 +52,7 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
     ) { picked ->
         if (picked != null) {
             val uriStr = picked.toString()
-            androidx.compose.runtime.rememberCoroutineScope().launch {
-                repo.setAlbumArt(album, artist, uriStr)
-            }
+            scope.launch { repo.setAlbumArt(album, artist, uriStr) }
         }
     }
 
