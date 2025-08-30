@@ -481,7 +481,8 @@ fun NowPlayingScreen(navController: NavController) {
                             albumId = track.albumId,
                             contentDescription = track.title,
                             modifier = Modifier.fillMaxSize(),
-                            enableOnDemand = true
+                            enableOnDemand = true,
+                            holdPreviousOnLoading = false
                         )
 
                         // Subtle overlay for depth

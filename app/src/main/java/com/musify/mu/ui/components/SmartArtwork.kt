@@ -42,7 +42,8 @@ fun SmartArtwork(
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
     shape: Shape? = null,
-    enableOnDemand: Boolean = true
+    enableOnDemand: Boolean = true,
+    holdPreviousOnLoading: Boolean = true
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
@@ -148,8 +149,8 @@ fun SmartArtwork(
             }
             val painter = rememberAsyncImagePainter(model = request)
 
-            // Only use previous artwork as a placeholder if the incoming track already had art
-            val allowPreviousAsPlaceholder = remember(sanitizedArtworkUri) { !sanitizedArtworkUri.isNullOrBlank() }
+            // Only use previous artwork as a placeholder if enabled and the incoming track already had art
+            val allowPreviousAsPlaceholder = remember(sanitizedArtworkUri, holdPreviousOnLoading) { holdPreviousOnLoading && !sanitizedArtworkUri.isNullOrBlank() }
 
             // Draw previous successful art underneath while the new one is loading
             if (allowPreviousAsPlaceholder && painter.state is AsyncImagePainter.State.Loading && !lastSuccessfulData.isNullOrBlank()) {
