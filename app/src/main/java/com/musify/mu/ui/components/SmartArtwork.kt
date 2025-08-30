@@ -47,9 +47,9 @@ fun SmartArtwork(
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
 
-    // State for tracking load status
-    var isLoading by remember { mutableStateOf(true) }
-    var hasError by remember { mutableStateOf(false) }
+            // State for tracking load status - keyed by artwork URI to prevent re-initialization
+        var isLoading by remember(artworkUri, mediaUri) { mutableStateOf(true) }
+        var hasError by remember(artworkUri, mediaUri) { mutableStateOf(false) }
 
     // Create gradient background colors based on theme
     val gradientColors = listOf(
@@ -80,11 +80,8 @@ fun SmartArtwork(
                 )
         )
 
-        // Ignore MediaStore album art content URIs; rely on embedded art or Media3
-        val sanitizedArtworkUri = remember(artworkUri) {
-            artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
-        }
-        var imageData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
+        // Use the artwork URI as is
+        var imageData by remember { mutableStateOf<String?>(artworkUri) }
 
         // Observe Media3/loader-provided artwork for this mediaUri
         val loaderFlowValue = if (enableOnDemand && !mediaUri.isNullOrBlank()) {
@@ -93,9 +90,9 @@ fun SmartArtwork(
         } else null
 
         // Prioritize explicit artwork from track, otherwise use loader-provided art
-        LaunchedEffect(sanitizedArtworkUri) {
-            if (!sanitizedArtworkUri.isNullOrBlank()) {
-                imageData = sanitizedArtworkUri
+        LaunchedEffect(artworkUri) {
+            if (!artworkUri.isNullOrBlank()) {
+                imageData = artworkUri
             }
         }
         LaunchedEffect(loaderFlowValue) {
@@ -121,6 +118,8 @@ fun SmartArtwork(
                     .dispatcher(Dispatchers.IO)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
+                    .memoryCacheKey(imageData) // Use stable memory cache key
+                    .diskCacheKey(imageData) // Use stable disk cache key
                     .apply { if (enableCrossfade) crossfade(300) else crossfade(false) }
                     .size(Size.ORIGINAL)
                     .scale(Scale.FIT)
