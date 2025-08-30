@@ -434,9 +434,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             }
                         ) {
                             Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                // Get a sample track from this album to use for artwork loading
+                                val sampleTrack = remember(a.albumId) { 
+                                    cachedTracks.find { it.albumId == a.albumId } 
+                                }
+                                
                                 Artwork(
-                                    data = a.artUri,
-                                    mediaUri = null,
+                                    data = a.artUri ?: sampleTrack?.artUri,
+                                    mediaUri = sampleTrack?.mediaId, // Use sample track's mediaUri for on-demand loading
                                     albumId = a.albumId,
                                     contentDescription = a.albumName,
                                     modifier = Modifier.size(48.dp),
@@ -444,8 +449,19 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                 )
                                 Spacer(Modifier.width(12.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(a.albumName, style = MaterialTheme.typography.titleMedium)
-                                    Text(a.artistName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                                    Text(
+                                        text = a.albumName, 
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = a.artistName, 
+                                        style = MaterialTheme.typography.bodyMedium, 
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                                 Text("${a.trackCount}")
                             }
@@ -777,7 +793,7 @@ private fun AnimatedCarousel(
 ) {
     if (data.isEmpty()) return
 
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
@@ -810,7 +826,8 @@ private fun AnimatedCarousel(
             LazyRow(
                 state = rowScrollState,
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(horizontal = 4.dp)
+                contentPadding = PaddingValues(horizontal = 4.dp),
+                modifier = Modifier.height(90.dp) // Increase height for better visibility
             ) {
                 items(data.size, key = { index -> "carousel_${title}_${index}_${data[index].mediaId}" }) { index ->
                     val track = data[index]
@@ -847,14 +864,19 @@ private fun TrackCard(
     val queueOps = rememberQueueOperations()
     val scope = rememberCoroutineScope()
 
+    // Get the current playing track from the media controller
+    val controller = LocalMediaController.current
+    val currentMediaId = controller?.currentMediaItem?.mediaId
+    val isCurrentlyPlaying = currentMediaId == track.mediaId && controller?.isPlaying == true
+
     com.musify.mu.ui.components.CompactTrackRow(
         title = track.title,
         subtitle = track.artist,
         artData = track.artUri,
         mediaUri = track.mediaId,
         contentDescription = track.title,
-        isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == track.mediaId && com.musify.mu.playback.LocalIsPlaying.current,
-        showIndicator = true,
+        isPlaying = isCurrentlyPlaying,
+        showIndicator = isCurrentlyPlaying,
         onClick = { onClick() },
         modifier = Modifier.fillMaxWidth()
     )

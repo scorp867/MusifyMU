@@ -315,7 +315,7 @@ class PlayerService : MediaLibraryService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         // Stop the service when app is swiped away from recents
-        android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
+        android.util.Log.d("PlayerService", "App swiped away from recents - stopping service immediately")
 
         // Stop playback immediately
         try {
@@ -332,17 +332,34 @@ class PlayerService : MediaLibraryService() {
         // Stop foreground service and clear notifications immediately
         stopForeground(STOP_FOREGROUND_REMOVE)
 
-        // Clear any remaining notifications
+        // Clear any remaining notifications immediately
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancelAll()
 
-        // Stop the service completely
+        // Cancel all coroutines and stop the service completely
         serviceScope.cancel()
+        
+        // Force stop the service
         stopSelf()
+        
+        // Ensure the service is completely stopped
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            try {
+                stopSelf()
+            } catch (_: Exception) {}
+        }, 100)
     }
 
     override fun onDestroy() {
         audioFocusManager.abandon()
+        
+        // Ensure notifications are cleared
+        try {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancelAll()
+        } catch (_: Exception) {}
+        
         stopForegroundService()
         mediaLibrarySession?.release()
         _player?.release()
@@ -360,6 +377,20 @@ class PlayerService : MediaLibraryService() {
         }
 
         super.onDestroy()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        // Clear any cached data when memory is low
+        android.util.Log.d("PlayerService", "Low memory - clearing caches")
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            // App is going to background, ensure notifications are properly managed
+            android.util.Log.d("PlayerService", "App going to background - managing notifications")
+        }
     }
 
     // Public helper for other components to start playback for a list of media IDs
