@@ -254,7 +254,7 @@ object OptimizedArtworkLoader {
         }
     }
     
-    private fun cacheUri(mediaUri: String, artUri: String?) {
+    fun cacheUri(mediaUri: String, artUri: String?) {
         val value = artUri ?: NONE_SENTINEL
         memoryCache.put(mediaUri, value)
         

@@ -228,7 +228,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val homeLayoutOrder by remember { mutableStateOf(themeManager.homeLayoutConfigState) }
     
     // List/Carousel mode preference
-    val prefs = context.getSharedPreferences("home_prefs", Context.MODE_PRIVATE)
+    val prefs = context.getSharedPreferences("home_prefs", android.content.Context.MODE_PRIVATE)
     var isListMode by remember { mutableStateOf(prefs.getBoolean("is_list_mode", false)) }
     var showListModeMenu by remember { mutableStateOf(false) }
 
@@ -438,11 +438,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                                         )
                                                     },
                                                     trailingContent = {
-                                                        Text(
-                                                            "${playlist.trackCount} songs",
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                        )
+                                                                                                            Text(
+                                                        "Playlist",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
                                                     },
                                                     modifier = Modifier.clickable {
                                                         navController.navigate("playlist/${playlist.id}")
