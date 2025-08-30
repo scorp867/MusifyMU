@@ -84,45 +84,7 @@ fun NowPlayingScreen(navController: NavController) {
     val repo = remember { LibraryRepository.get(context) }
     // Edit states (declared after track state below for clarity)
 
-    // Launchers and dialogs
-    if (showArtworkPicker) {
-        // Restrict to images
-        LaunchedEffect(Unit) {
-            showArtworkPicker = false
-            pickImageLauncher.launch("image/*")
-        }
-    }
-
-    if (showEditSongDialog) {
-        val track = currentTrack
-        if (track != null) {
-            EditSongDialog(
-                initialTitle = track.title,
-                initialArtist = track.artist,
-                initialAlbum = track.album,
-                onDismiss = { showEditSongDialog = false },
-                onSave = { newTitle, newArtist, newAlbum ->
-                    // Persist to file metadata asynchronously and update cache/db on success
-                    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                        try {
-                            MetadataWriter.writeTags(
-                                context = context,
-                                mediaUriString = track.mediaId,
-                                title = newTitle,
-                                artist = newArtist,
-                                album = newAlbum
-                            )
-                            // Reflect updates in our database cache
-                            val updated = track.copy(title = newTitle, artist = newArtist, album = newAlbum)
-                            // Minimal DB reflection via art update path (or extend DAO to update fields if available)
-                            // Here we simply force a refresh by updating art (no-op) or trigger a rescan elsewhere
-                        } catch (_: Exception) {}
-                    }
-                    showEditSongDialog = false
-                }
-            )
-        }
-    }
+    // (moved below currentTrack state declarations)
 
     // Get or create VoiceControlManager singleton
     val voiceControlManager = remember {
@@ -229,6 +191,42 @@ fun NowPlayingScreen(navController: NavController) {
                     } catch (_: Exception) {}
                 }
             }
+        }
+    }
+
+    // Launchers and dialogs
+    if (showArtworkPicker) {
+        // Restrict to images
+        LaunchedEffect(Unit) {
+            showArtworkPicker = false
+            pickImageLauncher.launch("image/*")
+        }
+    }
+
+    if (showEditSongDialog) {
+        val track = currentTrack
+        if (track != null) {
+            EditSongDialog(
+                initialTitle = track.title,
+                initialArtist = track.artist,
+                initialAlbum = track.album,
+                onDismiss = { showEditSongDialog = false },
+                onSave = { newTitle, newArtist, newAlbum ->
+                    // Persist to file metadata asynchronously and update cache/db on success
+                    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                        try {
+                            MetadataWriter.writeTags(
+                                context = context,
+                                mediaUriString = track.mediaId,
+                                title = newTitle,
+                                artist = newArtist,
+                                album = newAlbum
+                            )
+                        } catch (_: Exception) {}
+                    }
+                    showEditSongDialog = false
+                }
+            )
         }
     }
 
