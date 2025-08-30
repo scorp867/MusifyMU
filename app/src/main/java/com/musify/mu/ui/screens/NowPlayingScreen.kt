@@ -203,11 +203,10 @@ fun NowPlayingScreen(navController: NavController) {
     LaunchedEffect(currentTrack?.mediaId, currentTrack?.artUri) {
         currentTrack?.let { track ->
             coroutineScope.launch(Dispatchers.IO) {
-                try {
-                    android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
+                try { android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
 
                     val palette = com.musify.mu.util.extractPalette(
-                        LocalContext.current.contentResolver,
+                        context.contentResolver,
                         track.artUri
                     )
 
