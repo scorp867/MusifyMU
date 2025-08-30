@@ -63,6 +63,7 @@ import com.musify.mu.ui.components.GymModeIndicator
 import com.musify.mu.util.PermissionHelper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.ExperimentalMaterialApi
@@ -93,6 +94,28 @@ fun NowPlayingScreen(navController: NavController) {
             voiceControlManager?.toggleGymMode()
         } else {
             android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+    
+    // Image picker launcher for custom album art
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            // Handle the selected image
+            currentTrack?.let { track ->
+                scope.launch {
+                    // Copy image to app storage and update track
+                    val artUri = com.musify.mu.util.AlbumArtManager.saveCustomAlbumArt(context, track.mediaId, uri)
+                    if (artUri != null) {
+                        // Update the track's art URI in database
+                        repo.updateTrackArt(track.mediaId, artUri)
+                        android.widget.Toast.makeText(context, "Album art updated", android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        android.widget.Toast.makeText(context, "Failed to update album art", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
         }
     }
 
@@ -345,6 +368,7 @@ fun NowPlayingScreen(navController: NavController) {
     )
 
     var showQueue by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
     LaunchedEffect(showQueue) {
         if (showQueue) android.util.Log.d("QueueScreenDBG", "Queue modal opened")
         else android.util.Log.d("QueueScreenDBG", "Queue modal closed")
@@ -417,6 +441,13 @@ fun NowPlayingScreen(navController: NavController) {
                                 isGymModeEnabled = !isGymModeEnabled
                                 voiceControlManager?.toggleGymMode()
                             }
+                        },
+                        onCustomAlbumArt = {
+                            // Launch image picker
+                            imagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        onEditSongDetails = {
+                            showEditDialog = true
                         }
                     )
                 }
@@ -867,6 +898,48 @@ fun NowPlayingScreen(navController: NavController) {
         }
 
 
+        // Edit Song Details Dialog
+        if (showEditDialog && currentTrack != null) {
+            com.musify.mu.ui.components.EditSongDetailsDialog(
+                track = currentTrack,
+                onDismiss = { showEditDialog = false },
+                onSave = { title, artist, album, albumArtist, saveToFile ->
+                    scope.launch {
+                        // Update track in database
+                        val updatedTrack = currentTrack.copy(
+                            title = title,
+                            artist = artist,
+                            album = album,
+                            albumArtist = albumArtist
+                        )
+                        repo.updateTrackDetails(updatedTrack)
+                        
+                        // Save to file if requested
+                        if (saveToFile) {
+                            val success = com.musify.mu.util.MetadataEditor.updateFileMetadata(
+                                context = context,
+                                mediaUri = currentTrack.mediaId,
+                                title = title,
+                                artist = artist,
+                                album = album,
+                                albumArtist = albumArtist
+                            )
+                            
+                            if (success) {
+                                android.widget.Toast.makeText(context, "Song details saved to file", android.widget.Toast.LENGTH_SHORT).show()
+                            } else {
+                                android.widget.Toast.makeText(context, "Failed to save to file, but database updated", android.widget.Toast.LENGTH_LONG).show()
+                            }
+                        } else {
+                            android.widget.Toast.makeText(context, "Song details updated in database", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        
+                        showEditDialog = false
+                    }
+                }
+            )
+        }
+
         if (showQueue) {
             val queueOps = com.musify.mu.playback.rememberQueueOperations()
             ModalBottomSheet(
@@ -962,7 +1035,7 @@ fun NowPlayingScreen(navController: NavController) {
                                 val e = end.coerceAtMost(visualQueueItems.lastIndex)
                                 if (s <= e) {
                                     val ids = visualQueueItems.subList(s, e + 1).map { it.mediaItem.mediaId }
-                                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                                    com.musify.mu.util.OptimizedArtworkLoader.prefetch(ids, priority = 10)
                                 }
                             }
                         }

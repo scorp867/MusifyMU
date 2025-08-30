@@ -120,7 +120,9 @@ dependencies {
 
     // WebRTC Android (Threema prebuilt) for access to org.webrtc audio processing
     implementation("ch.threema:webrtc-android:100.0.0")
-
+    
+    // JAudioTagger for metadata editing
+    implementation("net.jthink:jaudiotagger:3.0.1")
 
 }
 

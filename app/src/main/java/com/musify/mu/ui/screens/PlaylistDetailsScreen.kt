@@ -149,7 +149,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                         val end = max.coerceAtMost(visualTracks.lastIndex)
                         if (start <= end) {
                             val ids = visualTracks.subList(start, end + 1).map { it.mediaId }
-                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                            com.musify.mu.util.OptimizedArtworkLoader.prefetch(ids, priority = 8)
                         }
                     }
             }

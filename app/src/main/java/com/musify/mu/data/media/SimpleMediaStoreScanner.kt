@@ -54,7 +54,8 @@ class SimpleMediaStoreScanner(
         MediaStore.Audio.Media.ARTIST,
         MediaStore.Audio.Media.ALBUM,
         MediaStore.Audio.Media.DURATION,
-        MediaStore.Audio.Media.ALBUM_ID
+        MediaStore.Audio.Media.ALBUM_ID,
+        MediaStore.Audio.Media.DATE_ADDED
     )
 
     /**
@@ -267,6 +268,7 @@ class SimpleMediaStoreScanner(
                 val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
 
                 while (cursor.moveToNext()) {
                     try {
@@ -277,6 +279,7 @@ class SimpleMediaStoreScanner(
                         val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
+                        val dateAdded = cursor.getLong(dateAddedIndex)
 
                         // Validate essential fields - be less restrictive
                         if (duration >= 0) {  // Allow 0 duration for now
@@ -296,7 +299,8 @@ class SimpleMediaStoreScanner(
                                 album = album,
                                 durationMs = duration,
                                 artUri = quickArtUri, // Fast album art lookup via album ID
-                                albumId = albumId
+                                albumId = albumId,
+                                dateAddedSec = dateAdded
                             )
                             tracks.add(track)
 
@@ -345,6 +349,7 @@ class SimpleMediaStoreScanner(
                     val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                     val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                     val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
 
                     while (cursor.moveToNext()) {
                         try {
@@ -355,6 +360,7 @@ class SimpleMediaStoreScanner(
                             val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
+                            val dateAdded = cursor.getLong(dateAddedIndex)
 
                             // Basic validation
                             if (duration >= 0) {
@@ -368,7 +374,8 @@ class SimpleMediaStoreScanner(
                                     album = album,
                                     durationMs = duration,
                                     artUri = artworkUri, // Extracted and cached at startup
-                                    albumId = albumId
+                                    albumId = albumId,
+                                    dateAddedSec = dateAdded
                                 )
                                 tracks.add(track)
 
@@ -442,6 +449,7 @@ class SimpleMediaStoreScanner(
                 val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
 
                 var sinceLastEmit = 0
                 while (cursor.moveToNext()) {
@@ -453,6 +461,7 @@ class SimpleMediaStoreScanner(
                         val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
+                        val dateAdded = cursor.getLong(dateAddedIndex)
                         if (duration >= 0) {
                             val artworkUri: String? = null // skip during streaming scan
                             tracks.add(
@@ -463,7 +472,8 @@ class SimpleMediaStoreScanner(
                                     album = album,
                                     durationMs = duration,
                                     artUri = artworkUri,
-                                    albumId = albumId
+                                    albumId = albumId,
+                                    dateAddedSec = dateAdded
                                 )
                             )
                             sinceLastEmit++
@@ -491,6 +501,7 @@ class SimpleMediaStoreScanner(
                     val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                     val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                     val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                     var sinceLastEmit = 0
                     while (cursor.moveToNext()) {
                         try {
@@ -501,6 +512,7 @@ class SimpleMediaStoreScanner(
                             val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
+                            val dateAdded = cursor.getLong(dateAddedIndex)
                             if (duration >= 0) {
                                 val artworkUri: String? = null
                                 tracks.add(
@@ -511,7 +523,8 @@ class SimpleMediaStoreScanner(
                                         album = album,
                                         durationMs = duration,
                                         artUri = artworkUri,
-                                        albumId = albumId
+                                        albumId = albumId,
+                                        dateAddedSec = dateAdded
                                     )
                                 )
                                 sinceLastEmit++
