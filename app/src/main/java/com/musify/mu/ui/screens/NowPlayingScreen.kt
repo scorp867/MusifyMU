@@ -243,11 +243,9 @@ fun NowPlayingScreen(navController: NavController) {
 
         // Also subscribe for future updates from loader and update colors instantly
         if (!track.mediaId.isNullOrBlank()) {
-            coroutineScope.launch {
-                com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(track.mediaId).collect { newUri ->
-                    if (!newUri.isNullOrBlank()) {
-                        extractAndApply(newUri)
-                    }
+            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(track.mediaId).collect { newUri ->
+                if (!newUri.isNullOrBlank()) {
+                    extractAndApply(newUri)
                 }
             }
         }
