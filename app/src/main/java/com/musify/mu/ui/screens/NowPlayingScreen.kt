@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.rememberCoroutineScope
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.AnimatedBackground
 import com.musify.mu.ui.components.EnhancedLyricsView
@@ -61,6 +62,9 @@ import com.musify.mu.voice.VoiceControlManager
 import com.musify.mu.ui.components.MoreOptionsMenu
 import com.musify.mu.ui.components.GymModeIndicator
 import com.musify.mu.util.PermissionHelper
+import com.musify.mu.util.ImagePickerUtil
+import com.musify.mu.util.rememberImagePicker
+import com.musify.mu.ui.components.SongDetailsEditor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -167,6 +171,46 @@ fun NowPlayingScreen(navController: NavController) {
     var duration by remember { mutableStateOf(0L) }
     var isLiked by remember { mutableStateOf(false) }
     var userSeeking by remember { mutableStateOf(false) }
+    
+    val scope = rememberCoroutineScope()
+    
+    // Custom image picker functionality
+    val imagePicker = rememberImagePicker { uri ->
+        currentTrack?.let { track ->
+            scope.launch {
+                val customImagePath = ImagePickerUtil.saveCustomImage(context, uri, track.mediaId)
+                if (customImagePath != null) {
+                    // Update track artwork
+                    repo.updateTrackArt(track.mediaId, customImagePath)
+                    
+                    // Store persistent metadata
+                    com.musify.mu.util.MetadataPersistence.storeCustomMetadata(
+                        context = context,
+                        db = repo.dataManager.database,
+                        track = track,
+                        customArtUri = customImagePath
+                    )
+                    
+                    // Update current track state
+                    currentTrack = track.copy(artUri = customImagePath)
+                    android.widget.Toast.makeText(
+                        context,
+                        "Custom album art saved",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                } else {
+                    android.widget.Toast.makeText(
+                        context,
+                        "Failed to save custom image",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+    
+    // Song details editor
+    var showSongEditor by remember { mutableStateOf(false) }
 
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
@@ -417,6 +461,12 @@ fun NowPlayingScreen(navController: NavController) {
                                 isGymModeEnabled = !isGymModeEnabled
                                 voiceControlManager?.toggleGymMode()
                             }
+                        },
+                        onCustomImageClick = {
+                            imagePicker()
+                        },
+                        onEditDetailsClick = {
+                            showSongEditor = true
                         }
                     )
                 }
@@ -962,7 +1012,7 @@ fun NowPlayingScreen(navController: NavController) {
                                 val e = end.coerceAtMost(visualQueueItems.lastIndex)
                                 if (s <= e) {
                                     val ids = visualQueueItems.subList(s, e + 1).map { it.mediaItem.mediaId }
-                                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                                    com.musify.mu.util.OptimizedArtworkLoader.prefetch(ids)
                                 }
                             }
                         }
@@ -1188,6 +1238,26 @@ fun NowPlayingScreen(navController: NavController) {
                 }
             }
         }
+    }
+    
+    // Song Details Editor Dialog
+    if (showSongEditor && currentTrack != null) {
+        SongDetailsEditor(
+            track = currentTrack!!,
+            onDismiss = { showSongEditor = false },
+            onSave = { updatedTrack ->
+                scope.launch {
+                    repo.updateTrackDetails(updatedTrack)
+                    currentTrack = updatedTrack
+                    showSongEditor = false
+                    android.widget.Toast.makeText(
+                        context,
+                        "Song details updated",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        )
     }
 }
 

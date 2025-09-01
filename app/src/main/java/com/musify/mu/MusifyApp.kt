@@ -8,7 +8,7 @@ import coil.ImageLoaderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import com.musify.mu.data.media.SimpleBackgroundDataManager
+import com.musify.mu.data.media.OptimizedDataManager
 import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.util.CoilImageLoaderConfig
@@ -21,8 +21,8 @@ class MusifyApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize on-demand artwork loader with application context
-        com.musify.mu.util.OnDemandArtworkLoader.init(this)
+        // Initialize optimized artwork loader with application context
+        com.musify.mu.util.OptimizedArtworkLoader.init(this)
 
         // Note: Data manager will be initialized by LibraryScreen when permissions are granted
         // This avoids conflicts and ensures proper initialization timing

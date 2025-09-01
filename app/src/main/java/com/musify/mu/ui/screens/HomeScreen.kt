@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -42,6 +43,9 @@ import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.Artwork
+import com.musify.mu.ui.components.OptimizedArtwork
+import com.musify.mu.ui.components.AlbumArtwork
+import com.musify.mu.data.media.AlbumInfo
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.data.db.entities.Playlist
@@ -87,6 +91,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var customPlaylists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var refreshTrigger by remember { mutableStateOf(0) }
+    
+    // Memoize expensive operations
+    val recentPlayedMemo = remember(recentPlayed) { recentPlayed }
+    val recentAddedMemo = remember(recentAdded) { recentAdded }
+    val favoritesMemo = remember(favorites) { favorites }
 
     val scope = rememberCoroutineScope()
     var showSearchSheet by remember { mutableStateOf(false) }
@@ -221,6 +230,10 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     // Section tabs below welcome header
     var selectedSection by rememberSaveable { mutableStateOf(0) } // 0=LISTS, 1=SONGS, 2=ARTISTS, 3=ALBUMS
     // Keep state on Home reselect (no reset per request)
+    
+    // List/Carousel mode toggle for LISTS section
+    var listsMode by rememberSaveable { mutableStateOf("list") } // "list" or "carousel" - default is list mode
+    var showListsModeMenu by remember { mutableStateOf(false) }
     val themeManager = remember { com.musify.mu.ui.theme.AppThemeManager.getInstance(context) }
     val customLayoutEnabled = themeManager.customLayoutEnabled
     val homeLayoutOrder by remember { mutableStateOf(themeManager.homeLayoutConfigState) }
@@ -267,55 +280,189 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
                     ) {
                         tabs.forEachIndexed { index, label ->
-                            Tab(
-                                selected = selectedSection == index,
-                                onClick = { selectedSection = index },
-                                text = { Text(label) }
-                            )
+                            if (index == 0) { // LISTS tab with special handling
+                                Box {
+                                    Tab(
+                                        selected = selectedSection == index,
+                                        onClick = { selectedSection = index },
+                                        text = { 
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(label)
+                                                IconButton(
+                                                    onClick = { 
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        showListsModeMenu = true 
+                                                    },
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.MoreVert,
+                                                        contentDescription = "Change view mode",
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    )
+                                    
+                                    DropdownMenu(
+                                        expanded = showListsModeMenu,
+                                        onDismissRequest = { showListsModeMenu = false }
+                                    ) {
+                                        if (listsMode == "carousel") {
+                                            DropdownMenuItem(
+                                                text = { Text("List Mode") },
+                                                onClick = {
+                                                    listsMode = "list"
+                                                    showListsModeMenu = false
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.List,
+                                                        contentDescription = null
+                                                    )
+                                                }
+                                            )
+                                        } else {
+                                            DropdownMenuItem(
+                                                text = { Text("Carousel Mode") },
+                                                onClick = {
+                                                    listsMode = "carousel"
+                                                    showListsModeMenu = false
+                                                },
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.ViewModule,
+                                                        contentDescription = null
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Tab(
+                                    selected = selectedSection == index,
+                                    onClick = { selectedSection = index },
+                                    text = { Text(label) }
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            when (selectedSection) {
-                0 -> {
-                    if (isLoading) {
-                        items(3) { ShimmerCarousel() }
+            // Content based on selected section
+            if (selectedSection == 0) {
+                // LISTS section
+                if (isLoading) {
+                    items(3) { ShimmerCarousel() }
+                } else {
+                    if (listsMode == "list") {
+                        // List mode - simple list without song details
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                if (recentPlayedMemo.isNotEmpty()) {
+                                    ListModeItem(
+                                        title = "Recently Played",
+                                        icon = Icons.Rounded.History,
+                                        count = recentPlayedMemo.size,
+                                        onClick = { navController.navigate("see_all/recently_played") }
+                                    )
+                                }
+                                
+                                if (recentAddedMemo.isNotEmpty()) {
+                                    ListModeItem(
+                                        title = "Recently Added",
+                                        icon = Icons.Rounded.NewReleases,
+                                        count = recentAddedMemo.size,
+                                        onClick = { navController.navigate("see_all/recently_added") }
+                                    )
+                                }
+                                
+                                if (favoritesMemo.isNotEmpty()) {
+                                    ListModeItem(
+                                        title = "Favourites",
+                                        icon = Icons.Rounded.Favorite,
+                                        count = favoritesMemo.size,
+                                        onClick = { navController.navigate("see_all/favorites") }
+                                    )
+                                }
+                                
+                                customPlaylists.forEach { playlist ->
+                                    ListModeItem(
+                                        title = playlist.name,
+                                        icon = Icons.Rounded.PlaylistPlay,
+                                        count = null,
+                                        onClick = { navController.navigate("playlist_details/${playlist.id}") }
+                                    )
+                                }
+                            }
+                        }
                     } else {
+                        // Carousel mode
                         val listsOrder = if (customLayoutEnabled) homeLayoutOrder.value else listOf("welcome","recentlyPlayed","recentlyAdded","favorites","playlists")
                         listsOrder.forEach { sectionKey ->
                             when (sectionKey) {
                                 "welcome" -> item { /* header already shown above; skip to avoid duplicate */ }
                                 "recentlyPlayed" -> item {
-                                    if (recentPlayed.isNotEmpty()) {
+                                    if (recentPlayedMemo.isNotEmpty()) {
                                         AnimatedCarousel(
                                             title = "Recently Played",
                                             icon = Icons.Rounded.History,
-                                            data = recentPlayed,
+                                            data = recentPlayedMemo,
                                             onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
                                             haptic = haptic,
-                                            onSeeAll = { navController.navigate("see_all/recently_played") }
+                                            onSeeAll = { navController.navigate("see_all/recently_played") },
+                                            onClear = {
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) {
+                                                        repo.clearRecentlyPlayed()
+                                                        withContext(Dispatchers.Main) {
+                                                            recentPlayed = emptyList()
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         )
                                     }
                                 }
                                 "recentlyAdded" -> item {
-                                    if (recentAdded.isNotEmpty()) {
+                                    if (recentAddedMemo.isNotEmpty()) {
                                         AnimatedCarousel(
                                             title = "Recently Added",
                                             icon = Icons.Rounded.NewReleases,
-                                            data = recentAdded,
+                                            data = recentAddedMemo,
                                             onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
                                             haptic = haptic,
-                                            onSeeAll = { navController.navigate("see_all/recently_added") }
+                                            onSeeAll = { navController.navigate("see_all/recently_added") },
+                                            onClear = {
+                                                scope.launch {
+                                                    withContext(Dispatchers.IO) {
+                                                        repo.clearRecentlyAdded()
+                                                        withContext(Dispatchers.Main) {
+                                                            recentAdded = emptyList()
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         )
                                     }
                                 }
                                 "favorites" -> item {
-                                    if (favorites.isNotEmpty()) {
+                                    if (favoritesMemo.isNotEmpty()) {
                                         AnimatedCarousel(
                                             title = "Favourites",
                                             icon = Icons.Rounded.Favorite,
-                                            data = favorites,
+                                            data = favoritesMemo,
                                             onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
                                             haptic = haptic,
                                             onSeeAll = { navController.navigate("see_all/favorites") }
@@ -334,118 +481,115 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         }
                     }
                 }
-                1 -> {
-                    // SONGS section now uses Paging 3 for on-demand loading
-                    items(pagingItems.itemCount, key = { i ->
-                        val item = pagingItems[i]
-                        item?.mediaId ?: "placeholder_$i"
-                    }) { idx ->
-                        val t = pagingItems[idx]
-                        if (t == null) {
-                            // Show loading placeholder
-                            Box(
+            } else if (selectedSection == 1) {
+                // SONGS section now uses Paging 3 for on-demand loading
+                items(pagingItems.itemCount, key = { i ->
+                    val item = pagingItems[i]
+                    item?.mediaId ?: "placeholder_$i"
+                }) { idx ->
+                    val t = pagingItems[idx]
+                    if (t == null) {
+                        // Show loading placeholder
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(60.dp)
+                                .padding(horizontal = 12.dp, vertical = 2.dp)
+                        ) {
+                            Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(60.dp)
-                                    .padding(horizontal = 12.dp, vertical = 2.dp)
+                                    .fillMaxSize()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
+                                // Placeholder for artwork
+                                Box(
                                     modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // Placeholder for artwork
+                                        .size(52.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    // Placeholder for title
                                     Box(
                                         modifier = Modifier
-                                            .size(52.dp)
-                                            .clip(RoundedCornerShape(8.dp))
+                                            .fillMaxWidth(0.7f)
+                                            .height(20.dp)
+                                            .clip(RoundedCornerShape(4.dp))
                                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                                     )
-                                    Spacer(Modifier.width(10.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        // Placeholder for title
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.7f)
-                                                .height(20.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                                        )
-                                        Spacer(Modifier.height(4.dp))
-                                        // Placeholder for subtitle
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.5f)
-                                                .height(16.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
-                                        )
-                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    // Placeholder for subtitle
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.5f)
+                                            .height(16.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
+                                    )
                                 }
                             }
-                            return@items
                         }
-                        val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
+                        return@items
+                    }
+                    val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
 
-                        // Add queue operations for swipe gestures
-                        val queueOps = rememberQueueOperations()
-                        val scope = rememberCoroutineScope()
+                    // Add queue operations for swipe gestures
+                    val queueOps = rememberQueueOperations()
+                    val scope = rememberCoroutineScope()
 
-                        com.musify.mu.ui.components.CompactTrackRow(
-                            title = t.title,
-                            subtitle = t.artist,
-                            artData = t.artUri,
-                            mediaUri = t.mediaId,
-                            contentDescription = t.title,
-                            isPlaying = isPlaying,
-                            showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                            onClick = { onPlay(pagingItems.itemSnapshotList.items, idx) },
-                            modifier = Modifier.fillMaxWidth()
+                    com.musify.mu.ui.components.CompactTrackRow(
+                        title = t.title,
+                        subtitle = t.artist,
+                        artData = t.artUri,
+                        mediaUri = t.mediaId,
+                        contentDescription = t.title,
+                        isPlaying = isPlaying,
+                        showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
+                        onClick = { onPlay(pagingItems.itemSnapshotList.items, idx) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            } else if (selectedSection == 2) {
+                // ARTISTS section
+                items(artistsFiltered.size, key = { i -> "artist_${artistsFiltered[i].first}" }) { idx ->
+                    val (name, count) = artistsFiltered[idx]
+                    Card(
+                        modifier = Modifier.clickable {
+                            val encoded = java.net.URLEncoder.encode(name, "UTF-8")
+                            navController.navigate("artist_details/$encoded")
+                        }
+                    ) {
+                        ListItem(
+                            headlineContent = { Text(name) },
+                            supportingContent = { Text("$count songs") }
                         )
                     }
                 }
-                2 -> {
-                    // ARTISTS section
-                    items(artistsFiltered.size, key = { i -> "artist_${artistsFiltered[i].first}" }) { idx ->
-                        val (name, count) = artistsFiltered[idx]
-                        Card(
-                            modifier = Modifier.clickable {
-                                val encoded = java.net.URLEncoder.encode(name, "UTF-8")
-                                navController.navigate("artist_details/$encoded")
-                            }
-                        ) {
-                            ListItem(
-                                headlineContent = { Text(name) },
-                                supportingContent = { Text("$count songs") }
-                            )
+            } else if (selectedSection == 3) {
+                // ALBUMS section
+                items(albumsFiltered.size, key = { i -> "album_${albumsFiltered[i].albumId}_${albumsFiltered[i].albumName}" }) { idx ->
+                    val a = albumsFiltered[idx]
+                    Card(
+                        modifier = Modifier.clickable {
+                            val albumEnc = java.net.URLEncoder.encode(a.albumName, "UTF-8")
+                            val artistEnc = java.net.URLEncoder.encode(a.artistName, "UTF-8")
+                            navController.navigate("album_details/$albumEnc/$artistEnc")
                         }
-                    }
-                }
-                3 -> {
-                    // ALBUMS section
-                    items(albumsFiltered.size, key = { i -> "album_${albumsFiltered[i].albumId}_${albumsFiltered[i].albumName}" }) { idx ->
-                        val a = albumsFiltered[idx]
-                        Card(
-                            modifier = Modifier.clickable {
-                                val albumEnc = java.net.URLEncoder.encode(a.albumName, "UTF-8")
-                                val artistEnc = java.net.URLEncoder.encode(a.artistName, "UTF-8")
-                                navController.navigate("album_details/$albumEnc/$artistEnc")
+                    ) {
+                        Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            com.musify.mu.ui.components.AlbumArtwork(
+                                albumId = a.albumId,
+                                contentDescription = a.albumName,
+                                modifier = Modifier.size(48.dp)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(a.albumName, style = MaterialTheme.typography.titleMedium)
+                                Text(a.artistName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                             }
-                        ) {
-                            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                com.musify.mu.ui.components.AlbumArtwork(
-                                    albumId = a.albumId,
-                                    contentDescription = a.albumName,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(a.albumName, style = MaterialTheme.typography.titleMedium)
-                                    Text(a.artistName, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
-                                }
-                                Text("${a.trackCount}")
-                            }
+                            Text("${a.trackCount}")
                         }
                     }
                 }
@@ -664,17 +808,19 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         }
     }
 
-    // Prefetch embedded art for visible recent lists (row-based prefetch for the main column)
-    LaunchedEffect(listState, recentAdded, recentPlayed, favorites) {
+    // Optimized prefetch for visible recent lists (reduced frequency)
+    LaunchedEffect(listState, recentAddedMemo, recentPlayedMemo, favoritesMemo) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
             .distinctUntilChanged()
             .collectLatest { _ ->
-                val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
+                // Reduced to prevent overwhelming the system
+                val visibleTracks = (recentAddedMemo + recentPlayedMemo + favoritesMemo).take(20)
                 val uris = visibleTracks.map { it.mediaId }
                 if (uris.isNotEmpty()) {
-                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(uris)
+                    // Add delay to prevent flooding
+                    kotlinx.coroutines.delay(100)
+                    com.musify.mu.util.OptimizedArtworkLoader.prefetch(uris)
                 }
-                // Simple artwork loading - no preloading needed
             }
     }
 }
@@ -770,9 +916,12 @@ private fun AnimatedCarousel(
     data: List<Track>,
     onPlay: (List<Track>, Int) -> Unit,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
-    onSeeAll: () -> Unit
+    onSeeAll: () -> Unit,
+    onClear: (() -> Unit)? = null
 ) {
     if (data.isEmpty()) return
+
+    var showMoreMenu by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(
@@ -797,6 +946,40 @@ private fun AnimatedCarousel(
             TextButton(onClick = onSeeAll) {
                 Text("See all")
             }
+            
+            // More button with dropdown for Recently Played and Recently Added
+            if (onClear != null) {
+                Box {
+                    IconButton(
+                        onClick = { showMoreMenu = !showMoreMenu }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "More options",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    
+                    DropdownMenu(
+                        expanded = showMoreMenu,
+                        onDismissRequest = { showMoreMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Clear") },
+                            onClick = {
+                                onClear()
+                                showMoreMenu = false
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Rounded.Clear,
+                                    contentDescription = null
+                                )
+                            }
+                        )
+                    }
+                }
+            }
         }
 
         // Create a scroll state for this row
@@ -809,7 +992,7 @@ private fun AnimatedCarousel(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(horizontal = 4.dp)
             ) {
-                items(data.size, key = { index -> "carousel_${title}_${index}_${data[index].mediaId}" }) { index ->
+                items(data.size, key = { index -> data[index].mediaId }) { index ->
                     val track = data[index]
                     TrackCard(
                         track = track,
@@ -845,13 +1028,11 @@ private fun TrackCard(
                 .clip(RoundedCornerShape(14.dp))
                 .shadow(6.dp, RoundedCornerShape(14.dp))
         ) {
-            com.musify.mu.ui.components.Artwork(
-                data = track.artUri,
+            com.musify.mu.ui.components.OptimizedArtwork(
                 mediaUri = track.mediaId,
-                albumId = track.albumId,
+                albumArtUri = track.artUri,
                 contentDescription = track.title,
-                modifier = Modifier.fillMaxSize(),
-                enableOnDemand = true
+                modifier = Modifier.fillMaxSize()
             ) {
                 if (isCurrent) {
                     com.musify.mu.ui.components.PlayingIndicator(
@@ -1079,4 +1260,53 @@ private fun PlaylistCard(
     }
 }
 
-
+@Composable
+private fun ListModeItem(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    count: Int?,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 2.dp,
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                if (count != null) {
+                    Text(
+                        text = "$count ${if (count == 1) "track" else "tracks"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                }
+            }
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+            )
+        }
+    }
+}
