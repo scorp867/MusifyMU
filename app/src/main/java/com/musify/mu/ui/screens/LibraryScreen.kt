@@ -307,7 +307,7 @@ fun LibraryScreen(
                 val end = (visibleItems.maxOf { it.index } + 5).coerceAtMost(visualTracks.lastIndex)
                 if (start <= end && visualTracks.isNotEmpty()) {
                     val prefetchUris: List<String> = visualTracks.subList(start, end + 1).map { it.mediaId }
-                    com.musify.mu.util.OptimizedArtworkLoader.prefetch(prefetchUris, priority = 8)
+                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(prefetchUris)
                 }
             }
     }

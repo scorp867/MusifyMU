@@ -19,8 +19,6 @@ fun MoreOptionsMenu(
     isGymModeEnabled: Boolean,
     canEnableGymMode: Boolean,
     onGymModeToggle: () -> Unit,
-    onCustomAlbumArt: () -> Unit,
-    onEditSongDetails: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -58,6 +56,21 @@ fun MoreOptionsMenu(
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column {
+                        // Header
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                        ) {
+                            Text(
+                                text = "Voice Controls",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                modifier = Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
 
                         // Gym Mode Toggle
                         Surface(
@@ -115,49 +128,84 @@ fun MoreOptionsMenu(
                             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
                         )
 
-                        // Custom Album Art Option
-                        DropdownMenuItem(
-                            text = {
+                        // Voice Commands Help
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surface
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp)
+                            ) {
+                                Text(
+                                    text = "Voice Commands",
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontWeight = FontWeight.Medium
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                val commands = listOf(
+                                    "Play/Pause" to "Say 'play' or 'pause'",
+                                    "Skip" to "Say 'next' or 'skip'",
+                                    "Previous" to "Say 'previous' or 'back'",
+                                    "Shuffle" to "Say 'shuffle on/off'",
+                                    "Repeat" to "Say 'repeat one/all/off'",
+                                    "Volume" to "Say 'volume up/down' or 'mute'"
+                                )
+
+                                commands.forEach { (command, instruction) ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = command,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                        )
+                                        Text(
+                                            text = instruction,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Note about headset microphone
+                        if (canEnableGymMode) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                            ) {
                                 Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Rounded.Image,
+                                        imageVector = Icons.Rounded.Info,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Change Album Art")
-                                }
-                            },
-                            onClick = {
-                                expanded = false
-                                onCustomAlbumArt()
-                            }
-                        )
-                        
-                        // Edit Song Details Option
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Edit,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Uses headset microphone only",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
                                     )
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Edit Song Details")
                                 }
-                            },
-                            onClick = {
-                                expanded = false
-                                onEditSongDetails()
                             }
-                        )
+                        }
                     }
                 }
             }

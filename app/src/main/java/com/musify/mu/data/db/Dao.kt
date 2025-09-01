@@ -28,18 +28,14 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY dateAddedSec DESC LIMIT :limit")
     suspend fun getRecentlyAdded(limit: Int): List<Track>
 
-    // Smart play history insertion - only record if not already in recent history
+    // Smart play history insertion - only record if not played recently (within 30 seconds)
     @Query("""
         INSERT OR IGNORE INTO play_history (mediaId, playedAt) 
         SELECT :mediaId, :playedAt 
         WHERE NOT EXISTS (
-            SELECT 1 FROM play_history ph
-            WHERE ph.mediaId = :mediaId 
-            AND ph.playedAt IN (
-                SELECT playedAt FROM play_history
-                ORDER BY playedAt DESC
-                LIMIT 200
-            )
+            SELECT 1 FROM play_history 
+            WHERE mediaId = :mediaId 
+            AND playedAt > :playedAt - 30000
         )
     """)
     suspend fun insertPlayHistoryIfNotRecent(mediaId: String, playedAt: Long = System.currentTimeMillis())
@@ -62,9 +58,6 @@ interface AppDao {
         """
     )
     suspend fun getRecentlyPlayed(limit: Int): List<Track>
-    
-    @Query("DELETE FROM play_history")
-    suspend fun clearPlayHistory()
 
 
     // Playlists
@@ -126,9 +119,6 @@ interface AppDao {
     // Artwork helpers
     @Query("UPDATE track SET artUri = :art WHERE mediaId = :mediaId")
     suspend fun updateTrackArt(mediaId: String, art: String?)
-    
-    @Update
-    suspend fun updateTrack(track: Track)
 
     @Query("SELECT * FROM track WHERE artUri IS NULL OR artUri = ''")
     suspend fun getTracksMissingArt(): List<Track>
