@@ -75,11 +75,9 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     // Enhanced drag configuration for playlist reordering
     val dragConfig = remember {
         com.musify.mu.ui.components.DragDropConfig(
-            longPressTimeout = 300L,
-            animationDuration = 150,
             enableHardwareAcceleration = true,
-            enableAutoScroll = true,
-            autoScrollThreshold = 70f
+            enableLightweightShadow = true,
+            enableHapticFeedback = true
         )
     }
 
@@ -188,9 +186,9 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                         // Hardware acceleration for smooth drag animations
                                         if (dragConfig.enableHardwareAcceleration) {
                                             compositingStrategy = if (isDragging) {
-                                                CompositingStrategy.Offscreen
+                                                androidx.compose.ui.graphics.CompositingStrategy.Offscreen
                                             } else {
-                                                CompositingStrategy.Auto
+                                                androidx.compose.ui.graphics.CompositingStrategy.Auto
                                             }
                                         }
                                         scaleX = if (isDragging) 1.02f else 1f

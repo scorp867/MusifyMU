@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,16 +60,14 @@ import com.musify.mu.ui.components.AlphabeticalScrollBar
 import com.musify.mu.ui.components.generateAlphabet
 import com.musify.mu.ui.components.getFirstLetter
 import com.musify.mu.ui.components.EnhancedSwipeableItem
+import com.musify.mu.ui.components.SongDetailsEditor
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.runtime.derivedStateOf
 import com.musify.mu.ui.helpers.MediaControllerListener
-import androidx.paging.Pager
-import androidx.paging.PagingConfig
-import androidx.paging.compose.collectAsLazyPagingItems
-import androidx.paging.compose.LazyPagingItems
 
 // Composition local to provide scroll state to child components
 val LocalScrollState = compositionLocalOf<LazyListState?> { null }
@@ -91,25 +90,25 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     val scope = rememberCoroutineScope()
     var showSearchSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var showSongEditor by remember { mutableStateOf(false) }
+    var editingTrack by remember { mutableStateOf<Track?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = repo.getAllTracks())
 
     val listState = rememberLazyListState()
 
-    // LazyPagingItems for all tracks (alphabetical)
-    // Increase initial load size and enable placeholders for faster perceived loading
-    val pagingItems: androidx.paging.compose.LazyPagingItems<Track> = remember {
-        Pager(
-            config = PagingConfig(
-                pageSize = 50,
-                prefetchDistance = 20,
-                initialLoadSize = 100, // Load more items initially
-                enablePlaceholders = true // Show placeholders while loading
-            )
-        ) {
-            repo.pagingSource()
-        }.flow
-    }.collectAsLazyPagingItems()
+    // All tracks from new LocalFilesService - no paging needed
+    val allTracks by remember(cachedTracks) {
+        derivedStateOf { cachedTracks.sortedBy { it.title.lowercase() } }
+    }
+
+    // Prefetch artwork for visible tracks to reduce loading delays
+    LaunchedEffect(allTracks) {
+        if (allTracks.isNotEmpty()) {
+            val visibleTrackUris = allTracks.take(50).map { it.mediaId }
+            repo.dataManager.localFilesService.prefetchArtwork(visibleTrackUris)
+        }
+    }
 
     // Function to refresh data with IO dispatcher
     val refreshData = {
@@ -220,22 +219,34 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
 
     // Section tabs below welcome header
     var selectedSection by rememberSaveable { mutableStateOf(0) } // 0=LISTS, 1=SONGS, 2=ARTISTS, 3=ALBUMS
+    var listsDisplayMode by rememberSaveable { mutableStateOf("carousel") } // "list" or "carousel"
+
     // Keep state on Home reselect (no reset per request)
     val themeManager = remember { com.musify.mu.ui.theme.AppThemeManager.getInstance(context) }
     val customLayoutEnabled = themeManager.customLayoutEnabled
     val homeLayoutOrder by remember { mutableStateOf(themeManager.homeLayoutConfigState) }
 
-    // Derived data for section lists
-    val tracksFiltered = remember(cachedTracks) { cachedTracks }
-    val artistsAll = remember(cachedTracks) {
-        cachedTracks
-            .groupBy { it.artist.ifBlank { "Unknown Artist" } }
-            .map { (name, tracks) -> name to tracks.size }
-            .sortedBy { it.first.lowercase() }
+    // Derived data for section lists - optimized to prevent unnecessary recompositions
+    val tracksFiltered by remember(cachedTracks) {
+        derivedStateOf { cachedTracks }
     }
-    val artistsFiltered = remember(artistsAll) { artistsAll }
-    val albumsAll = remember(cachedTracks) { repo.dataManager.getUniqueAlbums() }
-    val albumsFiltered = remember(albumsAll) { albumsAll }
+    val artistsAll by remember(cachedTracks) {
+        derivedStateOf {
+            cachedTracks
+                .groupBy { it.artist.ifBlank { "Unknown Artist" } }
+                .map { (name, tracks) -> name to tracks.size }
+                .sortedBy { it.first.lowercase() }
+        }
+    }
+    val artistsFiltered by remember(artistsAll) {
+        derivedStateOf { artistsAll }
+    }
+    val albumsAll by remember(cachedTracks) {
+        derivedStateOf { repo.dataManager.getUniqueAlbums() }
+    }
+    val albumsFiltered by remember(albumsAll) {
+        derivedStateOf { albumsAll }
+    }
 
 
 
@@ -267,11 +278,89 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                         containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
                     ) {
                         tabs.forEachIndexed { index, label ->
-                            Tab(
-                                selected = selectedSection == index,
-                                onClick = { selectedSection = index },
-                                text = { Text(label) }
-                            )
+                            if (index == 0) { // LISTS tab with dropdown
+                                var showDropdown by remember { mutableStateOf(false) }
+                                Tab(
+                                    selected = selectedSection == index,
+                                    onClick = { selectedSection = index },
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(label)
+                                            Box {
+                                                IconButton(
+                                                    onClick = { showDropdown = true },
+                                                    modifier = Modifier.size(20.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.ArrowDropDown,
+                                                        contentDescription = "Lists mode options",
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                                DropdownMenu(
+                                                    expanded = showDropdown,
+                                                    onDismissRequest = { showDropdown = false }
+                                                ) {
+                                                    DropdownMenuItem(
+                                                        text = { Text("Carousel Mode") },
+                                                        onClick = {
+                                                            listsDisplayMode = "carousel"
+                                                            showDropdown = false
+                                                        },
+                                                        leadingIcon = {
+                                                            Icon(
+                                                                imageVector = Icons.Rounded.ViewCarousel,
+                                                                contentDescription = null
+                                                            )
+                                                        },
+                                                        trailingIcon = {
+                                                            if (listsDisplayMode == "carousel") {
+                                                                Icon(
+                                                                    imageVector = Icons.Rounded.Check,
+                                                                    contentDescription = "Selected",
+                                                                    tint = MaterialTheme.colorScheme.primary
+                                                                )
+                                                            }
+                                                        }
+                                                    )
+                                                    DropdownMenuItem(
+                                                        text = { Text("List Mode") },
+                                                        onClick = {
+                                                            listsDisplayMode = "list"
+                                                            showDropdown = false
+                                                        },
+                                                        leadingIcon = {
+                                                                                @Suppress("DEPRECATION")
+                    Icon(
+                        imageVector = Icons.Rounded.List,
+                                                                contentDescription = null
+                                                            )
+                                                        },
+                                                        trailingIcon = {
+                                                            if (listsDisplayMode == "list") {
+                                                                Icon(
+                                                                    imageVector = Icons.Rounded.Check,
+                                                                    contentDescription = "Selected",
+                                                                    tint = MaterialTheme.colorScheme.primary
+                                                                )
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
+                            } else {
+                                Tab(
+                                    selected = selectedSection == index,
+                                    onClick = { selectedSection = index },
+                                    text = { Text(label) }
+                                )
+                            }
                         }
                     }
                 }
@@ -282,115 +371,141 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     if (isLoading) {
                         items(3) { ShimmerCarousel() }
                     } else {
-                        val listsOrder = if (customLayoutEnabled) homeLayoutOrder.value else listOf("welcome","recentlyPlayed","recentlyAdded","favorites","playlists")
-                        listsOrder.forEach { sectionKey ->
-                            when (sectionKey) {
-                                "welcome" -> item { /* header already shown above; skip to avoid duplicate */ }
-                                "recentlyPlayed" -> item {
-                                    if (recentPlayed.isNotEmpty()) {
-                                        AnimatedCarousel(
-                                            title = "Recently Played",
-                                            icon = Icons.Rounded.History,
-                                            data = recentPlayed,
-                                            onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
+                        if (listsDisplayMode == "carousel") {
+                            // Original carousel mode - show all sections with carousels
+                            val listsOrder = if (customLayoutEnabled) homeLayoutOrder.value else listOf("welcome","recentlyPlayed","recentlyAdded","favorites","playlists")
+                            listsOrder.forEach { sectionKey ->
+                                when (sectionKey) {
+                                    "welcome" -> item { /* header already shown above; skip to avoid duplicate */ }
+                                    "recentlyPlayed" -> item {
+                                        if (recentPlayed.isNotEmpty()) {
+                                            AnimatedCarousel(
+                                                title = "Recently Played",
+                                                icon = Icons.Rounded.History,
+                                                data = recentPlayed,
+                                                onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
+                                                haptic = haptic,
+                                                onSeeAll = { navController.navigate("see_all/recently_played") },
+                                                onClear = {
+                                                    scope.launch {
+                                                        withContext(Dispatchers.IO) {
+                                                            repo.clearRecentlyPlayed()
+                                                            withContext(Dispatchers.Main) {
+                                                                refreshTrigger++
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                    "recentlyAdded" -> item {
+                                        if (recentAdded.isNotEmpty()) {
+                                            AnimatedCarousel(
+                                                title = "Recently Added",
+                                                icon = Icons.Rounded.NewReleases,
+                                                data = recentAdded,
+                                                onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
+                                                haptic = haptic,
+                                                onSeeAll = { navController.navigate("see_all/recently_added") },
+                                                onClear = {
+                                                    scope.launch {
+                                                        withContext(Dispatchers.IO) {
+                                                            repo.clearRecentlyAdded()
+                                                            withContext(Dispatchers.Main) {
+                                                                refreshTrigger++
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
+                                    "favorites" -> item {
+                                        if (favorites.isNotEmpty()) {
+                                            AnimatedCarousel(
+                                                title = "Favourites",
+                                                icon = Icons.Rounded.Favorite,
+                                                data = favorites,
+                                                onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
+                                                haptic = haptic,
+                                                onSeeAll = { navController.navigate("see_all/favorites") },
+                                                onClear = { /* Favorites don't have a clear function */ }
+                                            )
+                                        }
+                                    }
+                                    "playlists" -> item {
+                                        CustomPlaylistsCarousel(
+                                            playlists = customPlaylists,
+                                            navController = navController,
                                             haptic = haptic,
-                                            onSeeAll = { navController.navigate("see_all/recently_played") }
+                                            onRefresh = { refreshTrigger++ }
                                         )
                                     }
                                 }
-                                "recentlyAdded" -> item {
-                                    if (recentAdded.isNotEmpty()) {
-                                        AnimatedCarousel(
-                                            title = "Recently Added",
-                                            icon = Icons.Rounded.NewReleases,
-                                            data = recentAdded,
-                                            onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
-                                            haptic = haptic,
-                                            onSeeAll = { navController.navigate("see_all/recently_added") }
+                            }
+                        } else {
+                            // List mode - show section names only
+                            val sections = listOf(
+                                Triple("Recently Played", Icons.Rounded.History, recentPlayed.size),
+                                Triple("Recently Added", Icons.Rounded.NewReleases, recentAdded.size),
+                                Triple("Favourites", Icons.Rounded.Favorite, favorites.size),
+                                @Suppress("DEPRECATION")
+                                Triple("Playlists", Icons.Rounded.QueueMusic, customPlaylists.size)
+                            )
+
+                            sections.forEach { (title, icon, count) ->
+                                item {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                val route = when (title) {
+                                                    "Recently Played" -> "see_all/recently_played"
+                                                    "Recently Added" -> "see_all/recently_added"
+                                                    "Favourites" -> "see_all/favorites"
+                                                    "Playlists" -> "see_all/playlists"
+                                                    else -> ""
+                                                }
+                                                if (route.isNotEmpty()) {
+                                                    navController.navigate(route)
+                                                }
+                                            },
+                                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                                    ) {
+                                        ListItem(
+                                            headlineContent = { Text(title) },
+                                            supportingContent = {
+                                                Text("$count ${when (title) {
+                                                    "Playlists" -> if (count == 1) "playlist" else "playlists"
+                                                    else -> if (count == 1) "song" else "songs"
+                                                }}")
+                                            },
+                                            leadingContent = {
+                                                Icon(
+                                                    imageVector = icon,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            },
+                                            trailingContent = {
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                                                    contentDescription = "Navigate"
+                                                )
+                                            }
                                         )
                                     }
-                                }
-                                "favorites" -> item {
-                                    if (favorites.isNotEmpty()) {
-                                        AnimatedCarousel(
-                                            title = "Favourites",
-                                            icon = Icons.Rounded.Favorite,
-                                            data = favorites,
-                                            onPlay = { tracks, index -> onPlay(tracks, index); scope.launch { kotlinx.coroutines.delay(500); refreshTrigger++ } },
-                                            haptic = haptic,
-                                            onSeeAll = { navController.navigate("see_all/favorites") }
-                                        )
-                                    }
-                                }
-                                "playlists" -> item {
-                                    CustomPlaylistsCarousel(
-                                        playlists = customPlaylists,
-                                        navController = navController,
-                                        haptic = haptic,
-                                        onRefresh = { refreshTrigger++ }
-                                    )
                                 }
                             }
                         }
                     }
                 }
                 1 -> {
-                    // SONGS section now uses Paging 3 for on-demand loading
-                    items(pagingItems.itemCount, key = { i ->
-                        val item = pagingItems[i]
-                        item?.mediaId ?: "placeholder_$i"
-                    }) { idx ->
-                        val t = pagingItems[idx]
-                        if (t == null) {
-                            // Show loading placeholder
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(60.dp)
-                                    .padding(horizontal = 12.dp, vertical = 2.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // Placeholder for artwork
-                                    Box(
-                                        modifier = Modifier
-                                            .size(52.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        // Placeholder for title
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.7f)
-                                                .height(20.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                                        )
-                                        Spacer(Modifier.height(4.dp))
-                                        // Placeholder for subtitle
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth(0.5f)
-                                                .height(16.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f))
-                                        )
-                                    }
-                                }
-                            }
-                            return@items
-                        }
+                    // SONGS section using new LocalFilesService - no paging needed
+                    items(allTracks.size, key = { idx -> "song_${allTracks[idx].mediaId}" }) { idx ->
+                        val t = allTracks[idx]
                         val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
-
-                        // Add queue operations for swipe gestures
-                        val queueOps = rememberQueueOperations()
-                        val scope = rememberCoroutineScope()
 
                         com.musify.mu.ui.components.CompactTrackRow(
                             title = t.title,
@@ -400,7 +515,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             contentDescription = t.title,
                             isPlaying = isPlaying,
                             showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
-                            onClick = { onPlay(pagingItems.itemSnapshotList.items, idx) },
+                            onClick = { onPlay(allTracks, idx) },
+                            onLongClick = {
+                                editingTrack = t
+                                showSongEditor = true
+                            },
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -677,6 +796,30 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 // Simple artwork loading - no preloading needed
             }
     }
+
+    // Song Details Editor Dialog
+    if (showSongEditor && editingTrack != null) {
+        SongDetailsEditor(
+            track = editingTrack!!,
+            onDismiss = {
+                showSongEditor = false
+                editingTrack = null
+            },
+            onSave = { updatedTrack ->
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        // Update track in database
+                        repo.updateTrackMetadata(updatedTrack)
+                        withContext(Dispatchers.Main) {
+                            refreshTrigger++ // Trigger UI refresh
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("HomeScreen", "Failed to update track", e)
+                    }
+                }
+            }
+        )
+    }
 }
 
 // (Flattened sections implemented inline above to avoid nested scrollables)
@@ -770,7 +913,8 @@ private fun AnimatedCarousel(
     data: List<Track>,
     onPlay: (List<Track>, Int) -> Unit,
     haptic: androidx.compose.ui.hapticfeedback.HapticFeedback,
-    onSeeAll: () -> Unit
+    onSeeAll: () -> Unit,
+    onClear: () -> Unit
 ) {
     if (data.isEmpty()) return
 
@@ -796,6 +940,35 @@ private fun AnimatedCarousel(
             )
             TextButton(onClick = onSeeAll) {
                 Text("See all")
+            }
+            // More button with dropdown menu
+            var showDropdown by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { showDropdown = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More options",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+                DropdownMenu(
+                    expanded = showDropdown,
+                    onDismissRequest = { showDropdown = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Clear") },
+                        onClick = {
+                            showDropdown = false
+                            onClear()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Rounded.Clear,
+                                contentDescription = null
+                            )
+                        }
+                    )
+                }
             }
         }
 

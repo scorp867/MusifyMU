@@ -176,8 +176,9 @@ fun MusifyTheme(dynamic: DynamicColors? = null, content: @Composable () -> Unit)
                     tintTop = if (darkTheme) Color.White.copy(alpha = 0.04f) else Color.White.copy(alpha = 0.12f),
                     tintBottom = if (darkTheme) Color.Black.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.08f),
                     blurRadius = if (darkTheme) 18 else 14
-                )
-                content()
+                ) {
+                    content()
+                }
             }
         }
     }

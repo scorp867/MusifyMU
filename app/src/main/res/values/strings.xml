@@ -34,4 +34,7 @@
     <!-- Permissions -->
     <string name="permission_rationale_audio">Musify MU needs access to your audio files to build your library.</string>
     <string name="permission_rationale_mic">Musify MU needs microphone access to enable voice commands.</string>
+
+    <!-- Media notification -->
+    <string name="media_notification_channel_id">media_playback</string>
 </resources>

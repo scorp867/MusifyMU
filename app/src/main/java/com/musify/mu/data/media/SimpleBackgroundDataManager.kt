@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.musify.mu.data.localfiles.LocalFilesService
 
 /**
  * Efficient data manager that caches tracks in memory and only queries MediaStore once at launch.
@@ -41,10 +42,8 @@ class SimpleBackgroundDataManager private constructor(
     private val _loadingState = MutableStateFlow<LoadingState>(LoadingState.Idle)
     val loadingState: StateFlow<LoadingState> = _loadingState.asStateFlow()
 
-    // Scanner instance
-    private val scanner = SimpleMediaStoreScanner(context, db)
-
-    // Note: Artwork is handled by ExoPlayer and Coil, not extracted during scan
+    // Spotify-style local files service
+    val localFilesService = LocalFilesService.getInstance(context)
 
     // Track if we've already initialized
     private var isInitialized = false
@@ -54,7 +53,7 @@ class SimpleBackgroundDataManager private constructor(
 
     /**
      * Initialize data loading ONCE at app launch
-     * This is the ONLY time we query MediaStore
+     * This is the ONLY time we query MediaStore (unless cache is invalid)
      */
     suspend fun initializeOnAppLaunch() {
         if (isInitialized) {
@@ -63,41 +62,30 @@ class SimpleBackgroundDataManager private constructor(
         }
 
         try {
-            _loadingState.value = LoadingState.Loading("Scanning music library and extracting artwork...")
-            Log.d(TAG, "Starting ONE-TIME app launch initialization with artwork extraction...")
+            _loadingState.value = LoadingState.Loading("Loading music library...")
 
-            // Lightweight scan without artwork extraction
-            val tracks = scanner.scanTracks().toMutableList()
-            _cachedTracks.value = tracks
-            Log.d(TAG, "Initial scan completed: ${tracks.size} tracks (no artwork extraction)")
+            // Initialize the Spotify-style local files service
+            localFilesService.initialize()
 
-            if (tracks.isNotEmpty()) {
-                // Store in memory cache - this is what the UI will use
+            // Collect tracks from the service (now with proper caching)
+            localFilesService.tracks.collect { tracks ->
                 _cachedTracks.value = tracks
-                Log.d(TAG, "Tracks cached in memory: ${_cachedTracks.value.size}")
+                Log.d(TAG, "Received ${tracks.size} tracks from LocalFilesService")
 
-                // Log sample track details for debugging
-                val sampleTrack = tracks.first()
-                Log.d(TAG, "Sample track - Title: ${sampleTrack.title}, Artist: ${sampleTrack.artist}, Album: ${sampleTrack.album}, AlbumID: ${sampleTrack.albumId}, ArtworkURI: ${sampleTrack.artUri}")
+                if (tracks.isNotEmpty()) {
+                    // Cache to database for persistence
+                    Log.d(TAG, "Caching ${tracks.size} tracks to database...")
+                    db.dao().upsertTracks(tracks)
 
-                // Cache to database for persistence (including artwork URIs)
-                Log.d(TAG, "Caching ${tracks.size} tracks with artwork to database for persistence...")
-                db.dao().upsertTracks(tracks)
-
-                _loadingState.value = LoadingState.Completed(tracks.size)
-                Log.d(TAG, "App launch initialization completed: ${tracks.size} tracks with artwork cached in memory")
-            } else {
-                _loadingState.value = LoadingState.Completed(0)
-                Log.w(TAG, "No tracks found during initialization")
-            }
-
-            // Register content observer for real-time updates ONLY
-            scanner.registerContentObserver {
-                Log.d(TAG, "MediaStore changed - refreshing cache...")
-                scope.launch {
-                    refreshTracksFromMediaStore()
+                    _loadingState.value = LoadingState.Completed(tracks.size)
+                    Log.d(TAG, "App launch initialization completed: ${tracks.size} tracks cached")
+                } else {
+                    _loadingState.value = LoadingState.Completed(0)
+                    Log.w(TAG, "No tracks found during initialization")
                 }
             }
+
+            // LocalFilesService handles its own content observer for real-time updates
 
             isInitialized = true
             Log.d(TAG, "Data manager initialized successfully")
@@ -168,48 +156,9 @@ class SimpleBackgroundDataManager private constructor(
             .sortedBy { it.albumName.lowercase() }
     }
 
-    /**
-     * Refresh tracks ONLY when MediaStore actually changes
-     * This includes extracting artwork for new tracks and cleaning up deleted tracks
-     */
-    private suspend fun refreshTracksFromMediaStore() {
-        try {
-            Log.d(TAG, "Refreshing tracks with artwork extraction due to MediaStore change...")
 
-            // Query MediaStore for changes and extract artwork for new tracks
-            val newTracks = scanner.scanTracks()
-            Log.d(TAG, "Refresh scan completed: ${newTracks.size} tracks with artwork")
 
-            // Update memory cache
-            _cachedTracks.value = newTracks
 
-            // Update database for persistence (including artwork URIs)
-            if (newTracks.isNotEmpty()) {
-                db.dao().upsertTracks(newTracks)
-                Log.d(TAG, "Cache and database updated with ${newTracks.size} tracks with artwork")
-
-                // Clean up orphaned database entries for deleted tracks
-                try {
-                    val currentTrackIds = newTracks.map { it.mediaId }.toSet()
-                    val allDatabaseTracks = db.dao().getAllTracks()
-                    val orphanedTrackIds = allDatabaseTracks.map { it.mediaId }.filter { !currentTrackIds.contains(it) }
-
-                    if (orphanedTrackIds.isNotEmpty()) {
-                        Log.d(TAG, "Cleaning up ${orphanedTrackIds.size} orphaned tracks from database")
-                        // Note: This would require additional DAO methods to clean up related data
-                        // For now, the filtering approach in LibraryRepository handles this
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to clean up orphaned tracks", e)
-                }
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error refreshing tracks", e)
-        }
-    }
-
-    // Artwork is extracted once during startup and cached permanently
 
     /**
      * Force refresh (for manual refresh button if needed)
@@ -221,7 +170,7 @@ class SimpleBackgroundDataManager private constructor(
         }
 
         scope.launch {
-            refreshTracksFromMediaStore()
+            localFilesService.forceRefresh()
         }
     }
 
@@ -229,16 +178,23 @@ class SimpleBackgroundDataManager private constructor(
      * Clear cache (for testing or memory management)
      */
     fun clearCache() {
+        scope.launch {
+            localFilesService.clearCache()
+        }
         _cachedTracks.value = emptyList()
         Log.d(TAG, "Memory cache cleared")
     }
+
+
 
     /**
      * Clean up resources
      */
     fun cleanup() {
-        scanner.unregisterContentObserver()
-        Log.d(TAG, "Data manager cleaned up, content observer unregistered")
+        scope.launch {
+            localFilesService.cleanup()
+        }
+        Log.d(TAG, "Data manager cleaned up")
     }
 
 

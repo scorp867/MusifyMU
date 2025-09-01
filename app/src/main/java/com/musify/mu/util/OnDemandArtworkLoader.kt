@@ -89,15 +89,19 @@ object OnDemandArtworkLoader {
     }
 
     /**
-     * Prefetch artwork for a list of media URIs concurrently (max parallel = 4).
+     * Prefetch artwork for a list of media URIs concurrently with optimized batching.
+     * Prioritizes visible items and uses smarter batching for better performance.
      */
     fun prefetch(mediaIds: List<String>) {
         if (!::appContext.isInitialized) return
-        val unique = mediaIds.distinct().take(200)
-        unique.chunked(4).forEach { chunk ->
+        val unique = mediaIds.distinct().take(150) // Reduced to prevent memory pressure
+        unique.chunked(3).forEachIndexed { index, chunk -> // Reduced concurrency
             scope.launch {
+                // Add small delay between batches to prevent overwhelming the system
+                if (index > 0) kotlinx.coroutines.delay(100L * index)
                 chunk.map { id ->
                     launch {
+                        // Skip if already cached or failed recently
                         if (!failedKeys.contains(id) && inMemoryCache.get(id) == null) {
                             loadArtwork(id)
                         }
@@ -190,6 +194,29 @@ object OnDemandArtworkLoader {
             return@withContext uri
         } catch (e: Exception) {
             android.util.Log.w("OnDemandArtworkLoader", "Failed to store artwork bytes", e)
+            null
+        }
+    }
+
+    /**
+     * Store custom artwork from gallery URI and cache it.
+     * Returns file URI string.
+     */
+    suspend fun storeCustomArtwork(mediaUri: String, imageUri: android.net.Uri, context: android.content.Context): String? = withContext(Dispatchers.IO) {
+        if (!::appContext.isInitialized) return@withContext null
+        val cacheFile = File(diskDir, "${mediaUri.md5()}_custom.jpg")
+        try {
+            context.contentResolver.openInputStream(imageUri)?.use { input ->
+                cacheFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            val uri = "file://${cacheFile.absolutePath}"
+            inMemoryCache.put(mediaUri, uri)
+            flowFor(mediaUri).value = uri
+            return@withContext uri
+        } catch (e: Exception) {
+            android.util.Log.w("OnDemandArtworkLoader", "Failed to store custom artwork", e)
             null
         }
     }

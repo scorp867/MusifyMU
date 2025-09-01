@@ -96,6 +96,8 @@ fun NowPlayingScreen(navController: NavController) {
         }
     }
 
+    
+
     // Update controller reference when it changes
     LaunchedEffect(controller) {
         if (controller != null && voiceControlManager != null) {
@@ -231,6 +233,45 @@ fun NowPlayingScreen(navController: NavController) {
             android.util.Log.d("NowPlayingScreen", "No current track, using default colors")
             dominantColor = Color(0xFF6236FF)
             vibrantColor = Color(0xFF38B6FF)
+        }
+    }
+
+    // Gallery picker launcher (needs currentTrack and coroutineScope in scope)
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let { imageUri ->
+            currentTrack?.let { track ->
+                coroutineScope.launch(Dispatchers.IO) {
+                    try {
+                        // Store the custom artwork using the new Spotify-style approach
+                        val customArtworkUri = com.musify.mu.util.OnDemandArtworkLoader.storeCustomArtwork(track.mediaId, imageUri, context)
+                        if (customArtworkUri != null) {
+                            // Save to LocalFilesService for persistence (Spotify's approach)
+                            repo.dataManager.localFilesService.saveCustomArtwork(track.mediaId, customArtworkUri)
+                            withContext(Dispatchers.Main) {
+                                android.widget.Toast.makeText(context, "Custom artwork set successfully", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                android.widget.Toast.makeText(context, "Failed to set custom artwork", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("NowPlayingScreen", "Error setting custom artwork", e)
+                        withContext(Dispatchers.Main) {
+                            android.widget.Toast.makeText(context, "Error setting custom artwork", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Storage permission launcher for custom artwork (references galleryLauncher)
+    val storagePermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            galleryLauncher.launch("image/*")
+        } else {
+            android.widget.Toast.makeText(context, "Storage permission required to select images", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 
@@ -416,6 +457,15 @@ fun NowPlayingScreen(navController: NavController) {
                             } else {
                                 isGymModeEnabled = !isGymModeEnabled
                                 voiceControlManager?.toggleGymMode()
+                            }
+                        },
+                        onCustomArtworkClick = {
+                            // Request storage permission if needed
+                            val activity = context as? android.app.Activity
+                            if (activity != null && !PermissionHelper.hasStoragePermission(activity)) {
+                                storagePermissionLauncher.launch(PermissionHelper.STORAGE_PERMISSION)
+                            } else {
+                                galleryLauncher.launch("image/*")
                             }
                         }
                     )

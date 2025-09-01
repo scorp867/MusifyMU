@@ -7,15 +7,18 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
 import androidx.compose.material3.CardDefaults
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,7 +29,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.ExperimentalFoundationApi
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CompactTrackRow(
     title: String,
@@ -36,14 +41,23 @@ fun CompactTrackRow(
     contentDescription: String?,
     isPlaying: Boolean,
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     trailingContent: (@Composable () -> Unit)? = null,
     showIndicator: Boolean = isPlaying,
     useGlass: Boolean = true,
     extraArtOverlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
+    val haptic = LocalHapticFeedback.current
     val pressed by remember { MutableInteractionSource() }.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.98f else 1f, spring(stiffness = Spring.StiffnessLow))
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.98f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "scale"
+    )
     val shape = RoundedCornerShape(14.dp)
     val containerColor = if (useGlass) MaterialTheme.colorScheme.surface.copy(alpha = 0.35f) else Color.Transparent
     val borderStroke = if (useGlass) BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)) else null
@@ -74,7 +88,13 @@ fun CompactTrackRow(
         Row(
             modifier = innerMod
                 .height(60.dp)
-                .clickable(onClick = onClick),
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongClick?.invoke()
+                    }
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Artwork(

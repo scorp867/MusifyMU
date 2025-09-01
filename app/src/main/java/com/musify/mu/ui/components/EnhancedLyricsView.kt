@@ -824,7 +824,9 @@ fun EnhancedLyricsView(
                         tintTop = Color.Black.copy(alpha = 0.36f),
                         tintBottom = Color.Black.copy(alpha = 0.52f),
                         blurRadius = 40
-                    )
+                    ) {
+                        // Empty content - backdrop only
+                    }
                     // Additional scrim to fully mask the player screen beneath
                     Box(
                         modifier = Modifier

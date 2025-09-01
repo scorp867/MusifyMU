@@ -20,26 +20,28 @@ object CoilImageLoaderConfig {
         return ImageLoader.Builder(context)
             .memoryCache {
                 MemoryCache.Builder(context)
-                    .maxSizePercent(0.15) // Use 15% of available memory
-                    .strongReferencesEnabled(true) // Keep strong references for better performance
+                    .maxSizePercent(0.20) // Increased to 20% for better performance
+                    .strongReferencesEnabled(true)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("coil_artwork_cache"))
-                    .maxSizeBytes(100 * 1024 * 1024) // 100MB disk cache
+                    .maxSizeBytes(150 * 1024 * 1024) // Increased to 150MB
                     .build()
             }
             .okHttpClient {
                 OkHttpClient.Builder()
-                    .connectTimeout(10, TimeUnit.SECONDS)
-                    .readTimeout(15, TimeUnit.SECONDS)
-                    .writeTimeout(15, TimeUnit.SECONDS)
+                    .connectTimeout(8, TimeUnit.SECONDS) // Faster timeout
+                    .readTimeout(12, TimeUnit.SECONDS)
+                    .writeTimeout(12, TimeUnit.SECONDS)
+                    .retryOnConnectionFailure(true)
                     .build()
             }
-            .respectCacheHeaders(false) // Ignore HTTP cache headers for local files
-            .allowHardware(false) // Better compatibility with older devices
-            .crossfade(true) // Enable smooth transitions
+            .respectCacheHeaders(false)
+            .allowHardware(true) // Enable hardware acceleration for better performance
+            .crossfade(true)
+            .networkObserverEnabled(false) // Disable network observer for local files
             .apply {
                 if (android.util.Log.isLoggable("CoilImageLoader", android.util.Log.DEBUG)) {
                     logger(DebugLogger())

@@ -54,7 +54,8 @@ class SimpleMediaStoreScanner(
         MediaStore.Audio.Media.ARTIST,
         MediaStore.Audio.Media.ALBUM,
         MediaStore.Audio.Media.DURATION,
-        MediaStore.Audio.Media.ALBUM_ID
+        MediaStore.Audio.Media.ALBUM_ID,
+        MediaStore.Audio.Media.DATE_ADDED
     )
 
     /**
@@ -267,6 +268,7 @@ class SimpleMediaStoreScanner(
                 val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
 
                 while (cursor.moveToNext()) {
                     try {
@@ -277,6 +279,7 @@ class SimpleMediaStoreScanner(
                         val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
+                        val dateAdded = cursor.getLong(dateAddedIndex)
 
                         // Validate essential fields - be less restrictive
                         if (duration >= 0) {  // Allow 0 duration for now
@@ -296,7 +299,8 @@ class SimpleMediaStoreScanner(
                                 album = album,
                                 durationMs = duration,
                                 artUri = quickArtUri, // Fast album art lookup via album ID
-                                albumId = albumId
+                                albumId = albumId,
+                                dateAddedSec = dateAdded
                             )
                             tracks.add(track)
 
@@ -345,6 +349,7 @@ class SimpleMediaStoreScanner(
                     val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                     val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                     val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
 
                     while (cursor.moveToNext()) {
                         try {
@@ -355,6 +360,7 @@ class SimpleMediaStoreScanner(
                             val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
+                            val dateAdded = cursor.getLong(dateAddedIndex)
 
                             // Basic validation
                             if (duration >= 0) {
@@ -368,7 +374,8 @@ class SimpleMediaStoreScanner(
                                     album = album,
                                     durationMs = duration,
                                     artUri = artworkUri, // Extracted and cached at startup
-                                    albumId = albumId
+                                    albumId = albumId,
+                                    dateAddedSec = dateAdded
                                 )
                                 tracks.add(track)
 
@@ -442,6 +449,7 @@ class SimpleMediaStoreScanner(
                 val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
 
                 var sinceLastEmit = 0
                 while (cursor.moveToNext()) {
@@ -453,6 +461,7 @@ class SimpleMediaStoreScanner(
                         val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
+                        val dateAdded = cursor.getLong(dateAddedIndex)
                         if (duration >= 0) {
                             val artworkUri: String? = null // skip during streaming scan
                             tracks.add(
@@ -463,7 +472,8 @@ class SimpleMediaStoreScanner(
                                     album = album,
                                     durationMs = duration,
                                     artUri = artworkUri,
-                                    albumId = albumId
+                                    albumId = albumId,
+                                    dateAddedSec = dateAdded
                                 )
                             )
                             sinceLastEmit++
@@ -491,6 +501,7 @@ class SimpleMediaStoreScanner(
                     val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                     val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                     val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                     var sinceLastEmit = 0
                     while (cursor.moveToNext()) {
                         try {
@@ -501,6 +512,7 @@ class SimpleMediaStoreScanner(
                             val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                             val duration = cursor.getLong(durationIndex)
                             val albumId = cursor.getLong(albumIdIndex)
+                            val dateAdded = cursor.getLong(dateAddedIndex)
                             if (duration >= 0) {
                                 val artworkUri: String? = null
                                 tracks.add(
@@ -511,7 +523,8 @@ class SimpleMediaStoreScanner(
                                         album = album,
                                         durationMs = duration,
                                         artUri = artworkUri,
-                                        albumId = albumId
+                                        albumId = albumId,
+                                        dateAddedSec = dateAdded
                                     )
                                 )
                                 sinceLastEmit++
@@ -530,6 +543,239 @@ class SimpleMediaStoreScanner(
             return tracks
         } catch (_: Exception) {
             return emptyList()
+        }
+    }
+
+    /**
+     * Lightweight scan that skips artwork extraction for faster startup
+     */
+    suspend fun scanTracksLightweight(): List<Track> = withContext(Dispatchers.IO) {
+        try {
+            Log.d(TAG, "Starting lightweight MediaStore scan...")
+
+            // Check permissions first
+            val requiredPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                android.Manifest.permission.READ_MEDIA_AUDIO
+            } else {
+                android.Manifest.permission.READ_EXTERNAL_STORAGE
+            }
+
+            val hasPermission = ContextCompat.checkSelfPermission(context, requiredPermission) == PackageManager.PERMISSION_GRANTED
+            Log.d(TAG, "Permission check - $requiredPermission: ${if (hasPermission) "GRANTED" else "DENIED"}")
+
+            if (!hasPermission) {
+                Log.e(TAG, "Required permission not granted: $requiredPermission")
+                return@withContext emptyList()
+            }
+
+            val tracks = mutableListOf<Track>()
+
+            // Minimal selection - just audio files
+            val selection = "${MediaStore.Audio.Media.IS_MUSIC} = 1"
+            val selectionArgs: Array<String>? = null
+            val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC" // Sort by date added for better prioritization
+
+            Log.d(TAG, "Lightweight query - URI: ${MediaStore.Audio.Media.EXTERNAL_CONTENT_URI}")
+            Log.d(TAG, "Lightweight query - Selection: $selection")
+
+            context.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                BASIC_PROJECTION,
+                selection,
+                selectionArgs,
+                sortOrder
+            )?.use { cursor ->
+                Log.d(TAG, "Lightweight query returned ${cursor.count} tracks")
+
+                val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val titleIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+
+                while (cursor.moveToNext()) {
+                    try {
+                        val id = cursor.getLong(idIndex)
+                        val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                        val title = cursor.getString(titleIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val artist = cursor.getString(artistIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                        val duration = cursor.getLong(durationIndex)
+                        val albumId = cursor.getLong(albumIdIndex)
+                        val dateAdded = cursor.getLong(dateAddedIndex)
+
+                        // Validate essential fields
+                        if (duration >= 0) {
+                            // Fast album art lookup via album ID (no extraction)
+                            val quickArtUri = if (albumId > 0) {
+                                "content://media/external/audio/albumart/$albumId"
+                            } else null
+
+                            val track = Track(
+                                mediaId = contentUri.toString(),
+                                title = title,
+                                artist = artist,
+                                album = album,
+                                durationMs = duration,
+                                artUri = quickArtUri, // Fast lookup only
+                                albumId = albumId,
+                                dateAddedSec = dateAdded
+                            )
+                            tracks.add(track)
+
+                            if (tracks.size <= 5) {
+                                Log.d(TAG, "Added track (lightweight): $title by $artist (${duration}ms)")
+                            }
+                        } else {
+                            Log.d(TAG, "Skipped track with invalid duration: $title (${duration}ms)")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error processing track at cursor position ${cursor.position}", e)
+                    }
+                }
+            } ?: run {
+                Log.e(TAG, "Lightweight query returned null cursor")
+            }
+
+            // If no tracks found with IS_MUSIC filter, try without it
+            if (tracks.isEmpty()) {
+                Log.d(TAG, "No tracks found with IS_MUSIC filter, trying broader query...")
+
+                context.contentResolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    BASIC_PROJECTION,
+                    null, // No selection - get all audio files
+                    null,
+                    sortOrder
+                )?.use { cursor ->
+                    Log.d(TAG, "Broader lightweight query returned ${cursor.count} audio files")
+
+                    val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val titleIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                    val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+
+                    while (cursor.moveToNext()) {
+                        try {
+                            val id = cursor.getLong(idIndex)
+                            val contentUri = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
+                            val title = cursor.getString(titleIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val artist = cursor.getString(artistIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
+                            val duration = cursor.getLong(durationIndex)
+                            val albumId = cursor.getLong(albumIdIndex)
+                            val dateAdded = cursor.getLong(dateAddedIndex)
+
+                            // Basic validation
+                            if (duration >= 0) {
+                                val artworkUri: String? = null // No artwork extraction in lightweight mode
+
+                                val track = Track(
+                                    mediaId = contentUri.toString(),
+                                    title = title,
+                                    artist = artist,
+                                    album = album,
+                                    durationMs = duration,
+                                    artUri = artworkUri,
+                                    albumId = albumId,
+                                    dateAddedSec = dateAdded
+                                )
+                                tracks.add(track)
+
+                                if (tracks.size <= 5) {
+                                    Log.d(TAG, "Added track (broad lightweight): $title by $artist (${duration}ms)")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error processing track in broad lightweight query", e)
+                        }
+                    }
+                } ?: run {
+                    Log.e(TAG, "Broader lightweight query also returned null cursor")
+                }
+            }
+
+            // Cache to database
+            if (tracks.isNotEmpty()) {
+                Log.d(TAG, "Caching ${tracks.size} tracks to database (lightweight)...")
+                db.dao().upsertTracks(tracks)
+                Log.d(TAG, "Lightweight scan completed with ${tracks.size} tracks")
+            } else {
+                Log.w(TAG, "No tracks found in MediaStore - this might indicate permission issues or no audio files")
+            }
+
+            tracks
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during lightweight scan", e)
+            emptyList()
+        }
+    }
+
+    /**
+     * Extract artwork for a single track
+     */
+    suspend fun extractArtworkForTrack(mediaUri: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val cacheKey = generateCacheKey(mediaUri)
+            val cacheFile = File(artworkCacheDir, "$cacheKey.jpg")
+
+            // Check if already cached
+            if (cacheFile.exists()) {
+                return@withContext "file://${cacheFile.absolutePath}"
+            }
+
+            val retriever = MediaMetadataRetriever()
+            try {
+                // Set data source
+                when {
+                    mediaUri.startsWith("content://") -> {
+                        retriever.setDataSource(context, Uri.parse(mediaUri))
+                    }
+                    mediaUri.startsWith("/") -> {
+                        retriever.setDataSource(mediaUri)
+                    }
+                    else -> {
+                        Log.w(TAG, "Unsupported URI format for artwork extraction: $mediaUri")
+                        return@withContext null
+                    }
+                }
+
+                // Extract embedded artwork
+                val artworkBytes = retriever.embeddedPicture
+                if (artworkBytes != null) {
+                    val originalBitmap = BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size)
+                    if (originalBitmap != null) {
+                        // Resize and save to cache
+                        val resizedBitmap = resizeBitmap(originalBitmap, MAX_ARTWORK_SIZE)
+                        saveBitmapToCache(resizedBitmap, cacheFile)
+
+                        // Clean up bitmaps
+                        if (resizedBitmap != originalBitmap) {
+                            originalBitmap.recycle()
+                        }
+                        resizedBitmap.recycle()
+
+                        return@withContext "file://${cacheFile.absolutePath}"
+                    }
+                }
+
+                return@withContext null
+
+            } finally {
+                try {
+                    retriever.release()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error releasing MediaMetadataRetriever", e)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error extracting artwork from $mediaUri", e)
+            return@withContext null
         }
     }
 

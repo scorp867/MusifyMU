@@ -9,6 +9,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -47,9 +53,9 @@ fun SmartArtwork(
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
 
-    // State for tracking load status - keyed by artwork URI to prevent re-initialization
-    var isLoading by remember(artworkUri, mediaUri) { mutableStateOf(true) }
-    var hasError by remember(artworkUri, mediaUri) { mutableStateOf(false) }
+            // State for tracking load status - use stable key to prevent re-initialization
+        val stableKey = remember(artworkUri, mediaUri) { "$artworkUri:$mediaUri" }
+        var hasError by remember(stableKey) { mutableStateOf(false) }
 
     // Create gradient background colors based on theme
     val gradientColors = listOf(
@@ -80,63 +86,62 @@ fun SmartArtwork(
                 )
         )
 
-        // Ignore MediaStore album art content URIs; rely on embedded art or Media3
-        val sanitizedArtworkUri = remember(artworkUri) {
-            artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
-        }
-        var imageData by remember { mutableStateOf<String?>(sanitizedArtworkUri) }
+        // Single source of truth for artwork data - prevent multiple state changes
+        val artworkData = remember(artworkUri, mediaUri) {
+            // Prioritize explicit artwork URI, ignore MediaStore album art content URIs
+            val sanitizedUri = artworkUri?.takeUnless { it.startsWith("content://media/external/audio/albumart") }
 
-        // Observe Media3/loader-provided artwork for this mediaUri
-        val loaderFlowValue = if (enableOnDemand && !mediaUri.isNullOrBlank()) {
-            val observedLoaderArt = remember(mediaUri) { com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri!!) }
-            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri!!).collectAsState(initial = observedLoaderArt).value
+            // If no explicit artwork, check cached loader data
+            sanitizedUri ?: if (enableOnDemand && !mediaUri.isNullOrBlank()) {
+                com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri)
+            } else null
+        }
+
+        // Observe loader changes only if we don't have explicit artwork
+        val loaderFlowValue = if (enableOnDemand && !mediaUri.isNullOrBlank() && artworkUri.isNullOrBlank()) {
+            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri).collectAsState(initial = artworkData).value
         } else null
 
-        // Prioritize explicit artwork from track, otherwise use loader-provided art
-        LaunchedEffect(sanitizedArtworkUri) {
-            if (!sanitizedArtworkUri.isNullOrBlank()) {
-                imageData = sanitizedArtworkUri
-            }
+        // Final image data - stable to prevent unnecessary recompositions
+        val finalImageData = remember(artworkData, loaderFlowValue) {
+            artworkData ?: loaderFlowValue
         }
-        LaunchedEffect(loaderFlowValue) {
-            if (imageData.isNullOrBlank() && !loaderFlowValue.isNullOrBlank()) {
-                imageData = loaderFlowValue
+
+        // Trigger artwork loading only once per unique mediaUri
+        LaunchedEffect(mediaUri) {
+            if (enableOnDemand && finalImageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
+                // Check if we already tried this before (negative cache)
+                val cached = com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri)
+                if (cached == null) { // Only extract if not in negative cache
+                    // Add delay to prevent rapid successive calls
+                    kotlinx.coroutines.delay(200)
+                    com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
+                }
             }
         }
 
-        // Trigger one-time extraction if still missing and mediaUri available
-        // Trigger one-time extraction if still missing and not negatively cached
-        LaunchedEffect(key1 = mediaUri) {
-            if (enableOnDemand && imageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
-                com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
-            }
-        }
-
-        if (imageData != null) {
+        if (finalImageData != null) {
             // Create image painter with multiple fallback strategies
-            val enableCrossfade = !imageData.isNullOrBlank()
+            val enableCrossfade = !finalImageData.isNullOrBlank()
             val painter = rememberAsyncImagePainter(
                 model = ImageRequest.Builder(context)
-                    .data(imageData)
+                    .data(finalImageData)
                     .dispatcher(Dispatchers.IO)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
-                    .memoryCacheKey(imageData) // Use stable memory cache key
-                    .diskCacheKey(imageData) // Use stable disk cache key
+                    .memoryCacheKey(finalImageData) // Use stable memory cache key
+                    .diskCacheKey(finalImageData) // Use stable disk cache key
                     .apply { if (enableCrossfade) crossfade(300) else crossfade(false) }
                     .size(Size.ORIGINAL)
                     .scale(Scale.FIT)
                     .listener(
                         onStart = {
-                            isLoading = true
                             hasError = false
                         },
                         onSuccess = { _, _ ->
-                            isLoading = false
                             hasError = false
                         },
                         onError = { _, _ ->
-                            isLoading = false
                             hasError = true
                         }
                     )
@@ -148,26 +153,28 @@ fun SmartArtwork(
                 painter = painter,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alpha = if (isLoading) 0.7f else 1f
+                contentScale = ContentScale.Crop
             )
-
-            // Loading state overlay
-            if (painter.state is AsyncImagePainter.State.Loading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.2f))
-                )
-            }
         }
 
-        // Show icon placeholder when no image or on error
-        if (imageData == null || hasError) {
+        // Enhanced placeholder with subtle animation for tracks without artwork
+        if (finalImageData == null || hasError) {
+            // Animated music note with subtle pulsing
+            val infiniteTransition = rememberInfiniteTransition(label = "musicNotePulse")
+            val pulseAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.6f,
+                targetValue = 0.8f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "pulseAlpha"
+            )
+
             Icon(
                 imageVector = Icons.Rounded.MusicNote,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulseAlpha),
                 modifier = Modifier.fillMaxSize(0.4f)
             )
         }

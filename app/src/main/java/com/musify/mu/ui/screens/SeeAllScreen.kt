@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.CompositingStrategy
@@ -21,7 +22,6 @@ import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
-
 import kotlinx.coroutines.launch
 import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
@@ -45,13 +45,20 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(type) {
-        title = when (type) {
-            "recently_played" -> "Recently Played"
-            "recently_added" -> "Recently Added"
-            "favorites" -> "Favourites"
-            else -> ""
+    // Optimized state management to prevent unnecessary recompositions
+    val displayTitle by remember(type) {
+        derivedStateOf {
+            when (type) {
+                "recently_played" -> "Recently Played"
+                "recently_added" -> "Recently Added"
+                "favorites" -> "Favourites"
+                else -> ""
+            }
         }
+    }
+
+    // Load tracks asynchronously
+    LaunchedEffect(type) {
         tracks = when (type) {
             "recently_played" -> repo.recentlyPlayed(200)
             "recently_added" -> repo.recentlyAdded(200)
@@ -60,9 +67,14 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         }
     }
 
+    val displayTracks by remember(tracks) {
+        derivedStateOf { tracks }
+    }
+
     val reorderState = if (type == "favorites") rememberReorderableLazyListState(
         onMove = { from, to ->
-            tracks = tracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
+            val mutableTracks = displayTracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
+            tracks = mutableTracks
         },
         onDragEnd = { _, _ ->
             // Persist once after drop
@@ -77,7 +89,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(title) })
+            TopAppBar(title = { Text(displayTitle) })
         }
     ) { padding ->
         if (type == "favorites") {
@@ -113,8 +125,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(tracks.size, key = { idx -> "seeall_${type}_${tracks[idx].mediaId}" }) { idx ->
-                        val track = tracks[idx]
+                    items(displayTracks.size, key = { idx -> "seeall_${type}_${displayTracks[idx].mediaId}" }) { idx ->
+                        val track = displayTracks[idx]
                         ReorderableItem(reorderState, key = "seeall_${type}_${track.mediaId}") { isDragging ->
                             Card(
                                 modifier = Modifier
@@ -203,8 +215,8 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(tracks.size) { idx ->
-                    val track = tracks[idx]
+                items(displayTracks.size) { idx ->
+                    val track = displayTracks[idx]
                     com.musify.mu.ui.components.EnhancedSwipeableItem(
                         onSwipeRight = {
                             // Right swipe: Play Next

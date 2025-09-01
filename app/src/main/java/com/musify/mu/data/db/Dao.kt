@@ -14,10 +14,6 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
     suspend fun getAllTracks(): List<Track>
 
-    // Paging support
-    @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE LIMIT :limit OFFSET :offset")
-    suspend fun getTracksPaged(limit: Int, offset: Int): List<Track>
-
     @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
     suspend fun searchTracks(q: String): List<Track>
 
@@ -28,13 +24,20 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY dateAddedSec DESC LIMIT :limit")
     suspend fun getRecentlyAdded(limit: Int): List<Track>
 
-    // Smart play history insertion - only record if not played recently (within 30 seconds)
+    // Smart play history insertion - update existing entry if track already in recently played, otherwise insert new
     @Query("""
-        INSERT OR IGNORE INTO play_history (mediaId, playedAt) 
-        SELECT :mediaId, :playedAt 
+        INSERT OR REPLACE INTO play_history (mediaId, playedAt)
+        VALUES (:mediaId, :playedAt)
+    """)
+    suspend fun insertOrUpdatePlayHistory(mediaId: String, playedAt: Long = System.currentTimeMillis())
+
+    // Legacy method - keep for backward compatibility
+    @Query("""
+        INSERT OR IGNORE INTO play_history (mediaId, playedAt)
+        SELECT :mediaId, :playedAt
         WHERE NOT EXISTS (
-            SELECT 1 FROM play_history 
-            WHERE mediaId = :mediaId 
+            SELECT 1 FROM play_history
+            WHERE mediaId = :mediaId
             AND playedAt > :playedAt - 30000
         )
     """)
@@ -58,6 +61,10 @@ interface AppDao {
         """
     )
     suspend fun getRecentlyPlayed(limit: Int): List<Track>
+
+    // Clear play history
+    @Query("DELETE FROM play_history")
+    suspend fun clearPlayHistory()
 
 
     // Playlists
@@ -115,6 +122,25 @@ interface AppDao {
 
     @Query("SELECT * FROM lyrics_map WHERE mediaId = :mediaId")
     suspend fun getLyricsMap(mediaId: String): LyricsMap?
+
+    // Update track metadata (user edits)
+    @Query("""
+        UPDATE track SET
+        title = :title,
+        artist = :artist,
+        album = :album,
+        genre = :genre,
+        year = :year
+        WHERE mediaId = :mediaId
+    """)
+    suspend fun updateTrackMetadata(
+        mediaId: String,
+        title: String,
+        artist: String,
+        album: String,
+        genre: String?,
+        year: Int?
+    )
 
     // Artwork helpers
     @Query("UPDATE track SET artUri = :art WHERE mediaId = :mediaId")

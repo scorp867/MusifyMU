@@ -6,28 +6,39 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import java.io.File
 import com.musify.mu.ui.MainActivity
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.data.repo.LyricsStateStore
 import com.musify.mu.data.repo.PlaybackStateStore
 import com.musify.mu.data.repo.QueueStateStore
 import com.musify.mu.data.db.entities.Track
+import com.musify.mu.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // Temporary workaround - define extension function here
 fun Track.toMediaItem(): MediaItem {
@@ -48,7 +59,45 @@ fun Track.toMediaItem(): MediaItem {
         .build()
 }
 
+@UnstableApi
 class PlayerService : MediaLibraryService() {
+
+    companion object {
+        private var mediaCache: SimpleCache? = null
+        private val cacheMutex = Mutex()
+
+        /**
+         * Get or create Media3 cache with optimized settings for music streaming
+         */
+        suspend fun getOrCreateMediaCache(context: Context): SimpleCache = cacheMutex.withLock {
+            mediaCache ?: run {
+                val cacheDir = File(context.cacheDir, "media3_cache")
+                val cacheEvictor = LeastRecentlyUsedCacheEvictor(500 * 1024 * 1024L) // 500MB cache
+                @Suppress("DEPRECATION")
+                SimpleCache(cacheDir, cacheEvictor).also { mediaCache = it }
+            }
+        }
+
+        /**
+         * Create optimized ExoPlayer with Media3 caching
+         */
+        suspend fun createOptimizedExoPlayer(context: Context): ExoPlayer {
+            val cache = getOrCreateMediaCache(context)
+
+            // Create cache data source factory
+            val cacheDataSourceFactory = CacheDataSource.Factory()
+                .setCache(cache)
+                .setUpstreamDataSourceFactory(DefaultDataSource.Factory(context))
+                .setCacheWriteDataSinkFactory(null) // Disable writing to cache for now
+
+            // Create media source factory with caching
+            val mediaSourceFactory = DefaultMediaSourceFactory(cacheDataSourceFactory)
+
+            return ExoPlayer.Builder(context)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build()
+        }
+    }
 
     private var _player: ExoPlayer? = null
     private val player: ExoPlayer get() = _player ?: throw IllegalStateException("Player not initialized")
@@ -73,7 +122,7 @@ class PlayerService : MediaLibraryService() {
         android.util.Log.d("PlayerService", "Initializing player and queue")
 
         // Only create a new player if we don't have one
-        val newPlayer = _player ?: ExoPlayer.Builder(this).build().also { _player = it }
+        val newPlayer = _player ?: runBlocking { createOptimizedExoPlayer(this@PlayerService) }.also { _player = it }
 
         // Only create QueueManager if we don't have one, to prevent duplicates
         if (_queue == null) {
@@ -314,31 +363,68 @@ class PlayerService : MediaLibraryService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        // Stop the service when app is swiped away from recents
         android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
+        android.util.Log.d("PlayerService", "Media session available: ${mediaLibrarySession != null}")
+        android.util.Log.d("PlayerService", "Player playing: ${_player?.isPlaying}")
+        android.util.Log.d("PlayerService", "Player has media items: ${_player?.mediaItemCount}")
 
         // Stop playback immediately
         try {
             _player?.stop()
             _player?.clearMediaItems()
-        } catch (_: Exception) {}
+            android.util.Log.d("PlayerService", "Player stopped and cleared")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error stopping player", e)
+        }
 
         // Release the media session immediately to clear notification
         try {
             mediaLibrarySession?.release()
             mediaLibrarySession = null
-        } catch (_: Exception) {}
+            android.util.Log.d("PlayerService", "Media session released")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error releasing media session", e)
+        }
 
         // Stop foreground service and clear notifications immediately
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                stopForeground(true)
+            }
+            android.util.Log.d("PlayerService", "Foreground service stopped")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error stopping foreground", e)
+        }
 
         // Clear any remaining notifications
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancelAll()
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancelAll()
+            android.util.Log.d("PlayerService", "All notifications cleared")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error clearing notifications", e)
+        }
+
+        // Clean up resources
+        try {
+            _player?.release()
+            _player = null
+            _queue = null
+            serviceScope.cancel()
+            android.util.Log.d("PlayerService", "Resources cleaned up")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error cleaning up resources", e)
+        }
 
         // Stop the service completely
-        serviceScope.cancel()
-        stopSelf()
+        try {
+            stopSelf()
+            android.util.Log.d("PlayerService", "Service stopped")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error stopping service", e)
+        }
     }
 
     override fun onDestroy() {
@@ -357,6 +443,14 @@ class PlayerService : MediaLibraryService() {
             } catch (e: Exception) {
                 android.util.Log.w("PlayerService", "Failed to clear state on destroy", e)
             }
+        }
+
+        // Release Media3 cache
+        try {
+            mediaCache?.release()
+            mediaCache = null
+        } catch (e: Exception) {
+            android.util.Log.w("PlayerService", "Failed to release Media3 cache", e)
         }
 
         super.onDestroy()
@@ -421,7 +515,5 @@ class PlayerService : MediaLibraryService() {
     }
 
 
-    companion object {
-        // Service configuration constants
-    }
+
 }
