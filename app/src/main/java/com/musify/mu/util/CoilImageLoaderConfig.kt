@@ -39,7 +39,7 @@ object CoilImageLoaderConfig {
                     .build()
             }
             .respectCacheHeaders(false)
-            .allowHardware(true) // Enable hardware acceleration for better performance
+            .allowHardware(false) // Disable hardware acceleration to prevent artwork flickering
             .crossfade(true)
             .networkObserverEnabled(false) // Disable network observer for local files
             .apply {
@@ -68,7 +68,7 @@ object CoilImageLoaderConfig {
                     .build()
             }
             .respectCacheHeaders(false)
-            .allowHardware(false)
+            .allowHardware(false) // Hardware acceleration disabled to prevent flickering
             .crossfade(false) // Disable crossfade to save memory
             .build()
     }

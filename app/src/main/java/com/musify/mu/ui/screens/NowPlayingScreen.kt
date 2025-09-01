@@ -70,6 +70,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.flow.distinctUntilChanged
+import android.net.Uri
+import android.content.ContentResolver
+import android.media.MediaMetadataRetriever
+import android.webkit.MimeTypeMap
+import java.io.File
+import java.io.FileOutputStream
+import android.os.Environment
+import androidx.core.content.FileProvider
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
     ExperimentalMaterialApi::class
@@ -826,7 +835,79 @@ fun NowPlayingScreen(navController: NavController) {
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = { /* Share song */ }) {
+                            IconButton(onClick = {
+                                currentTrack?.let { track ->
+                                    // Show loading indicator
+                                    val progressDialog = android.app.ProgressDialog(context).apply {
+                                        setMessage("Preparing song for sharing...")
+                                        setCancelable(false)
+                                        show()
+                                    }
+
+                                    coroutineScope.launch(Dispatchers.IO) {
+                                        try {
+                                            val shareResult = shareSongWithMetadata(track, context)
+
+                                            withContext(Dispatchers.Main) {
+                                                progressDialog.dismiss()
+
+                                                when (shareResult) {
+                                                    is ShareSongResult.Success -> {
+                                                        val shareIntent = android.content.Intent().apply {
+                                                            action = android.content.Intent.ACTION_SEND
+                                                            type = shareResult.mimeType
+                                                            putExtra(android.content.Intent.EXTRA_STREAM, shareResult.uri)
+                                                            putExtra(android.content.Intent.EXTRA_TEXT,
+                                                                "🎵 ${track.title} by ${track.artist}\nAlbum: ${track.album}\nShared from Musify MU")
+                                                            putExtra(android.content.Intent.EXTRA_SUBJECT, "${track.title} - ${track.artist}")
+                                                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                        }
+
+                                                        val chooserIntent = android.content.Intent.createChooser(
+                                                            shareIntent,
+                                                            "Share song file via"
+                                                        )
+
+                                                        try {
+                                                            context.startActivity(chooserIntent)
+                                                        } catch (e: Exception) {
+                                                            android.util.Log.e("NowPlayingScreen", "Error starting share chooser", e)
+                                                            android.widget.Toast.makeText(
+                                                                context,
+                                                                "Unable to open share options",
+                                                                android.widget.Toast.LENGTH_SHORT
+                                                            ).show()
+                                                        }
+                                                    }
+                                                    is ShareSongResult.Error -> {
+                                                        android.widget.Toast.makeText(
+                                                            context,
+                                                            "Failed to share: ${shareResult.message}",
+                                                            android.widget.Toast.LENGTH_LONG
+                                                        ).show()
+                                                    }
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("NowPlayingScreen", "Error sharing song", e)
+                                            withContext(Dispatchers.Main) {
+                                                progressDialog.dismiss()
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "Error preparing song for sharing",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        }
+                                    }
+                                } ?: run {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "No song to share",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }) {
                                 Icon(
                                     imageVector = Icons.Rounded.Share,
                                     contentDescription = "Share",
@@ -1238,6 +1319,129 @@ fun NowPlayingScreen(navController: NavController) {
                 }
             }
         }
+    }
+}
+
+// Share result types
+sealed class ShareSongResult {
+    data class Success(val uri: Uri, val mimeType: String) : ShareSongResult()
+    data class Error(val message: String) : ShareSongResult()
+}
+
+// Function to share song with metadata and album art
+suspend fun shareSongWithMetadata(track: com.musify.mu.data.db.entities.Track, context: android.content.Context): ShareSongResult {
+    return withContext(Dispatchers.IO) {
+        try {
+            val contentResolver = context.contentResolver
+            val originalUri = Uri.parse(track.mediaId)
+
+            // Get MIME type
+            val mimeType = contentResolver.getType(originalUri) ?: run {
+                val extension = MimeTypeMap.getFileExtensionFromUrl(track.mediaId)
+                MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase())
+            } ?: "audio/*"
+
+            // Create temporary file for sharing
+            val tempDir = File(context.cacheDir, "shared_music").apply { mkdirs() }
+            val fileName = "${track.title.replace(Regex("[^a-zA-Z0-9]"), "_")}_${track.artist.replace(Regex("[^a-zA-Z0-9]"), "_")}"
+            val extension = when (mimeType) {
+                "audio/mpeg" -> "mp3"
+                "audio/flac" -> "flac"
+                "audio/ogg" -> "ogg"
+                "audio/wav" -> "wav"
+                "audio/aac" -> "aac"
+                else -> "mp3"
+            }
+            val tempFile = File(tempDir, "$fileName.$extension")
+
+            // Copy the file with metadata
+            contentResolver.openInputStream(originalUri)?.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return@withContext ShareSongResult.Error("Unable to access song file")
+
+            // Try to embed metadata if it's MP3
+            if (mimeType == "audio/mpeg" || extension == "mp3") {
+                try {
+                    embedMp3Metadata(tempFile, track, context)
+                } catch (e: Exception) {
+                    android.util.Log.w("ShareSong", "Failed to embed metadata", e)
+                    // Continue without metadata embedding
+                }
+            }
+
+            // Create content URI for sharing
+            val contentUri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                tempFile
+            )
+
+            ShareSongResult.Success(contentUri, mimeType)
+        } catch (e: Exception) {
+            android.util.Log.e("ShareSong", "Error preparing song for sharing", e)
+            ShareSongResult.Error("Failed to prepare song: ${e.message}")
+        }
+    }
+}
+
+// Function to embed metadata in MP3 files
+private suspend fun embedMp3Metadata(file: File, track: com.musify.mu.data.db.entities.Track, context: android.content.Context) {
+    try {
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(context, Uri.parse(track.mediaId))
+
+        // Get existing embedded picture if available
+        val existingArtwork = retriever.embeddedPicture
+
+        retriever.release()
+
+        // If no embedded artwork but we have a cached artwork URI, try to get it
+        val artworkBytes = existingArtwork ?: if (!track.artUri.isNullOrBlank()) {
+            try {
+                getArtworkBytes(track.artUri, context)
+            } catch (e: Exception) {
+                android.util.Log.w("ShareSong", "Failed to get artwork for embedding", e)
+                null
+            }
+        } else null
+
+        // For now, we'll log what metadata would be embedded
+        // To fully implement MP3 metadata embedding, you would need a library like:
+        // - jaudiotagger (https://github.com/hexagonframework/jaudiotagger)
+        // - or similar MP3 metadata manipulation library
+
+        android.util.Log.d("ShareSong", "Would embed metadata for: ${track.title}")
+        android.util.Log.d("ShareSong", "Artist: ${track.artist}")
+        android.util.Log.d("ShareSong", "Album: ${track.album}")
+        android.util.Log.d("ShareSong", "Genre: ${track.genre}")
+        android.util.Log.d("ShareSong", "Year: ${track.year}")
+        android.util.Log.d("ShareSong", "Artwork available: ${artworkBytes?.isNotEmpty() ?: false}")
+
+        // The file already contains the original metadata from the source
+        // For a complete implementation, you would:
+        // 1. Add jaudiotagger dependency to build.gradle.kts
+        // 2. Use AudioFileIO.read(file) to read existing metadata
+        // 3. Update title, artist, album, artwork, etc.
+        // 4. Use AudioFileIO.write() to save changes
+
+    } catch (e: Exception) {
+        android.util.Log.w("ShareSong", "Failed to process MP3 metadata", e)
+        throw e
+    }
+}
+
+// Helper function to get artwork bytes from URI
+private suspend fun getArtworkBytes(artUri: String, context: android.content.Context): ByteArray? {
+    return try {
+        val uri = Uri.parse(artUri)
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            input.readBytes()
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("ShareSong", "Failed to read artwork bytes", e)
+        null
     }
 }
 

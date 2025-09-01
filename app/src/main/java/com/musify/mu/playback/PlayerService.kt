@@ -21,6 +21,9 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import java.io.File
@@ -97,6 +100,11 @@ class PlayerService : MediaLibraryService() {
                 .setMediaSourceFactory(mediaSourceFactory)
                 .build()
         }
+
+        // Static flag to persist across service instances and prevent unwanted restarts
+        private var isServiceBeingDestroyed = false
+        private var resetHandler: android.os.Handler? = null
+        private const val RESET_DELAY_MS = 10000L // 10 seconds should be enough
     }
 
     private var _player: ExoPlayer? = null
@@ -108,12 +116,69 @@ class PlayerService : MediaLibraryService() {
     private lateinit var queueStateStore: QueueStateStore
     private lateinit var lyricsStateStore: LyricsStateStore
     private lateinit var audioFocusManager: AudioFocusManager
+    private var componentsInitialized = false
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var lastLoadedLyricsId: String? = null
 
     private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
     private var hasValidMedia = false
     private var currentMediaIdCache: String? = null
+    private var receiverRegistered = false
+    private var lifecycleObserverRegistered = false
+    private var audioFocusManagerInitialized = false
+
+
+
+    /**
+     * Broadcast receiver to catch system events that might indicate app termination
+     */
+    private val terminationReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            // Don't do anything if the service is being destroyed
+            if (isServiceBeingDestroyed) {
+                android.util.Log.d("PlayerService", "Ignoring termination signal - service is being destroyed")
+                return
+            }
+
+            val packageName = intent?.data?.schemeSpecificPart
+            val isOurPackage = packageName == context?.packageName
+
+            if (isOurPackage) {
+                when (intent?.action) {
+                    android.content.Intent.ACTION_PACKAGE_RESTARTED,
+                    android.content.Intent.ACTION_PACKAGE_REMOVED,
+                    android.content.Intent.ACTION_PACKAGE_REPLACED -> {
+                        android.util.Log.d("PlayerService", "Received termination signal for our package: ${intent.action}")
+                        cleanupAllNotifications()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Process lifecycle observer - handles background transitions and termination
+     */
+    private val processLifecycleObserver = object : DefaultLifecycleObserver {
+        override fun onStop(owner: LifecycleOwner) {
+            android.util.Log.d("PlayerService", "App going to background")
+            // Don't interfere with normal Media3 notification management
+            // Let Media3 handle background notifications properly
+        }
+
+        override fun onDestroy(owner: LifecycleOwner) {
+            android.util.Log.d("PlayerService", "Process lifecycle onDestroy - app is terminating")
+            // Only clean up notifications when the process is actually being destroyed
+            cleanupAllNotifications()
+        }
+
+        override fun onStart(owner: LifecycleOwner) {
+            android.util.Log.d("PlayerService", "App returning to foreground")
+            // App is back, no cleanup needed
+        }
+    }
+
+
 
     private fun ensurePlayerInitialized() {
         // If we already have a properly initialized player and queue, return
@@ -228,33 +293,81 @@ class PlayerService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
 
-        repo = LibraryRepository.get(this)
-        stateStore = PlaybackStateStore(this)
-        queueStateStore = QueueStateStore(this)
-        lyricsStateStore = LyricsStateStore.getInstance(this)
-        // Lazy: player and queue are created on first playback request
+        // Check if this service was previously being destroyed
+        // If so, it means Media3 or Android is trying to restart it - stop immediately
+        if (isServiceBeingDestroyed) {
+            android.util.Log.d("PlayerService", "Service restart detected after destruction - stopping immediately")
+            stopSelf()
+            return
+        }
 
-        // Player listeners are attached in ensurePlayerInitialized() when needed
+        // Service is starting normally - cancel any pending flag reset
+        cancelFlagReset()
 
-        // Initialize audio focus manager
-        audioFocusManager = AudioFocusManager(this) { focusChange ->
-            when (focusChange) {
-                android.media.AudioManager.AUDIOFOCUS_GAIN -> {
-                    player.volume = 1.0f
-                    if (!player.isPlaying && player.playWhenReady) {
-                        player.play()
+        // Reset destruction flag when service is recreated normally
+        isServiceBeingDestroyed = false
+
+        try {
+            // Register broadcast receiver for termination events
+            val filter = android.content.IntentFilter().apply {
+                addAction(android.content.Intent.ACTION_PACKAGE_RESTARTED)
+                addAction(android.content.Intent.ACTION_PACKAGE_REMOVED)
+                addAction(android.content.Intent.ACTION_PACKAGE_REPLACED)
+                addDataScheme("package")
+            }
+            registerReceiver(terminationReceiver, filter)
+            receiverRegistered = true
+            android.util.Log.d("PlayerService", "Termination broadcast receiver registered")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error registering broadcast receiver", e)
+            receiverRegistered = false
+        }
+
+        try {
+            // Register process lifecycle observer
+            ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
+            lifecycleObserverRegistered = true
+            android.util.Log.d("PlayerService", "Process lifecycle observer registered")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error registering lifecycle observer", e)
+            lifecycleObserverRegistered = false
+        }
+
+        try {
+            repo = LibraryRepository.get(this)
+            stateStore = PlaybackStateStore(this)
+            queueStateStore = QueueStateStore(this)
+            lyricsStateStore = LyricsStateStore.getInstance(this)
+            // Lazy: player and queue are created on first playback request
+
+            // Player listeners are attached in ensurePlayerInitialized() when needed
+
+            // Initialize audio focus manager
+            audioFocusManager = AudioFocusManager(this) { focusChange ->
+                when (focusChange) {
+                    android.media.AudioManager.AUDIOFOCUS_GAIN -> {
+                        player.volume = 1.0f
+                        if (!player.isPlaying && player.playWhenReady) {
+                            player.play()
+                        }
+                    }
+                    android.media.AudioManager.AUDIOFOCUS_LOSS -> {
+                        player.pause()
+                    }
+                    android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                        player.pause()
+                    }
+                    android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                        player.volume = 0.3f
                     }
                 }
-                android.media.AudioManager.AUDIOFOCUS_LOSS -> {
-                    player.pause()
-                }
-                android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                    player.pause()
-                }
-                android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
-                    player.volume = 0.3f
-                }
             }
+            audioFocusManagerInitialized = true
+            componentsInitialized = true
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error during service initialization", e)
+            stopSelf()
+            return
         }
 
         val callback = object : MediaLibraryService.MediaLibrarySession.Callback {
@@ -364,11 +477,17 @@ class PlayerService : MediaLibraryService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         android.util.Log.d("PlayerService", "App swiped away from recents - stopping service")
-        android.util.Log.d("PlayerService", "Media session available: ${mediaLibrarySession != null}")
-        android.util.Log.d("PlayerService", "Player playing: ${_player?.isPlaying}")
-        android.util.Log.d("PlayerService", "Player has media items: ${_player?.mediaItemCount}")
 
-        // Stop playback immediately
+        // Set flag to prevent Media3 from restarting the service
+        isServiceBeingDestroyed = true
+
+        // Schedule flag reset after a delay to allow legitimate service restarts later
+        scheduleFlagReset()
+
+        // CRITICAL: Stop player and release media session BEFORE stopping foreground service
+        // This prevents Media3 from trying to restart the service during cleanup
+
+        // 1. Stop playback and clear media items first
         try {
             _player?.stop()
             _player?.clearMediaItems()
@@ -377,7 +496,7 @@ class PlayerService : MediaLibraryService() {
             android.util.Log.e("PlayerService", "Error stopping player", e)
         }
 
-        // Release the media session immediately to clear notification
+        // 2. Release media session to disconnect from Media3
         try {
             mediaLibrarySession?.release()
             mediaLibrarySession = null
@@ -386,28 +505,7 @@ class PlayerService : MediaLibraryService() {
             android.util.Log.e("PlayerService", "Error releasing media session", e)
         }
 
-        // Stop foreground service and clear notifications immediately
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                stopForeground(true)
-            }
-            android.util.Log.d("PlayerService", "Foreground service stopped")
-        } catch (e: Exception) {
-            android.util.Log.e("PlayerService", "Error stopping foreground", e)
-        }
-
-        // Clear any remaining notifications
-        try {
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.cancelAll()
-            android.util.Log.d("PlayerService", "All notifications cleared")
-        } catch (e: Exception) {
-            android.util.Log.e("PlayerService", "Error clearing notifications", e)
-        }
-
-        // Clean up resources
+        // 3. Clean up resources
         try {
             _player?.release()
             _player = null
@@ -418,7 +516,11 @@ class PlayerService : MediaLibraryService() {
             android.util.Log.e("PlayerService", "Error cleaning up resources", e)
         }
 
-        // Stop the service completely
+        // 4. NOW clean up notifications and stop foreground service
+        // This should prevent Media3 from trying to restart the service
+        cleanupAllNotifications()
+
+        // 5. Stop the service completely
         try {
             stopSelf()
             android.util.Log.d("PlayerService", "Service stopped")
@@ -427,21 +529,143 @@ class PlayerService : MediaLibraryService() {
         }
     }
 
+    override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
+        // If the service is being destroyed, don't allow it to restart
+        if (isServiceBeingDestroyed) {
+            android.util.Log.d("PlayerService", "Service start blocked - service is being destroyed")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        return super.onStartCommand(intent, flags, startId)
+    }
+
+    /**
+     * Schedule the destruction flag to be reset after a delay
+     */
+    private fun scheduleFlagReset() {
+        // Cancel any existing reset
+        cancelFlagReset()
+
+        // Create handler if needed
+        if (resetHandler == null) {
+            resetHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        }
+
+        // Schedule flag reset
+        resetHandler?.postDelayed({
+            android.util.Log.d("PlayerService", "Resetting service destruction flag")
+            isServiceBeingDestroyed = false
+        }, RESET_DELAY_MS)
+    }
+
+    /**
+     * Cancel the scheduled flag reset
+     */
+    private fun cancelFlagReset() {
+        resetHandler?.removeCallbacksAndMessages(null)
+    }
+
+    /**
+     * Comprehensive notification cleanup that handles all Media3 notification scenarios
+     */
+    private fun cleanupAllNotifications() {
+        try {
+            // Stop foreground service properly - this will dismiss the notification
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                stopForeground(true)
+            }
+            android.util.Log.d("PlayerService", "Foreground service stopped")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error stopping foreground", e)
+        }
+
+        // Clear any remaining notifications that Media3 might have left
+        try {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            // Cancel all notifications to be thorough
+            notificationManager.cancelAll()
+            android.util.Log.d("PlayerService", "All notifications cleared")
+        } catch (e: Exception) {
+            android.util.Log.e("PlayerService", "Error clearing notifications", e)
+        }
+    }
+
     override fun onDestroy() {
-        audioFocusManager.abandon()
-        stopForegroundService()
-        mediaLibrarySession?.release()
-        _player?.release()
-        _player = null
+        android.util.Log.d("PlayerService", "Service onDestroy called")
+
+        // Cancel any pending flag reset
+        cancelFlagReset()
+
+        // Unregister broadcast receiver - only if it was registered
+        if (receiverRegistered) {
+            try {
+                unregisterReceiver(terminationReceiver)
+                android.util.Log.d("PlayerService", "Termination broadcast receiver unregistered")
+            } catch (e: Exception) {
+                android.util.Log.d("PlayerService", "Broadcast receiver was not registered or already unregistered")
+            }
+        }
+
+        // Unregister process lifecycle observer - only if it was registered
+        if (lifecycleObserverRegistered) {
+            try {
+                ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
+                android.util.Log.d("PlayerService", "Process lifecycle observer unregistered")
+            } catch (e: Exception) {
+                android.util.Log.d("PlayerService", "Process lifecycle observer was not registered or already unregistered")
+            }
+        }
+
+        // Always clean up notifications in onDestroy as well
+        cleanupAllNotifications()
+
+        // Abandon audio focus manager - only if it was initialized
+        if (audioFocusManagerInitialized) {
+            try {
+                audioFocusManager.abandon()
+            } catch (e: Exception) {
+                android.util.Log.d("PlayerService", "Audio focus manager was already abandoned")
+            }
+        }
+
+        try {
+            stopForegroundService()
+        } catch (e: Exception) {
+            android.util.Log.d("PlayerService", "Foreground service was already stopped")
+        }
+
+        try {
+            mediaLibrarySession?.release()
+            mediaLibrarySession = null
+        } catch (e: Exception) {
+            android.util.Log.d("PlayerService", "Media session was already released")
+        }
+
+        try {
+            _player?.release()
+            _player = null
+        } catch (e: Exception) {
+            android.util.Log.d("PlayerService", "Player was already released")
+        }
+
         _queue = null
         serviceScope.cancel()
 
-        // Clear state on destroy
-        serviceScope.launch(Dispatchers.IO) {
+        // Clear state on destroy - only if components were initialized
+        if (componentsInitialized) {
             try {
-                stateStore.clear()
+                serviceScope.launch(Dispatchers.IO) {
+                    try {
+                        stateStore.clear()
+                    } catch (e: Exception) {
+                        android.util.Log.w("PlayerService", "Failed to clear state on destroy", e)
+                    }
+                }
             } catch (e: Exception) {
-                android.util.Log.w("PlayerService", "Failed to clear state on destroy", e)
+                android.util.Log.d("PlayerService", "State store was not initialized")
             }
         }
 
@@ -450,7 +674,7 @@ class PlayerService : MediaLibraryService() {
             mediaCache?.release()
             mediaCache = null
         } catch (e: Exception) {
-            android.util.Log.w("PlayerService", "Failed to release Media3 cache", e)
+            android.util.Log.d("PlayerService", "Media cache was already released")
         }
 
         super.onDestroy()
