@@ -28,14 +28,12 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY dateAddedSec DESC LIMIT :limit")
     suspend fun getRecentlyAdded(limit: Int): List<Track>
 
-    // Smart play history insertion - only record if not played recently (within 30 seconds)
+    // Play history insertion - record ONLY the first time a track is ever played
     @Query("""
-        INSERT OR IGNORE INTO play_history (mediaId, playedAt) 
-        SELECT :mediaId, :playedAt 
+        INSERT OR IGNORE INTO play_history (mediaId, playedAt)
+        SELECT :mediaId, :playedAt
         WHERE NOT EXISTS (
-            SELECT 1 FROM play_history 
-            WHERE mediaId = :mediaId 
-            AND playedAt > :playedAt - 30000
+            SELECT 1 FROM play_history WHERE mediaId = :mediaId
         )
     """)
     suspend fun insertPlayHistoryIfNotRecent(mediaId: String, playedAt: Long = System.currentTimeMillis())
@@ -59,6 +57,10 @@ interface AppDao {
     )
     suspend fun getRecentlyPlayed(limit: Int): List<Track>
 
+    // Clear entire play history (used by UI 'Clear' action)
+    @Query("DELETE FROM play_history")
+    suspend fun clearPlayHistory()
+
 
     // Playlists
     @Insert
@@ -66,6 +68,9 @@ interface AppDao {
 
     @Query("UPDATE playlist SET name = :name WHERE id = :id")
     suspend fun renamePlaylist(id: Long, name: String)
+
+    @Query("UPDATE playlist SET imageUri = :imageUri WHERE id = :id")
+    suspend fun updatePlaylistImage(id: Long, imageUri: String?)
 
     @Query("DELETE FROM playlist WHERE id = :id")
     suspend fun deletePlaylist(id: Long)
@@ -134,6 +139,13 @@ interface AppDao {
 
     @Query("SELECT * FROM track WHERE album = :album AND artist = :artist")
     suspend fun getTracksByAlbum(album: String, artist: String): List<Track>
+
+    // Art overrides for artist/album mosaics
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertArtOverride(item: ArtOverride)
+
+    @Query("SELECT * FROM art_override WHERE type = :type AND key = :key")
+    suspend fun getArtOverride(type: String, key: String): ArtOverride?
 }
 
 // Simple data class for album info

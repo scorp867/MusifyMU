@@ -121,6 +121,9 @@ dependencies {
     // WebRTC Android (Threema prebuilt) for access to org.webrtc audio processing
     implementation("ch.threema:webrtc-android:100.0.0")
 
+    // Audio metadata editing (ID3 tags, Vorbis, etc.)
+    implementation("org.jaudiotagger:jaudiotagger:3.0.1")
+
 
 }
 

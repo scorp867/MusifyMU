@@ -47,14 +47,20 @@ class SimpleMediaStoreScanner(
     private val observerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var contentObserver: MediaStoreContentObserver? = null
 
-    // Minimal projection - only what we need for basic display
+    // Minimal projection - extended to include date and details for better sorting
     private val BASIC_PROJECTION = arrayOf(
         MediaStore.Audio.Media._ID,
         MediaStore.Audio.Media.TITLE,
         MediaStore.Audio.Media.ARTIST,
         MediaStore.Audio.Media.ALBUM,
         MediaStore.Audio.Media.DURATION,
-        MediaStore.Audio.Media.ALBUM_ID
+        MediaStore.Audio.Media.ALBUM_ID,
+        MediaStore.Audio.Media.DATE_ADDED,
+        MediaStore.Audio.Media.DATE_MODIFIED,
+        MediaStore.Audio.Media.MIME_TYPE,
+        MediaStore.Audio.Media.SIZE,
+        MediaStore.Audio.Media.TRACK,
+        MediaStore.Audio.Media.YEAR
     )
 
     /**
@@ -267,6 +273,12 @@ class SimpleMediaStoreScanner(
                 val albumIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val durationIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val albumIdIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val dateAddedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                val dateModifiedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+                val mimeIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
+                val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                val trackNoIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TRACK)
+                val yearIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
 
                 while (cursor.moveToNext()) {
                     try {
@@ -277,6 +289,12 @@ class SimpleMediaStoreScanner(
                         val album = cursor.getString(albumIndex)?.takeIf { it.isNotBlank() } ?: "Unknown"
                         val duration = cursor.getLong(durationIndex)
                         val albumId = cursor.getLong(albumIdIndex)
+                        val dateAddedSec = cursor.getLong(dateAddedIndex)
+                        val dateModified = cursor.getLong(dateModifiedIndex)
+                        val mime = cursor.getString(mimeIndex)
+                        val size = cursor.getLong(sizeIndex)
+                        val trackNo = cursor.getInt(trackNoIndex)
+                        val year = cursor.getInt(yearIndex)
 
                         // Validate essential fields - be less restrictive
                         if (duration >= 0) {  // Allow 0 duration for now
@@ -296,7 +314,21 @@ class SimpleMediaStoreScanner(
                                 album = album,
                                 durationMs = duration,
                                 artUri = quickArtUri, // Fast album art lookup via album ID
-                                albumId = albumId
+                                albumId = albumId,
+                                dateAddedSec = dateAddedSec,
+                                artistId = null,
+                                genre = null,
+                                year = year.takeIf { it > 0 },
+                                track = trackNo.takeIf { it > 0 },
+                                mimeType = mime,
+                                size = size,
+                                bitrate = null,
+                                sampleRate = null,
+                                isMusic = 1,
+                                dateModified = dateModified,
+                                displayName = null,
+                                relativePath = null,
+                                albumArtist = null
                             )
                             tracks.add(track)
 

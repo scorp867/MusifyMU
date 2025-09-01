@@ -69,3 +69,10 @@ data class PlayHistory(
     val mediaId: String,
     val playedAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "art_override", primaryKeys = ["type", "key"])
+data class ArtOverride(
+    val type: String, // "artist" or "album"
+    val key: String,  // for album use "album|artist"
+    val imageUri: String
+)

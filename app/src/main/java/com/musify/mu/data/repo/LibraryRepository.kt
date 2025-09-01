@@ -83,6 +83,7 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun createPlaylist(name: String, imageUri: String? = null): Long = db.dao().createPlaylist(Playlist(name = name, imageUri = imageUri))
     suspend fun renamePlaylist(id: Long, name: String) = db.dao().renamePlaylist(id, name)
     suspend fun deletePlaylist(id: Long) = db.dao().deletePlaylist(id)
+    suspend fun updatePlaylistImage(id: Long, imageUri: String?) = db.dao().updatePlaylistImage(id, imageUri)
 
     suspend fun addToPlaylist(playlistId: Long, mediaIds: List<String>) {
         val existing = db.dao().getPlaylistTracks(playlistId).map { it.mediaId }.toSet()
@@ -138,7 +139,11 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun recentlyAdded(limit: Int = 20): List<Track> {
         val databaseRecent = db.dao().getRecentlyAdded(limit)
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
-        return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
+        // Ensure order by date added desc (in case DB isn't updated yet)
+        return databaseRecent
+            .filter { track -> currentTrackIds.contains(track.mediaId) }
+            .sortedByDescending { it.dateAddedSec }
+            .take(limit)
     }
 
     suspend fun recentlyPlayed(limit: Int = 20): List<Track> {
@@ -150,6 +155,19 @@ class LibraryRepository private constructor(private val context: Context, privat
 
     // Artwork cache update from playback metadata
     suspend fun updateTrackArt(mediaId: String, artUri: String?) = db.dao().updateTrackArt(mediaId, artUri)
+
+    // Clear play history (recently played)
+    suspend fun clearRecentlyPlayed() = db.dao().clearPlayHistory()
+
+    // Art override helpers
+    suspend fun setArtistArt(artist: String, imageUri: String) = db.dao().upsertArtOverride(
+        com.musify.mu.data.db.entities.ArtOverride("artist", artist, imageUri)
+    )
+    suspend fun setAlbumArt(album: String, artist: String, imageUri: String) = db.dao().upsertArtOverride(
+        com.musify.mu.data.db.entities.ArtOverride("album", "$album|$artist", imageUri)
+    )
+    suspend fun getArtistArt(artist: String): String? = db.dao().getArtOverride("artist", artist)?.imageUri
+    suspend fun getAlbumArt(album: String, artist: String): String? = db.dao().getArtOverride("album", "$album|$artist")?.imageUri
 
     companion object {
         @Volatile private var INSTANCE: LibraryRepository? = null

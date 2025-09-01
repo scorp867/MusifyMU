@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +37,7 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(album, artist) {
         val all = repo.getAllTracks()
@@ -45,14 +47,29 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
             }
     }
 
+    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { picked ->
+        if (picked != null) {
+            val uriStr = picked.toString()
+            scope.launch { repo.setAlbumArt(album, artist, uriStr) }
+        }
+    }
+
     Scaffold { padding ->
         if (tracks.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("No songs found")
             }
         } else {
-            // Choose a single album art (from the album group)
-            val albumArt = remember(tracks) { tracks.firstOrNull { it.artUri != null }?.artUri }
+            // Resolve album art override or fallback to any track art
+            var albumArt by remember { mutableStateOf<String?>(null) }
+            LaunchedEffect(tracks, album, artist) {
+                val override = repo.getAlbumArt(album, artist)
+                if (override != null) albumArt = override else {
+                    albumArt = tracks.firstOrNull { it.artUri != null }?.artUri
+                }
+            }
 
             val listState = rememberLazyListState()
 
@@ -122,6 +139,9 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                             Text(album, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1)
                             IconButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks, 0) }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Play all") }
                             IconButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks.shuffled(), 0) }) { Icon(Icons.Rounded.Shuffle, contentDescription = "Shuffle") }
+                            IconButton(onClick = { imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                                Icon(imageVector = Icons.Rounded.Edit, contentDescription = "Change image")
+                            }
                         }
                     }
                 }

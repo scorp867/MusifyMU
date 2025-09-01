@@ -63,6 +63,7 @@ import com.musify.mu.ui.components.GymModeIndicator
 import com.musify.mu.util.PermissionHelper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.ExperimentalMaterialApi
@@ -70,6 +71,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.flow.distinctUntilChanged
+import com.musify.mu.data.media.MetadataEditor
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
     ExperimentalMaterialApi::class
@@ -93,6 +95,66 @@ fun NowPlayingScreen(navController: NavController) {
             voiceControlManager?.toggleGymMode()
         } else {
             android.widget.Toast.makeText(context, "Microphone permission required", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    var showEditInfoDialog by remember { mutableStateOf(false) }
+    var editTitle by remember { mutableStateOf("") }
+    var editArtist by remember { mutableStateOf("") }
+    var editAlbum by remember { mutableStateOf("") }
+    var currentTrack by remember { mutableStateOf<Track?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var shuffleOn by remember { mutableStateOf(false) }
+    var repeatMode by remember { mutableStateOf(0) }
+    var progress by remember { mutableStateOf(0f) }
+    var duration by remember { mutableStateOf(0L) }
+    var isLiked by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { picked ->
+        if (picked != null) {
+            currentTrack?.let { track ->
+                coroutineScope.launch(Dispatchers.IO) {
+                    try {
+                        MetadataEditor.requestWriteAccess(context, android.net.Uri.parse(track.mediaId))
+                        val newArtUri = MetadataEditor.embedAlbumArt(context, android.net.Uri.parse(track.mediaId), picked)
+                        if (newArtUri != null) {
+                            repo.updateTrackArt(track.mediaId, newArtUri)
+                            com.musify.mu.util.OnDemandArtworkLoader.cacheUri(track.mediaId, newArtUri)
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+    if (showEditInfoDialog) {
+        val t = currentTrack
+        if (t != null) {
+            if (editTitle.isEmpty() && editArtist.isEmpty() && editAlbum.isEmpty()) {
+                editTitle = t.title
+                editArtist = t.artist
+                editAlbum = t.album
+            }
+            AlertDialog(
+                onDismissRequest = { showEditInfoDialog = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showEditInfoDialog = false
+                        coroutineScope.launch(Dispatchers.IO) {
+                            MetadataEditor.requestWriteAccess(context, android.net.Uri.parse(t.mediaId))
+                            MetadataEditor.editBasicTags(context, android.net.Uri.parse(t.mediaId), editTitle, editArtist, editAlbum)
+                        }
+                    }) { Text("Save") }
+                },
+                dismissButton = { TextButton(onClick = { showEditInfoDialog = false }) { Text("Cancel") } },
+                title = { Text("Edit song info") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(value = editTitle, onValueChange = { editTitle = it }, label = { Text("Title") })
+                        OutlinedTextField(value = editArtist, onValueChange = { editArtist = it }, label = { Text("Artist") })
+                        OutlinedTextField(value = editAlbum, onValueChange = { editAlbum = it }, label = { Text("Album") })
+                    }
+                }
+            )
         }
     }
 
@@ -417,7 +479,11 @@ fun NowPlayingScreen(navController: NavController) {
                                 isGymModeEnabled = !isGymModeEnabled
                                 voiceControlManager?.toggleGymMode()
                             }
-                        }
+                        },
+                        onChangeAlbumArt = {
+                            imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        onEditSongInfo = { showEditInfoDialog = true }
                     )
                 }
 
