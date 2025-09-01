@@ -102,6 +102,14 @@ fun NowPlayingScreen(navController: NavController) {
     var editTitle by remember { mutableStateOf("") }
     var editArtist by remember { mutableStateOf("") }
     var editAlbum by remember { mutableStateOf("") }
+    var currentTrack by remember { mutableStateOf<Track?>(null) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var shuffleOn by remember { mutableStateOf(false) }
+    var repeatMode by remember { mutableStateOf(0) }
+    var progress by remember { mutableStateOf(0f) }
+    var duration by remember { mutableStateOf(0L) }
+    var isLiked by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { picked ->
         if (picked != null) {
             currentTrack?.let { track ->
