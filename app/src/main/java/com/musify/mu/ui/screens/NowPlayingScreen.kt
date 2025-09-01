@@ -63,7 +63,10 @@ import com.musify.mu.ui.components.GymModeIndicator
 import com.musify.mu.util.PermissionHelper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.clickable
+import com.musify.mu.util.MetadataWriter
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.ui.unit.Dp
@@ -79,6 +82,9 @@ fun NowPlayingScreen(navController: NavController) {
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
+    // Edit states (declared after track state below for clarity)
+
+    // (moved below currentTrack state declarations)
 
     // Get or create VoiceControlManager singleton
     val voiceControlManager = remember {
@@ -167,6 +173,62 @@ fun NowPlayingScreen(navController: NavController) {
     var duration by remember { mutableStateOf(0L) }
     var isLiked by remember { mutableStateOf(false) }
     var userSeeking by remember { mutableStateOf(false) }
+
+    // Edit states
+    var showArtworkPicker by remember { mutableStateOf(false) }
+    var showEditSongDialog by remember { mutableStateOf(false) }
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            // Update artwork for current track
+            val mediaId = currentTrack?.mediaId
+            if (mediaId != null) {
+                val uriStr = uri.toString()
+                // Update DB art and in-memory loader cache; writing tags handled by metadata writer utility
+                kotlinx.coroutines.GlobalScope.launch(Dispatchers.Main) {
+                    try {
+                        withContext(Dispatchers.IO) { repo.updateTrackArt(mediaId, uriStr) }
+                        com.musify.mu.util.OnDemandArtworkLoader.cacheUri(mediaId, uriStr)
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
+    // Launchers and dialogs
+    if (showArtworkPicker) {
+        // Restrict to images
+        LaunchedEffect(Unit) {
+            showArtworkPicker = false
+            pickImageLauncher.launch("image/*")
+        }
+    }
+
+    if (showEditSongDialog) {
+        val track = currentTrack
+        if (track != null) {
+            EditSongDialog(
+                initialTitle = track.title,
+                initialArtist = track.artist,
+                initialAlbum = track.album,
+                onDismiss = { showEditSongDialog = false },
+                onSave = { newTitle, newArtist, newAlbum ->
+                    // Persist to file metadata asynchronously and update cache/db on success
+                    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                        try {
+                            MetadataWriter.writeTags(
+                                context = context,
+                                mediaUriString = track.mediaId,
+                                title = newTitle,
+                                artist = newArtist,
+                                album = newAlbum
+                            )
+                        } catch (_: Exception) {}
+                    }
+                    showEditSongDialog = false
+                }
+            )
+        }
+    }
 
     // Dynamic color extraction from album art
     var dominantColor by remember { mutableStateOf(Color(0xFF6236FF)) }
@@ -417,6 +479,13 @@ fun NowPlayingScreen(navController: NavController) {
                                 isGymModeEnabled = !isGymModeEnabled
                                 voiceControlManager?.toggleGymMode()
                             }
+                        },
+                        onChangeArtwork = {
+                            // Trigger artwork change flow
+                            showArtworkPicker = true
+                        },
+                        onEditSongInfo = {
+                            showEditSongDialog = true
                         }
                     )
                 }
@@ -488,6 +557,7 @@ fun NowPlayingScreen(navController: NavController) {
                                         radius = 300f
                                     )
                                 )
+                                .clickable { showArtworkPicker = true }
                         )
                     }
                 } ?: Box(
@@ -1189,6 +1259,56 @@ fun NowPlayingScreen(navController: NavController) {
             }
         }
     }
+}
+
+@Composable
+private fun EditSongDialog(
+    initialTitle: String,
+    initialArtist: String,
+    initialAlbum: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String) -> Unit
+) {
+    var title by remember { mutableStateOf(initialTitle) }
+    var artist by remember { mutableStateOf(initialArtist) }
+    var album by remember { mutableStateOf(initialAlbum) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { onSave(title.trim(), artist.trim(), album.trim()) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        title = { Text("Edit song info") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = artist,
+                    onValueChange = { artist = it },
+                    label = { Text("Artist") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = album,
+                    onValueChange = { album = it },
+                    label = { Text("Album") },
+                    singleLine = true
+                )
+            }
+        }
+    )
 }
 
 // Helper function to format duration in mm:ss format

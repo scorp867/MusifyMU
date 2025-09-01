@@ -46,6 +46,10 @@ class AppThemeManager private constructor(context: Context) {
     val homeLayoutConfigState: State<List<String>> get() = _homeLayoutConfigState
     val homeLayoutConfig: List<String> get() = _homeLayoutConfigState.value
     
+    // LISTS display mode: "carousel" (default) or "list"
+    private val _listsDisplayMode = mutableStateOf(prefs.getString(KEY_LISTS_DISPLAY_MODE, "carousel") ?: "carousel")
+    val listsDisplayModeState: State<String> get() = _listsDisplayMode
+    
     // Animation settings
     private val _useAnimatedBackgrounds = mutableStateOf(prefs.getBoolean(KEY_USE_ANIMATED_BACKGROUNDS, false))
     val useAnimatedBackgrounds: Boolean
@@ -98,6 +102,12 @@ class AppThemeManager private constructor(context: Context) {
         _homeLayoutConfigState.value = config
     }
     
+    suspend fun setListsDisplayMode(mode: String) = withContext(Dispatchers.IO) {
+        val normalized = if (mode == "list") "list" else "carousel"
+        prefs.edit().putString(KEY_LISTS_DISPLAY_MODE, normalized).apply()
+        _listsDisplayMode.value = normalized
+    }
+    
     // Animation settings methods
     suspend fun setUseAnimatedBackgrounds(enabled: Boolean) = withContext(Dispatchers.IO) {
         prefs.edit().putBoolean(KEY_USE_ANIMATED_BACKGROUNDS, enabled).apply()
@@ -128,6 +138,7 @@ class AppThemeManager private constructor(context: Context) {
         // Layout keys
         private const val KEY_CUSTOM_LAYOUT_ENABLED = "custom_layout_enabled"
         private const val KEY_HOME_LAYOUT_CONFIG = "home_layout_config"
+        private const val KEY_LISTS_DISPLAY_MODE = "lists_display_mode"
         
         // Animation keys
         private const val KEY_USE_ANIMATED_BACKGROUNDS = "use_animated_backgrounds"

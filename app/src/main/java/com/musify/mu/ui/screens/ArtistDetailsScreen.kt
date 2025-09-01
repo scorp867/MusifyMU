@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,6 +33,10 @@ import com.musify.mu.playback.LocalIsPlaying
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
 import kotlinx.coroutines.launch
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -39,6 +44,25 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
+    var showArtPicker by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            val uriStr = uri.toString()
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    tracks.forEach { t ->
+                        try {
+                            repo.updateTrackArt(t.mediaId, uriStr)
+                            com.musify.mu.util.OnDemandArtworkLoader.cacheUri(t.mediaId, uriStr)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(artist) {
         val all = repo.getAllTracks()
@@ -99,6 +123,20 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(onClick = { onPlay(tracks, 0) }) { Text("Play all") }
                             OutlinedButton(onClick = { if (tracks.isNotEmpty()) onPlay(tracks.shuffled(), 0) }) { Text("Shuffle") }
+                            var expanded by remember { mutableStateOf(false) }
+                            Box {
+                                IconButton(onClick = { expanded = true }) { Icon(Icons.Rounded.MoreVert, contentDescription = "More") }
+                                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                                    DropdownMenuItem(text = { Text("Change artwork") }, onClick = {
+                                        expanded = false
+                                        showArtPicker = true
+                                    })
+                                    DropdownMenuItem(text = { Text("Edit artist info") }, onClick = {
+                                        expanded = false
+                                        showEditDialog = true
+                                    })
+                                }
+                            }
                         }
                     }
                 }
@@ -164,6 +202,46 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                 }
             }
         }
+    }
+
+    if (showArtPicker) {
+        LaunchedEffect(Unit) {
+            showArtPicker = false
+            pickImageLauncher.launch("image/*")
+        }
+    }
+
+    if (showEditDialog) {
+        var newArtist by remember { mutableStateOf(artist) }
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    showEditDialog = false
+                    // Update artist tag for all tracks
+                    scope.launch(Dispatchers.IO) {
+                        tracks.forEach { t ->
+                            try {
+                                com.musify.mu.util.MetadataWriter.writeTags(
+                                    context = context,
+                                    mediaUriString = t.mediaId,
+                                    title = null,
+                                    artist = if (newArtist.isNotBlank()) newArtist else null,
+                                    album = null
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { showEditDialog = false }) { Text("Cancel") } },
+            title = { Text("Edit artist info") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(value = newArtist, onValueChange = { newArtist = it }, label = { Text("Artist name") }, singleLine = true)
+                }
+            }
+        )
     }
 }
 

@@ -120,8 +120,8 @@ class PlayerService : MediaLibraryService() {
                             }
                         }
                         serviceScope.launch(Dispatchers.IO) {
-                            // Record track as played
-                            repo.recordPlayed(item.mediaId)
+                            // Record track as played (only first occurrence to avoid reordering duplicates)
+                            repo.recordPlayed(item.mediaId, onlyOnce = true)
                             queueStateStore.decrementOnAdvance()
 
                             // Load lyrics only if it's a different track
