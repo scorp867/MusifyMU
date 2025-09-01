@@ -23,9 +23,6 @@ class MusifyApp : Application(), ImageLoaderFactory {
 
         // Initialize on-demand artwork loader with application context
         com.musify.mu.util.OnDemandArtworkLoader.init(this)
-        
-        // Initialize optimized artwork loader
-        com.musify.mu.util.OptimizedArtworkLoader.init(this)
 
         // Note: Data manager will be initialized by LibraryScreen when permissions are granted
         // This avoids conflicts and ensures proper initialization timing

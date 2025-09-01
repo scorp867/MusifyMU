@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DragHandle
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -77,58 +75,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
         }
     ) else null
 
-    var showMenu by remember { mutableStateOf(false) }
-
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(title) },
-                actions = {
-                    if (type == "recently_played" || type == "recently_added") {
-                        Box {
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "More options"
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Clear") },
-                                    onClick = {
-                                        showMenu = false
-                                        scope.launch {
-                                            when (type) {
-                                                "recently_played" -> repo.clearRecentlyPlayed()
-                                                "recently_added" -> {
-                                                    // Can't clear recently added as it's based on dateAddedSec
-                                                    // Maybe show a message instead
-                                                }
-                                            }
-                                            // Refresh the list
-                                            tracks = when (type) {
-                                                "recently_played" -> repo.recentlyPlayed(200)
-                                                "recently_added" -> repo.recentlyAdded(200)
-                                                else -> emptyList()
-                                            }
-                                        }
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Default.Clear,
-                                            contentDescription = null
-                                        )
-                                    }
-                                )
-                                // Add more menu items here in the future
-                            }
-                        }
-                    }
-                }
-            )
+            TopAppBar(title = { Text(title) })
         }
     ) { padding ->
         if (type == "favorites") {
@@ -152,7 +101,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                             val end = max.coerceAtMost(tracks.lastIndex)
                             if (start <= end) {
                                 val ids = tracks.subList(start, end + 1).map { it.mediaId }
-                                com.musify.mu.util.OptimizedArtworkLoader.prefetch(ids, priority = 8)
+                                com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
                             }
                         }
                 }

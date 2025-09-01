@@ -147,14 +147,9 @@ class LibraryRepository private constructor(private val context: Context, privat
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
     suspend fun recordPlayed(mediaId: String) = db.dao().insertPlayHistoryIfNotRecent(mediaId)
-    
-    suspend fun clearRecentlyPlayed() = db.dao().clearPlayHistory()
 
     // Artwork cache update from playback metadata
     suspend fun updateTrackArt(mediaId: String, artUri: String?) = db.dao().updateTrackArt(mediaId, artUri)
-    
-    // Update track details
-    suspend fun updateTrackDetails(track: Track) = db.dao().updateTrack(track)
 
     companion object {
         @Volatile private var INSTANCE: LibraryRepository? = null

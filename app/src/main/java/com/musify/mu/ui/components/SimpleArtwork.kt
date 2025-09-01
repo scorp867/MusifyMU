@@ -60,20 +60,13 @@ fun SimpleArtwork(
 
     // Observe loader-provided artwork bound to trackUri (mediaId)
     val loaderCached = remember(trackUri) {
-        if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OptimizedArtworkLoader.getCachedUri(trackUri)
+        if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(trackUri)
     }
     val loaderFlow = remember(trackUri) {
-        if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OptimizedArtworkLoader.artworkFlow(trackUri)
+        if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(trackUri)
     }
     val loaderArt by (loaderFlow?.collectAsState(initial = loaderCached)
         ?: remember { mutableStateOf<String?>(null) })
-    
-    // Request artwork loading when this composable is visible
-    LaunchedEffect(trackUri) {
-        if (!trackUri.isNullOrBlank() && loaderArt == null) {
-            com.musify.mu.util.OptimizedArtworkLoader.requestArtwork(trackUri, priority = 10)
-        }
-    }
 
     // Resolve image data preference: explicit artUri (non-MediaStore) > loaderArt > placeholder
     val sanitizedArtUri = remember(artUri) {

@@ -71,7 +71,7 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                         }
                         val mediaUris = visibleTracks.mapNotNull { it.mediaId }
                         if (mediaUris.isNotEmpty()) {
-                            com.musify.mu.util.OptimizedArtworkLoader.prefetch(mediaUris, priority = 8)
+                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(mediaUris)
                         }
                     }
             }
