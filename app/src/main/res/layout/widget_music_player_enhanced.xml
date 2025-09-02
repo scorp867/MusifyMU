@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="8dp">
+
+    <!-- Background: Album Art / Gradient -->
+    <ImageView
+        android:id="@+id/widget_background_image"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/widget_background"
+        android:scaleType="centerCrop"
+        tools:ignore="ContentDescription" />
+
+    <!-- Content Layout (Glass panel background applied here) -->
+    <RelativeLayout
+        android:id="@+id/widget_main_layout"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clickable="true"
+        android:focusable="true"
+        android:padding="12dp"
+        android:background="@drawable/widget_glass_panel_background">
+
+        <!-- Album Art -->
+        <ImageView
+            android:id="@+id/widget_album_art"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:layout_alignParentStart="true"
+            android:layout_alignParentTop="true"
+            android:layout_marginEnd="12dp"
+            android:src="@drawable/ic_widget_album_placeholder"
+            android:scaleType="centerCrop"
+            tools:ignore="ContentDescription" />
+
+        <!-- Track Info -->
+        <LinearLayout
+            android:id="@+id/widget_track_info_layout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_alignTop="@id/widget_album_art"
+            android:layout_alignBottom="@id/widget_album_art"
+            android:layout_toEndOf="@id/widget_album_art"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_track_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="marquee"
+                android:focusable="true"
+                android:focusableInTouchMode="true"
+                android:marqueeRepeatLimit="marquee_forever"
+                android:scrollHorizontally="true"
+                android:singleLine="true"
+                android:text="No music playing"
+                android:textColor="@android:color/white"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_artist_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:text="Musify MU"
+                android:textColor="#E0E0E0"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Controls -->
+        <LinearLayout
+            android:id="@+id/widget_controls"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentBottom="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/widget_previous_button"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Previous"
+                android:src="@drawable/ic_widget_previous"
+                android:scaleType="center"
+                android:tint="@color/white" />
+
+            <ImageButton
+                android:id="@+id/widget_play_pause_button"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="8dp"
+                android:layout_marginEnd="8dp"
+                android:contentDescription="Play/Pause"
+                android:src="@drawable/ic_widget_play"
+                android:scaleType="center"
+                android:tint="@color/white" />
+
+            <ImageButton
+                android:id="@+id/widget_next_button"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Next"
+                android:scaleType="center"
+                android:src="@drawable/ic_widget_next"
+                android:tint="@color/white" />
+        </LinearLayout>
+    </RelativeLayout>
+</FrameLayout>

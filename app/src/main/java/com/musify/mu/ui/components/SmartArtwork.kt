@@ -130,19 +130,9 @@ fun SmartArtwork(
                 .diskCachePolicy(CachePolicy.ENABLED)
                 .apply { if (resolvedImageData != null) { memoryCacheKey(resolvedImageData); diskCacheKey(resolvedImageData) } }
                 .crossfade(false)
-                .size(Size.ORIGINAL)
-                .scale(Scale.FIT)
-                .listener(
-                    onStart = {
-                        hasError = false
-                    },
-                    onSuccess = { _, _ ->
-                        hasError = false
-                    },
-                    onError = { _, _ ->
-                        hasError = true
-                    }
-                )
+                // Cap decode size to avoid huge in-memory bitmaps while preserving visual quality
+                .size(Size(512, 512))
+                .scale(Scale.FILL)
                 .build()
         }
 

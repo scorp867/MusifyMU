@@ -7,7 +7,7 @@
     android:maxResizeWidth="400dp"
     android:maxResizeHeight="200dp"
     android:updatePeriodMillis="0"
-    android:initialLayout="@layout/widget_music_player_simple"
+    android:initialLayout="@layout/widget_music_player_enhanced"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"
     android:previewImage="@drawable/widget_background"

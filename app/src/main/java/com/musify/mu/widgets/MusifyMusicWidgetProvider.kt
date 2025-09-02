@@ -7,308 +7,326 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
+import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
+import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.util.Log
 import android.widget.RemoteViews
-import androidx.annotation.OptIn
-import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
+import androidx.core.graphics.drawable.toBitmap
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.palette.graphics.Palette
+import coil.imageLoader
+import coil.request.ImageRequest
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import com.musify.mu.R
 import com.musify.mu.playback.PlayerService
 import com.musify.mu.ui.MainActivity
+import com.musify.mu.util.PaletteUtil
 import kotlinx.coroutines.*
-import android.graphics.Color as AndroidColor
+import kotlinx.coroutines.android.asCoroutineDispatcher
 
 @UnstableApi
 class MusifyMusicWidgetProvider : AppWidgetProvider() {
 
-    companion object {
-        private const val ACTION_PLAY_PAUSE = "com.musify.mu.widget.PLAY_PAUSE"
-        private const val ACTION_NEXT = "com.musify.mu.widget.NEXT"
-        private const val ACTION_PREVIOUS = "com.musify.mu.widget.PREVIOUS"
-        private const val ACTION_OPEN_APP = "com.musify.mu.widget.OPEN_APP"
+	// Coroutine scope for background tasks
+	private val widgetScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-        // Widget update interval (in milliseconds)
-        private const val UPDATE_INTERVAL = 1000L
+	private data class PlaybackSnapshot(
+		val hasQueue: Boolean,
+		val isPlaying: Boolean,
+		val title: CharSequence?,
+		val artist: CharSequence?,
+		val mediaId: String?,
+		val artworkBytes: ByteArray?,
+		val artworkUri: Uri?
+	)
 
-        // Cache for media controller
-        private var mediaControllerFuture: ListenableFuture<MediaController>? = null
-        private var mediaController: MediaController? = null
+	override fun onUpdate(
+		context: Context,
+		appWidgetManager: AppWidgetManager,
+		appWidgetIds: IntArray
+	) {
+		if (mediaController == null) {
+			getMediaController(context)
+		}
 
-        // Track current playback state
-        private var currentTrack: MediaItem? = null
-        private var isPlaying = false
-        private var currentPosition = 0L
-        private var duration = 0L
+		for (appWidgetId in appWidgetIds) {
+			widgetScope.launch {
+				updateAppWidget(context, appWidgetManager, appWidgetId)
+			}
+		}
+	}
 
-        // Update job for periodic widget updates
-        private var updateJob: Job? = null
+	private suspend fun readSnapshot(controller: MediaController): PlaybackSnapshot {
+		val dispatcher = Handler(controller.applicationLooper).asCoroutineDispatcher()
+		return withContext(dispatcher) {
+			val hasQueue = controller.mediaItemCount > 0
+			val item = controller.currentMediaItem
+			val md = item?.mediaMetadata
+			PlaybackSnapshot(
+				hasQueue = hasQueue,
+				isPlaying = controller.isPlaying,
+				title = md?.title,
+				artist = md?.artist,
+				mediaId = item?.mediaId,
+				artworkBytes = md?.artworkData,
+				artworkUri = md?.artworkUri
+			)
+		}
+	}
 
-        /**
-         * Get or create media controller for the widget
-         */
-        fun getMediaController(context: Context): MediaController? {
-            if (mediaController == null) {
-                try {
-                    val sessionToken = SessionToken(context, ComponentName(context, PlayerService::class.java))
-                    mediaControllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-                    mediaControllerFuture?.addListener({
-                        try {
-                            mediaController = mediaControllerFuture?.get()
-                            setupMediaControllerListener()
-                        } catch (e: Exception) {
-                            android.util.Log.e("MusifyMusicWidget", "Failed to get media controller", e)
-                        }
-                    }, MoreExecutors.directExecutor())
-                } catch (e: Exception) {
-                    android.util.Log.e("MusifyMusicWidget", "Failed to create media controller", e)
-                }
-            }
-            return mediaController
-        }
+	private suspend fun updateAppWidget(
+		context: Context,
+		appWidgetManager: AppWidgetManager,
+		appWidgetId: Int
+	) {
+		val views = RemoteViews(context.packageName, R.layout.widget_music_player_enhanced)
 
-        /**
-         * Setup media controller listener to track playback changes
-         */
-        private fun setupMediaControllerListener() {
-            mediaController?.let { controller ->
-                controller.addListener(object : Player.Listener {
-                    override fun onIsPlayingChanged(isPlayingNow: Boolean) {
-                        isPlaying = isPlayingNow
-                        updateAllWidgets()
-                    }
+		// Set pending intents for buttons
+		views.setOnClickPendingIntent(R.id.widget_main_layout, getOpenAppIntent(context))
+		views.setOnClickPendingIntent(R.id.widget_play_pause_button, getPlaybackActionIntent(context, ACTION_PLAY_PAUSE))
+		views.setOnClickPendingIntent(R.id.widget_next_button, getPlaybackActionIntent(context, ACTION_NEXT))
+		views.setOnClickPendingIntent(R.id.widget_previous_button, getPlaybackActionIntent(context, ACTION_PREVIOUS))
 
-                    override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                        currentTrack = mediaItem
-                        updateAllWidgets()
-                    }
+		val controller = mediaController
+		if (controller == null) {
+			// Not connected yet
+			views.setTextViewText(R.id.widget_track_title, "No music playing")
+			views.setTextViewText(R.id.widget_artist_name, "Musify MU")
+			views.setImageViewResource(R.id.widget_album_art, R.drawable.ic_widget_album_placeholder)
+			views.setImageViewResource(R.id.widget_background_image, R.drawable.widget_background)
+			views.setImageViewResource(R.id.widget_play_pause_button, R.drawable.ic_widget_play)
+			appWidgetManager.updateAppWidget(appWidgetId, views)
+			return
+		}
 
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        updateAllWidgets()
-                    }
+		val snapshot = runCatching { readSnapshot(controller) }.getOrElse {
+			Log.w("MusifyMusicWidget", "Failed to read controller snapshot", it)
+			PlaybackSnapshot(false, false, null, null, null, null, null)
+		}
 
-                    override fun onPositionDiscontinuity(
-                        oldPosition: Player.PositionInfo,
-                        newPosition: Player.PositionInfo,
-                        reason: Int
-                    ) {
-                        currentPosition = newPosition.positionMs
-                        duration = controller.duration
-                        updateAllWidgets()
-                    }
-                })
-            }
-        }
+		if (!snapshot.hasQueue) {
+			views.setTextViewText(R.id.widget_track_title, "No music playing")
+			views.setTextViewText(R.id.widget_artist_name, "Musify MU")
+			views.setImageViewResource(R.id.widget_album_art, R.drawable.ic_widget_album_placeholder)
+			views.setImageViewResource(R.id.widget_background_image, R.drawable.widget_background)
+			views.setImageViewResource(R.id.widget_play_pause_button, R.drawable.ic_widget_play)
+			appWidgetManager.updateAppWidget(appWidgetId, views)
+			return
+		}
 
-        /**
-         * Update all active widgets
-         */
-        private fun updateAllWidgets() {
-            // Get the context from a widget provider instance if available
-            // For now, we'll handle updates through the periodic update mechanism
-        }
+		views.setTextViewText(R.id.widget_track_title, snapshot.title ?: "Unknown Title")
+		views.setTextViewText(R.id.widget_artist_name, snapshot.artist ?: "Unknown Artist")
+		views.setImageViewResource(
+			R.id.widget_play_pause_button,
+			if (snapshot.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
+		)
 
-        /**
-         * Start periodic widget updates
-         */
-        fun startWidgetUpdates(context: Context) {
-            updateJob?.cancel()
-            updateJob = CoroutineScope(Dispatchers.Main).launch {
-                while (isActive) {
-                    getMediaController(context)?.let { controller ->
-                        currentPosition = controller.currentPosition
-                        duration = controller.duration
-                        isPlaying = controller.isPlaying
-                        currentTrack = controller.currentMediaItem
-                    }
-                    // Update all widgets
-                    val appWidgetManager = AppWidgetManager.getInstance(context)
-                    val componentName = ComponentName(context, MusifyMusicWidgetProvider::class.java)
-                    val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
-                    appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetIds, 0)
-                    delay(UPDATE_INTERVAL)
-                }
-            }
-        }
+		// Obtain artwork bitmap (always capped size)
+		var artworkBitmap: Bitmap? = null
+		if (snapshot.artworkBytes != null) {
+			artworkBitmap = coilDecode(context, snapshot.artworkBytes)
+		}
+		if (artworkBitmap == null && !snapshot.mediaId.isNullOrBlank()) {
+			artworkBitmap = loadArtworkFromOnDemand(context, snapshot.mediaId)
+		}
+		if (artworkBitmap == null) {
+			artworkBitmap = coilDecode(context, snapshot.artworkUri)
+		}
 
-        /**
-         * Stop periodic widget updates
-         */
-        fun stopWidgetUpdates() {
-            updateJob?.cancel()
-            updateJob = null
-        }
-    }
+		if (artworkBitmap != null) {
+			val safeArt = scaleBitmapIfNeeded(artworkBitmap, MAX_ART_SIZE_PX)
+			if (safeArt !== artworkBitmap) artworkBitmap.recycle()
+			views.setImageViewBitmap(R.id.widget_album_art, safeArt)
+			Palette.from(safeArt).generate { palette ->
+				palette?.let {
+					val backgroundBitmap = PaletteUtil.createGradientBitmap(it)
+					views.setImageViewBitmap(R.id.widget_background_image, backgroundBitmap)
+					appWidgetManager.updateAppWidget(appWidgetId, views)
+				}
+			}
+		} else {
+			views.setImageViewResource(R.id.widget_album_art, R.drawable.ic_widget_album_placeholder)
+			views.setImageViewResource(R.id.widget_background_image, R.drawable.widget_background)
+		}
 
-    override fun onReceive(context: Context, intent: Intent) {
-        super.onReceive(context, intent)
+		appWidgetManager.updateAppWidget(appWidgetId, views)
+	}
 
-        when (intent.action) {
-            ACTION_PLAY_PAUSE -> handlePlayPause(context)
-            ACTION_NEXT -> handleNext(context)
-            ACTION_PREVIOUS -> handlePrevious(context)
-            ACTION_OPEN_APP -> handleOpenApp(context)
-        }
-    }
+	private fun scaleBitmapIfNeeded(src: Bitmap, maxEdge: Int): Bitmap {
+		val w = src.width
+		val h = src.height
+		if (w <= maxEdge && h <= maxEdge) return src
+		val ratio = kotlin.math.min(maxEdge.toFloat() / w, maxEdge.toFloat() / h)
+		val nw = (w * ratio).toInt().coerceAtLeast(1)
+		val nh = (h * ratio).toInt().coerceAtLeast(1)
+		return Bitmap.createScaledBitmap(src, nw, nh, true)
+	}
 
-    override fun onUpdate(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray) {
-        android.util.Log.d("MusifyMusicWidget", "onUpdate called with ${appWidgetIds.size} widget IDs: ${appWidgetIds.joinToString()}")
+	private suspend fun coilDecode(context: Context, uri: Uri?): Bitmap? {
+		if (uri == null) return null
+		return try {
+			val request = ImageRequest.Builder(context)
+				.data(uri)
+				.size(MAX_ART_SIZE_PX)
+				.allowHardware(false)
+				.build()
+			val drawable = context.imageLoader.execute(request).drawable
+			(drawable as? BitmapDrawable)?.bitmap ?: drawable?.toBitmap()
+		} catch (e: Exception) {
+			Log.w("MusifyMusicWidget", "coilDecode uri failed", e)
+			null
+		}
+	}
 
-        // Initialize media controller if needed
-        getMediaController(context)
+	private suspend fun coilDecode(context: Context, bytes: ByteArray): Bitmap? {
+		return try {
+			val request = ImageRequest.Builder(context)
+				.data(bytes)
+				.size(MAX_ART_SIZE_PX)
+				.allowHardware(false)
+				.build()
+			val drawable = context.imageLoader.execute(request).drawable
+			(drawable as? BitmapDrawable)?.bitmap ?: drawable?.toBitmap()
+		} catch (e: Exception) {
+			Log.w("MusifyMusicWidget", "coilDecode bytes failed", e)
+			null
+		}
+	}
 
-        // Start periodic updates
-        startWidgetUpdates(context)
+	private suspend fun loadArtworkFromOnDemand(context: Context, mediaId: String): Bitmap? {
+		return withContext(Dispatchers.IO) {
+			try {
+				val cached = com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaId)
+				val uriStr = cached ?: com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaId)
+				if (uriStr.isNullOrBlank()) return@withContext null
+				val request = ImageRequest.Builder(context)
+					.data(uriStr)
+					.size(MAX_ART_SIZE_PX)
+					.allowHardware(false)
+					.build()
+				val drawable = context.imageLoader.execute(request).drawable
+				(drawable as? BitmapDrawable)?.bitmap ?: drawable?.toBitmap()
+			} catch (e: Exception) {
+				Log.w("MusifyMusicWidget", "OnDemand artwork load failed", e)
+				null
+			}
+		}
+	}
 
-        // Update all widgets
-        for (appWidgetId in appWidgetIds) {
-            android.util.Log.d("MusifyMusicWidget", "Updating widget $appWidgetId")
-            updateAppWidget(context, appWidgetManager, appWidgetId)
-        }
-    }
+	override fun onReceive(context: Context, intent: Intent) {
+		super.onReceive(context, intent)
+		val action = intent.action
+		if (action?.startsWith("com.musify.mu.widget") == true) {
+			performActionWithController(context) { controller ->
+				when (action) {
+					ACTION_PLAY_PAUSE -> if (controller.isPlaying) controller.pause() else controller.play()
+					ACTION_NEXT -> controller.seekToNext()
+					ACTION_PREVIOUS -> controller.seekToPrevious()
+				}
+				requestWidgetsUpdate(context)
+			}
+		}
+	}
 
-    override fun onEnabled(context: Context) {
-        super.onEnabled(context)
-        android.util.Log.d("MusifyMusicWidget", "Widget provider enabled")
-        // Start updates when first widget is enabled
-        startWidgetUpdates(context)
-    }
+	override fun onEnabled(context: Context) {
+		super.onEnabled(context)
+		getMediaController(context)
+	}
 
-    override fun onDisabled(context: Context) {
-        super.onDisabled(context)
-        // Stop updates when last widget is disabled
-        stopWidgetUpdates()
-        mediaController?.release()
-        mediaController = null
-        mediaControllerFuture = null
-    }
+	override fun onDisabled(context: Context) {
+		super.onDisabled(context)
+		mediaController?.release()
+		mediaController = null
+		mediaControllerFuture = null
+		widgetScope.cancel()
+	}
 
-    private fun updateAppWidget(context: Context, appWidgetManager: AppWidgetManager, appWidgetId: Int) {
-        try {
-            val views = RemoteViews(context.packageName, R.layout.widget_music_player_simple)
-            android.util.Log.d("MusifyMusicWidget", "Creating RemoteViews for widget $appWidgetId")
+	companion object {
+		private const val ACTION_PLAY_PAUSE = "com.musify.mu.widget.PLAY_PAUSE"
+		private const val ACTION_NEXT = "com.musify.mu.widget.NEXT"
+		private const val ACTION_PREVIOUS = "com.musify.mu.widget.PREVIOUS"
+		private const val MAX_ART_SIZE_PX = 256
 
-        // Get current playback state
-        val controller = getMediaController(context)
-        val mediaItem = controller?.currentMediaItem
-        val playing = controller?.isPlaying ?: false
-        val position = controller?.currentPosition ?: 0L
-        val totalDuration = controller?.duration ?: 0L
+		@Volatile
+		private var mediaController: MediaController? = null
+		private var mediaControllerFuture: ListenableFuture<MediaController>? = null
 
-        // Update track information
-        val metadata = mediaItem?.mediaMetadata
-        val title = metadata?.title?.toString() ?: "No track playing"
-        val artist = metadata?.artist?.toString() ?: ""
-        val album = metadata?.albumTitle?.toString() ?: ""
+		private fun getMediaController(context: Context) {
+			if (mediaControllerFuture == null) {
+				val appCtx = context.applicationContext
+				val sessionToken = SessionToken(appCtx, ComponentName(appCtx, PlayerService::class.java))
+				mediaControllerFuture = MediaController.Builder(appCtx, sessionToken).buildAsync()
+				mediaControllerFuture?.addListener({
+					try {
+						mediaController = mediaControllerFuture?.get()
+						mediaController?.addListener(PlayerListener(appCtx))
+						requestWidgetsUpdate(appCtx)
+					} catch (e: Exception) {
+						Log.e("MusifyMusicWidget", "Error connecting to MediaController", e)
+					}
+				}, MoreExecutors.directExecutor())
+			}
+		}
 
-            // Update text views
-            val displayText = if (mediaItem != null) {
-                metadata?.title?.toString() ?: "Unknown Track"
-            } else {
-                "No music playing"
-            }
-            views.setTextViewText(R.id.widget_track_title, displayText)
-            android.util.Log.d("MusifyMusicWidget", "Updated widget text to: $displayText")
+		private fun requestWidgetsUpdate(context: Context) {
+			val manager = AppWidgetManager.getInstance(context)
+			val ids = manager.getAppWidgetIds(ComponentName(context, MusifyMusicWidgetProvider::class.java))
+			if (ids != null && ids.isNotEmpty()) {
+				val updateIntent = Intent(context, MusifyMusicWidgetProvider::class.java).setAction(AppWidgetManager.ACTION_APPWIDGET_UPDATE)
+				updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
+				context.sendBroadcast(updateIntent)
+			}
+		}
 
-            // Update play/pause button
-            val iconRes = if (playing) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
-            views.setImageViewResource(R.id.widget_play_pause_button, iconRes)
-            android.util.Log.d("MusifyMusicWidget", "Set play/pause icon: ${if (playing) "pause" else "play"}")
+		private fun performActionWithController(context: Context, block: (MediaController) -> Unit) {
+			val controller = mediaController
+			if (controller != null) {
+				Handler(controller.applicationLooper).post { block(controller) }
+				return
+			}
+			// Try to connect and then perform action
+			getMediaController(context)
+			mediaControllerFuture?.addListener({
+				try {
+					mediaControllerFuture?.get()?.let { c ->
+						Handler(c.applicationLooper).post { block(c) }
+					}
+				} catch (e: Exception) {
+					Log.e("MusifyMusicWidget", "Failed to perform action after controller connect", e)
+				}
+			}, MoreExecutors.directExecutor())
+		}
 
-            // Set up click handlers
-            views.setOnClickPendingIntent(R.id.widget_play_pause_button, getPendingIntent(context, ACTION_PLAY_PAUSE))
-            views.setOnClickPendingIntent(R.id.widget_next_button, getPendingIntent(context, ACTION_NEXT))
-            views.setOnClickPendingIntent(R.id.widget_previous_button, getPendingIntent(context, ACTION_PREVIOUS))
-            views.setOnClickPendingIntent(R.id.widget_main_layout, getPendingIntent(context, ACTION_OPEN_APP))
-            android.util.Log.d("MusifyMusicWidget", "Set up click handlers")
+		private fun getPlaybackActionIntent(context: Context, action: String): PendingIntent {
+			val intent = Intent(context, MusifyMusicWidgetProvider::class.java).setAction(action)
+			val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+			return PendingIntent.getBroadcast(context, action.hashCode(), intent, flags)
+		}
 
-            // Update the widget
-            appWidgetManager.updateAppWidget(appWidgetId, views)
-            android.util.Log.d("MusifyMusicWidget", "Widget $appWidgetId updated successfully")
-        } catch (e: Exception) {
-            android.util.Log.e("MusifyMusicWidget", "Error updating widget $appWidgetId", e)
-        }
-    }
+		private fun getOpenAppIntent(context: Context): PendingIntent {
+			val intent = Intent(context, MainActivity::class.java)
+				.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+			val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
+			return PendingIntent.getActivity(context, "open_app".hashCode(), intent, flags)
+		}
 
-    private fun getPendingIntent(context: Context, action: String): PendingIntent {
-        val intent = Intent(context, MusifyMusicWidgetProvider::class.java).apply {
-            this.action = action
-        }
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        } else {
-            PendingIntent.FLAG_UPDATE_CURRENT
-        }
-        return PendingIntent.getBroadcast(context, action.hashCode(), intent, flags)
-    }
-
-    private fun handlePlayPause(context: Context) {
-        getMediaController(context)?.let { controller ->
-            if (controller.isPlaying) {
-                controller.pause()
-            } else {
-                controller.play()
-            }
-        }
-    }
-
-    private fun handleNext(context: Context) {
-        getMediaController(context)?.seekToNext()
-    }
-
-    private fun handlePrevious(context: Context) {
-        getMediaController(context)?.seekToPrevious()
-    }
-
-    private fun handleOpenApp(context: Context) {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("navigate_to", "player")
-        }
-        context.startActivity(intent)
-    }
-
-    private fun formatTime(milliseconds: Long): String {
-        val totalSeconds = milliseconds / 1000
-        val minutes = totalSeconds / 60
-        val seconds = totalSeconds % 60
-        return String.format("%d:%02d", minutes, seconds)
-    }
-
-    /**
-     * Create a progress bar bitmap for custom progress visualization
-     */
-    private fun createProgressBitmap(width: Int, height: Int, progress: Float, context: Context): Bitmap {
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-
-        // Background
-        val backgroundPaint = Paint().apply {
-            color = AndroidColor.parseColor("#33000000")
-            style = Paint.Style.FILL
-        }
-        val backgroundRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
-        canvas.drawRoundRect(backgroundRect, height / 2f, height / 2f, backgroundPaint)
-
-        // Progress
-        if (progress > 0) {
-            val progressPaint = Paint().apply {
-                color = AndroidColor.parseColor("#FF1DB954") // Spotify Green
-                style = Paint.Style.FILL
-            }
-            val progressWidth = width * progress
-            val progressRect = RectF(0f, 0f, progressWidth, height.toFloat())
-            canvas.drawRoundRect(progressRect, height / 2f, height / 2f, progressPaint)
-        }
-
-        return bitmap
-    }
+		private class PlayerListener(private val context: Context) : Player.Listener {
+			override fun onEvents(player: Player, events: Player.Events) {
+				if (events.containsAny(
+						Player.EVENT_MEDIA_ITEM_TRANSITION,
+						Player.EVENT_IS_PLAYING_CHANGED,
+						Player.EVENT_PLAYBACK_STATE_CHANGED)
+				) {
+					requestWidgetsUpdate(context)
+				}
+			}
+		}
+	}
 }

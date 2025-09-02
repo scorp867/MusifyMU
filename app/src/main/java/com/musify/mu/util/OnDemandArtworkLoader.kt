@@ -222,7 +222,18 @@ object OnDemandArtworkLoader {
         if (!::appContext.isInitialized) return@withContext null
         val cacheFile = File(diskDir, mediaUri.md5() + ".jpg")
         try {
-            cacheFile.outputStream().use { it.write(bytes) }
+            // Decode and resize to avoid huge images in cache
+            val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            if (decoded != null) {
+                val resized = resizeBitmap(decoded, MAX_BITMAP_EDGE)
+                cacheFile.outputStream().use { out ->
+                    resized.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                }
+                if (resized !== decoded) decoded.recycle()
+            } else {
+                // Fallback: if decode fails, write raw bytes
+                cacheFile.outputStream().use { it.write(bytes) }
+            }
             val uri = "file://${cacheFile.absolutePath}"
             inMemoryCache.put(mediaUri, uri)
             flowFor(mediaUri).value = uri
