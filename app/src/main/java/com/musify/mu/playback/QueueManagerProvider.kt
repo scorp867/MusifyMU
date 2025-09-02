@@ -41,10 +41,15 @@ fun rememberQueueState(): State<QueueManager.QueueState> {
 
     var queueState by remember { mutableStateOf(QueueManager.QueueState()) }
 
-    LaunchedEffect(queueManager, lifecycleOwner) {
-        queueManager?.queueStateLiveData?.observe(lifecycleOwner, Observer { state ->
+    DisposableEffect(queueManager, lifecycleOwner) {
+        val observer = Observer<QueueManager.QueueState> { state ->
             queueState = state
-        })
+        }
+        queueManager?.queueStateLiveData?.observe(lifecycleOwner, observer)
+        
+        onDispose {
+            queueManager?.queueStateLiveData?.removeObserver(observer)
+        }
     }
 
     return remember { derivedStateOf { queueState } }
@@ -78,10 +83,15 @@ fun rememberQueueChanges(): State<QueueManager.QueueChangeEvent?> {
 
     var queueChange by remember { mutableStateOf<QueueManager.QueueChangeEvent?>(null) }
 
-    LaunchedEffect(queueManager, lifecycleOwner) {
-        queueManager?.queueChangesLiveData?.observe(lifecycleOwner, Observer { change ->
+    DisposableEffect(queueManager, lifecycleOwner) {
+        val observer = Observer<QueueManager.QueueChangeEvent?> { change ->
             queueChange = change
-        })
+        }
+        queueManager?.queueChangesLiveData?.observe(lifecycleOwner, observer)
+        
+        onDispose {
+            queueManager?.queueChangesLiveData?.removeObserver(observer)
+        }
     }
 
     return remember { derivedStateOf { queueChange } }
@@ -97,10 +107,15 @@ fun rememberCurrentItem(): State<QueueManager.QueueItem?> {
 
     var currentItem by remember { mutableStateOf<QueueManager.QueueItem?>(null) }
 
-    LaunchedEffect(queueManager, lifecycleOwner) {
-        queueManager?.currentItemLiveData?.observe(lifecycleOwner, Observer { item ->
+    DisposableEffect(queueManager, lifecycleOwner) {
+        val observer = Observer<QueueManager.QueueItem?> { item ->
             currentItem = item
-        })
+        }
+        queueManager?.currentItemLiveData?.observe(lifecycleOwner, observer)
+        
+        onDispose {
+            queueManager?.currentItemLiveData?.removeObserver(observer)
+        }
     }
 
     return remember { derivedStateOf { currentItem } }

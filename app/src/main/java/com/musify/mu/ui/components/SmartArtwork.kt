@@ -9,12 +9,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -24,7 +19,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.graphics.graphicsLayer
+
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
@@ -99,88 +94,80 @@ fun SmartArtwork(
         }
 
         // Observe loader changes only if we don't have explicit artwork - with proper lifecycle
-        val loaderFlowValue by if (enableOnDemand && !mediaUri.isNullOrBlank() && artworkUri.isNullOrBlank()) {
-            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri).collectAsState(initial = finalImageData)
-        } else {
-            remember { mutableStateOf<String?>(null) }
+        // Use produceState to prevent flickering
+        val loaderFlowValue by produceState<String?>(
+            initialValue = if (enableOnDemand && !mediaUri.isNullOrBlank() && artworkUri.isNullOrBlank()) finalImageData else null,
+            key1 = mediaUri,
+            key2 = artworkUri
+        ) {
+            if (enableOnDemand && !mediaUri.isNullOrBlank() && artworkUri.isNullOrBlank()) {
+                com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(mediaUri).collect { newValue ->
+                    value = newValue
+                }
+            }
         }
 
         // Final resolved image data
         val resolvedImageData = finalImageData ?: loaderFlowValue
 
         // Trigger artwork loading only once per unique mediaUri - simplified
-        LaunchedEffect(mediaUri, resolvedImageData) {
-            if (enableOnDemand && resolvedImageData.isNullOrBlank() && !mediaUri.isNullOrBlank()) {
-                // Check if we already tried this before (negative cache)
+        LaunchedEffect(mediaUri) {
+            if (enableOnDemand && !mediaUri.isNullOrBlank()) {
+                // Check if we already have artwork or tried before
                 val cached = com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaUri)
-                if (cached == null) { // Only extract if not in negative cache
-                    // Reduced delay to prevent UI blocking
-                    kotlinx.coroutines.delay(100)
+                if (cached == null && artworkUri.isNullOrBlank()) {
+                    // Load artwork without delay to prevent flickering
                     com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaUri)
                 }
             }
         }
 
-        if (resolvedImageData != null) {
-            // Create image painter with multiple fallback strategies
-            val enableCrossfade = !resolvedImageData.isNullOrBlank()
-            val painter = rememberAsyncImagePainter(
-                model = ImageRequest.Builder(context)
-                    .data(resolvedImageData)
-                    .dispatcher(Dispatchers.IO)
-                    .memoryCachePolicy(CachePolicy.ENABLED)
-                    .diskCachePolicy(CachePolicy.ENABLED)
-                    .memoryCacheKey(resolvedImageData) // Use stable memory cache key
-                    .diskCacheKey(resolvedImageData) // Use stable disk cache key
-                    .apply { if (enableCrossfade) crossfade(300) else crossfade(false) }
-                    .size(Size.ORIGINAL)
-                    .scale(Scale.FIT)
-                    .listener(
-                        onStart = {
-                            hasError = false
-                        },
-                        onSuccess = { _, _ ->
-                            hasError = false
-                        },
-                        onError = { _, _ ->
-                            hasError = true
-                        }
-                    )
-                    .build()
-            )
+        // Create image painter with multiple fallback strategies (always create, even if no data)
+        val painter = rememberAsyncImagePainter(
+            model = ImageRequest.Builder(context)
+                .data(resolvedImageData)
+                .dispatcher(Dispatchers.IO)
+                .memoryCachePolicy(CachePolicy.ENABLED)
+                .diskCachePolicy(CachePolicy.ENABLED)
+                .memoryCacheKey(resolvedImageData) // Use stable memory cache key
+                .diskCacheKey(resolvedImageData) // Use stable disk cache key
+                .crossfade(false) // Disable crossfade to prevent flickering
+                .size(Size.ORIGINAL)
+                .scale(Scale.FIT)
+                .listener(
+                    onStart = {
+                        hasError = false
+                    },
+                    onSuccess = { _, _ ->
+                        hasError = false
+                    },
+                    onError = { _, _ ->
+                        hasError = true
+                    }
+                )
+                .build()
+        )
 
-            // Display the image with hardware acceleration disabled to prevent flickering
+        if (resolvedImageData != null) {
+            // Display the image
             androidx.compose.foundation.Image(
                 painter = painter,
                 contentDescription = contentDescription,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        // Disable hardware acceleration for artwork to prevent flickering
-                        renderEffect = null
-                    },
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
         }
 
-        // Enhanced placeholder with subtle animation for tracks without artwork
-        if (resolvedImageData == null || hasError) {
-            // Animated music note with subtle pulsing
-            val infiniteTransition = rememberInfiniteTransition(label = "musicNotePulse")
-            val pulseAlpha by infiniteTransition.animateFloat(
-                initialValue = 0.6f,
-                targetValue = 0.8f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(2000, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "pulseAlpha"
-            )
+        // Show placeholder only when we don't have image data AND painter is not loading
+        // This prevents flickering during cache checks
+        val showPlaceholder = resolvedImageData == null || (hasError && painter.state !is AsyncImagePainter.State.Loading)
 
+        if (showPlaceholder) {
+            // Static music note without animation to prevent flickering
             Icon(
                 imageVector = Icons.Rounded.MusicNote,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = pulseAlpha),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                 modifier = Modifier.fillMaxSize(0.4f)
             )
         }

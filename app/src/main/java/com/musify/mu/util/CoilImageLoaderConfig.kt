@@ -40,7 +40,7 @@ object CoilImageLoaderConfig {
             }
             .respectCacheHeaders(false)
             .allowHardware(false) // Disable hardware acceleration to prevent artwork flickering
-            .crossfade(true)
+            .crossfade(false)
             .networkObserverEnabled(false) // Disable network observer for local files
             .apply {
                 if (android.util.Log.isLoggable("CoilImageLoader", android.util.Log.DEBUG)) {

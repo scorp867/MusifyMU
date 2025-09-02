@@ -53,20 +53,20 @@ fun SimpleArtwork(
 
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
 
-    // Debug logging
-    LaunchedEffect(albumId, trackUri, artUri) {
-        android.util.Log.d("SimpleArtwork", "SimpleArtwork created - albumId: $albumId, trackUri: $trackUri, artUri: $artUri, cacheKey: $cacheKey")
-    }
+
 
     // Observe loader-provided artwork bound to trackUri (mediaId)
-    val loaderCached = remember(trackUri) {
-        if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(trackUri)
+    // Use produceState to prevent flickering by maintaining stable state across recompositions
+    val loaderArt by produceState<String?>(
+        initialValue = if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(trackUri),
+        key1 = trackUri
+    ) {
+        if (!trackUri.isNullOrBlank()) {
+            com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(trackUri).collect { newValue ->
+                value = newValue
+            }
+        }
     }
-    val loaderFlow = remember(trackUri) {
-        if (trackUri.isNullOrBlank()) null else com.musify.mu.util.OnDemandArtworkLoader.artworkFlow(trackUri)
-    }
-    val loaderArt by (loaderFlow?.collectAsState(initial = loaderCached)
-        ?: remember { mutableStateOf<String?>(null) })
 
     // Resolve image data preference: explicit artUri (non-MediaStore) > loaderArt > placeholder
     val sanitizedArtUri = remember(artUri) {
@@ -117,12 +117,9 @@ fun SimpleArtwork(
                 .memoryCachePolicy(CachePolicy.ENABLED)
                 .diskCachePolicy(CachePolicy.ENABLED)
                 .dispatcher(Dispatchers.IO)
-                .apply {
-                    val enableCrossfade = imageData !is Int
-                    if (enableCrossfade) crossfade(200) else crossfade(false)
-                }
+                .crossfade(false) // Disable crossfade to prevent flickering
                 .error(R.drawable.ic_music_note)
-                .placeholder(R.drawable.ic_music_note)
+                .placeholder(null) // Remove placeholder to prevent flickering during cache checks
                 .fallback(R.drawable.ic_music_note)
                 .size(Size.ORIGINAL)
                 .scale(Scale.FIT)

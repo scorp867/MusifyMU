@@ -262,7 +262,7 @@ class CommandController(
         }
 
         // Ensure model via assets first, then download fallback
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 // Reduce Vosk logs
                 try { org.vosk.LibVosk.setLogLevel(org.vosk.LogLevel.INFO) } catch (_: Exception) {}

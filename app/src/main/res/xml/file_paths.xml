@@ -5,3 +5,4 @@
     <!-- External cache directory -->
     <external-cache-path name="external_shared_music" path="shared_music/" />
 </paths>
+

@@ -23,6 +23,9 @@ class MusifyApp : Application(), ImageLoaderFactory {
 
         // Initialize on-demand artwork loader with application context
         com.musify.mu.util.OnDemandArtworkLoader.init(this)
+        
+        // Clear Coil's memory cache on app start to prevent flickering from stale cache
+        newImageLoader().memoryCache?.clear()
 
         // Note: Data manager will be initialized by LibraryScreen when permissions are granted
         // This avoids conflicts and ensures proper initialization timing

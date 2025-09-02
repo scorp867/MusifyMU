@@ -50,14 +50,20 @@ object OnDemandArtworkLoader {
 
     /** Put a uri (or sentinel) directly into memory cache */
     fun cacheUri(mediaUri: String, artUri: String?) {
-        inMemoryCache.put(mediaUri, artUri ?: NONE_SENTINEL)
+        val normalizedValue = artUri ?: NONE_SENTINEL
+        val previousValue = inMemoryCache.get(mediaUri)
+        
+        inMemoryCache.put(mediaUri, normalizedValue)
         if (artUri.isNullOrBlank()) {
             failedKeys.add(mediaUri)
         } else {
             failedKeys.remove(mediaUri)
         }
-        // Publish update to any observers
-        flowFor(mediaUri).value = artUri
+        
+        // Only publish update if value actually changed to prevent flickering
+        if (previousValue != normalizedValue) {
+            flowFor(mediaUri).value = artUri
+        }
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -76,7 +82,9 @@ object OnDemandArtworkLoader {
 
     private fun flowFor(mediaUri: String): MutableStateFlow<String?> {
         return uriFlows.getOrPut(mediaUri) {
-            MutableStateFlow(normalizedCachedValue(mediaUri))
+            // Initialize with cached value to prevent unnecessary emissions
+            val initialValue = normalizedCachedValue(mediaUri)
+            MutableStateFlow(initialValue)
         }
     }
 
@@ -86,6 +94,18 @@ object OnDemandArtworkLoader {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        // Clear any persisted flows from previous app sessions to prevent flickering
+        clearFlows()
+    }
+    
+    /**
+     * Clear all cached flows - called on app initialization to prevent flickering
+     * from stale flows persisting across app restarts
+     */
+    private fun clearFlows() {
+        uriFlows.clear()
+        // Also clear the loading map to reset state
+        loading.clear()
     }
 
     /**
@@ -128,9 +148,12 @@ object OnDemandArtworkLoader {
             val cacheFile = File(diskDir, mediaUri.md5() + ".jpg")
             if (cacheFile.exists()) {
                 val uriString = "file://${cacheFile.absolutePath}"
+                val previousValue = inMemoryCache.get(mediaUri)
                 inMemoryCache.put(mediaUri, uriString)
-                // Notify observers immediately
-                flowFor(mediaUri).value = uriString
+                // Only notify observers if value changed
+                if (previousValue != uriString) {
+                    flowFor(mediaUri).value = uriString
+                }
                 loading.remove(mediaUri)
                 return@withContext uriString
             }
@@ -148,9 +171,13 @@ object OnDemandArtworkLoader {
                 }
                 val artworkBytes = retriever.embeddedPicture ?: run {
                     // Negative cache so we don't thrash trying again
+                    val previousValue = inMemoryCache.get(mediaUri)
                     inMemoryCache.put(mediaUri, NONE_SENTINEL)
                     failedKeys.add(mediaUri)
-                    flowFor(mediaUri).value = null
+                    // Only notify observers if this is the first failure
+                    if (previousValue != NONE_SENTINEL) {
+                        flowFor(mediaUri).value = null
+                    }
                     loading.remove(mediaUri)
                     return@withContext null
                 }
@@ -162,15 +189,23 @@ object OnDemandArtworkLoader {
                 if (resized !== bmp) bmp.recycle()
                 resized.recycle()
                 val uriString = "file://${cacheFile.absolutePath}"
+                val previousValue = inMemoryCache.get(mediaUri)
                 inMemoryCache.put(mediaUri, uriString)
-                flowFor(mediaUri).value = uriString
+                // Only notify observers if value changed
+                if (previousValue != uriString) {
+                    flowFor(mediaUri).value = uriString
+                }
                 loading.remove(mediaUri)
                 return@withContext uriString
             } catch (e: Exception) {
                 // Negative cache to avoid repeated attempts during session
+                val previousValue = inMemoryCache.get(mediaUri)
                 inMemoryCache.put(mediaUri, NONE_SENTINEL)
                 failedKeys.add(mediaUri)
-                flowFor(mediaUri).value = null
+                // Only notify observers if this is the first failure
+                if (previousValue != NONE_SENTINEL) {
+                    flowFor(mediaUri).value = null
+                }
                 loading.remove(mediaUri)
                 null
             } finally {
