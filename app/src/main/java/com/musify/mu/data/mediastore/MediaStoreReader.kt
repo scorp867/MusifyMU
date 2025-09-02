@@ -352,11 +352,25 @@ class MediaStoreReader private constructor(
         if (contentObserver != null) return
 
         contentObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            private var lastChangeAtMs: Long = 0L
+            private var pending: Boolean = false
+
             override fun onChange(selfChange: Boolean, uri: Uri?) {
                 Log.d(TAG, "MediaStore changed: $uri")
-                scope.launch {
-                    runQuery()
-                    onChange()
+                val now = System.currentTimeMillis()
+                lastChangeAtMs = now
+                if (!pending) {
+                    pending = true
+                    scope.launch {
+                        // Debounce: wait briefly to coalesce rapid bursts
+                        kotlinx.coroutines.delay(400)
+                        // Only fire if no newer change arrived during the delay
+                        val since = System.currentTimeMillis() - lastChangeAtMs
+                        if (since >= 350) {
+                            onChange()
+                        }
+                        pending = false
+                    }
                 }
             }
         }

@@ -69,13 +69,20 @@ class SimpleBackgroundDataManager private constructor(
 
             // Collect tracks from the service (now with proper caching)
             localFilesService.tracks.collect { tracks ->
+                val previous = _cachedTracks.value
+                val changed = (previous.size != tracks.size) || (previous.firstOrNull()?.mediaId != tracks.firstOrNull()?.mediaId)
+
                 _cachedTracks.value = tracks
                 Log.d(TAG, "Received ${tracks.size} tracks from LocalFilesService")
 
                 if (tracks.isNotEmpty()) {
-                    // Cache to database for persistence
-                    Log.d(TAG, "Caching ${tracks.size} tracks to database...")
-                    db.dao().upsertTracks(tracks)
+                    if (changed) {
+                        // Cache to database only if set meaningfully changed
+                        Log.d(TAG, "Caching ${tracks.size} tracks to database (changed=true)...")
+                        db.dao().upsertTracks(tracks)
+                    } else {
+                        Log.d(TAG, "Skipping DB upsert (no meaningful change)")
+                    }
 
                     _loadingState.value = LoadingState.Completed(tracks.size)
                     Log.d(TAG, "App launch initialization completed: ${tracks.size} tracks cached")

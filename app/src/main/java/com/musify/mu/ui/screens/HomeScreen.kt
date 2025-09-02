@@ -93,7 +93,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var showSongEditor by remember { mutableStateOf(false) }
     var editingTrack by remember { mutableStateOf<Track?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = repo.getAllTracks())
+    val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = emptyList())
 
     val listState = rememberLazyListState()
 
@@ -105,8 +105,13 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     // Prefetch artwork for visible tracks to reduce loading delays
     LaunchedEffect(allTracks) {
         if (allTracks.isNotEmpty()) {
-            val visibleTrackUris = allTracks.take(50).map { it.mediaId }
-            repo.dataManager.localFilesService.prefetchArtwork(visibleTrackUris)
+            val visibleTrackUris = allTracks
+                .take(50)
+                .filter { it.artUri.isNullOrBlank() || it.artUri?.startsWith("content://media/external/audio/albumart") == true }
+                .map { it.mediaId }
+            if (visibleTrackUris.isNotEmpty()) {
+                repo.dataManager.localFilesService.prefetchArtwork(visibleTrackUris)
+            }
         }
     }
 
@@ -132,42 +137,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
 
                         customPlaylists = customPlaylistsData
                         android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
+                        // stop showing shimmer after first refresh
+                        isLoading = false
                     }
                 } catch (e: Exception) {
                     android.util.Log.w("HomeScreen", "Failed to refresh data", e)
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            try {
-                // Get data from fast cache - background loading handles the heavy lifting
-                val recentPlayedData = repo.recentlyPlayed(12)
-                val recentAddedData = repo.recentlyAdded(12)
-                val favoritesData = repo.favorites()
-                val customPlaylistsData = repo.playlists()
-
-                withContext(Dispatchers.Main) {
-                    recentPlayed = recentPlayedData
-                    android.util.Log.d("HomeScreen", "Recently played loaded: ${recentPlayed.size} tracks")
-
-                    recentAdded = recentAddedData
-                    android.util.Log.d("HomeScreen", "Recently added loaded: ${recentAdded.size} tracks")
-
-                    favorites = favoritesData
-                    android.util.Log.d("HomeScreen", "Favorites loaded: ${favorites.size} tracks")
-
-                    customPlaylists = customPlaylistsData
-                    android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
-                }
-            } catch (e: Exception) {
-                // Handle error gracefully
-                android.util.Log.w("HomeScreen", "Failed to load home data", e)
-            } finally {
-                withContext(Dispatchers.Main) {
-                    isLoading = false
                 }
             }
         }
@@ -203,11 +177,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         }
     )
 
-    // Refresh data when the screen becomes visible (simplified approach)
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(1000) // Initial delay
-        refreshData()
-    }
+    // Removed redundant delayed refresh to avoid duplicate loads
 
     // Create gradient background
     val backgroundGradient = Brush.verticalGradient(
