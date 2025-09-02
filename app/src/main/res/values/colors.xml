@@ -6,5 +6,14 @@
     <color name="black">#000000</color>
     <color name="white">#FFFFFF</color>
 
+    <!-- Widget colors -->
+    <color name="widget_text_primary">#FFFFFF</color>
+    <color name="widget_text_secondary">#B3B3B3</color>
+    <color name="widget_background_start">#1DB954</color>
+    <color name="widget_background_end">#191414</color>
+    <color name="widget_button_background">#33FFFFFF</color>
+    <color name="widget_progress_background">#33FFFFFF</color>
+    <color name="widget_progress_foreground">#1DB954</color>
+
     <!-- You can later update these to match Oscorp Tech brand colors -->
 </resources>

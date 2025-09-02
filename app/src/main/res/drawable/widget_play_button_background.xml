@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+
+    <!-- Bright green background for play button -->
+    <solid android:color="#FF1DB954" />
+
+    <!-- Size -->
+    <size
+        android:width="56dp"
+        android:height="56dp" />
+
+    <!-- Subtle shadow effect -->
+    <stroke
+        android:width="2dp"
+        android:color="#FFFFFFFF" />
+
+</shape>
