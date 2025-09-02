@@ -96,15 +96,15 @@ fun SimpleArtwork(
         modifier = finalModifier,
         contentAlignment = Alignment.Center
     ) {
-        // Background gradient placeholder
+        // Background neutral placeholder
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.05f)
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f),
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.04f)
                         )
                     )
                 )
@@ -124,6 +124,7 @@ fun SimpleArtwork(
                 .size(Size.ORIGINAL)
                 .scale(Scale.FIT)
                 .listener(
+                    onStart = { },
                     onError = { _, _ -> hasError = true },
                     onSuccess = { _, _ -> hasError = false }
                 )

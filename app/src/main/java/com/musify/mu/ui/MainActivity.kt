@@ -88,6 +88,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Debug instrumentation removed
+
         // Capture any incoming VIEW intent (open with Musify)
         handleViewIntent(intent)
 

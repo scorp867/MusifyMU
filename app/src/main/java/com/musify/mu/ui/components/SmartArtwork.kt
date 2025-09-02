@@ -53,18 +53,17 @@ fun SmartArtwork(
     val stableKey = remember(artworkUri, mediaUri) { "$artworkUri:$mediaUri" }
     var hasError by remember(stableKey) { mutableStateOf(false) }
 
-    // Create gradient background colors based on theme
-    val gradientColors = listOf(
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-        MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
-        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f)
+    // Neutral placeholder colors aligned with theme
+    val neutralColors = listOf(
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f),
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.04f)
     )
 
     Box(
         modifier = finalModifier,
         contentAlignment = Alignment.Center
     ) {
-        // Background gradient placeholder
+        // Background neutral placeholder
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -72,11 +71,11 @@ fun SmartArtwork(
                     brush = Brush.linearGradient(
                         colors = if (hasError) {
                             listOf(
-                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
-                                MaterialTheme.colorScheme.error.copy(alpha = 0.1f)
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.14f),
+                                MaterialTheme.colorScheme.error.copy(alpha = 0.08f)
                             )
                         } else {
-                            gradientColors
+                            neutralColors
                         }
                     )
                 )
@@ -122,16 +121,15 @@ fun SmartArtwork(
             }
         }
 
-        // Create image painter with multiple fallback strategies (always create, even if no data)
-        val painter = rememberAsyncImagePainter(
-            model = ImageRequest.Builder(context)
+        // Build a stable ImageRequest tied to resolvedImageData only
+        val imageRequest = remember(resolvedImageData) {
+            ImageRequest.Builder(context)
                 .data(resolvedImageData)
                 .dispatcher(Dispatchers.IO)
                 .memoryCachePolicy(CachePolicy.ENABLED)
                 .diskCachePolicy(CachePolicy.ENABLED)
-                .memoryCacheKey(resolvedImageData) // Use stable memory cache key
-                .diskCacheKey(resolvedImageData) // Use stable disk cache key
-                .crossfade(false) // Disable crossfade to prevent flickering
+                .apply { if (resolvedImageData != null) { memoryCacheKey(resolvedImageData); diskCacheKey(resolvedImageData) } }
+                .crossfade(false)
                 .size(Size.ORIGINAL)
                 .scale(Scale.FIT)
                 .listener(
@@ -146,7 +144,10 @@ fun SmartArtwork(
                     }
                 )
                 .build()
-        )
+        }
+
+        // Create painter from memoized request; painter will not restart unless imageRequest changes
+        val painter = rememberAsyncImagePainter(model = imageRequest)
 
         if (resolvedImageData != null) {
             // Display the image
