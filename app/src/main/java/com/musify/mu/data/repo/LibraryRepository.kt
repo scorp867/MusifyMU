@@ -93,6 +93,8 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun favorites(): List<Track> {
         val databaseFavorites = db.dao().getFavorites()
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        // If cache is empty (e.g., right after app (re)start), show DB favorites to avoid empty UI
+        if (currentTrackIds.isEmpty()) return databaseFavorites
         return databaseFavorites.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
     suspend fun saveFavoritesOrder(order: List<FavoritesOrder>) = db.dao().upsertFavoriteOrder(order)
@@ -109,12 +111,14 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun recentlyAdded(limit: Int = 20): List<Track> {
         val databaseRecent = db.dao().getRecentlyAdded(limit)
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        if (currentTrackIds.isEmpty()) return databaseRecent
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
 
     suspend fun recentlyPlayed(limit: Int = 20): List<Track> {
         val databaseRecent = db.dao().getRecentlyPlayed(limit)
         val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        if (currentTrackIds.isEmpty()) return databaseRecent
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
     suspend fun recordPlayed(mediaId: String) = db.dao().insertOrUpdatePlayHistory(mediaId)
