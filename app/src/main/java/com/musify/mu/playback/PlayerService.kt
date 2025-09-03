@@ -365,7 +365,7 @@ class PlayerService : MediaLibraryService() {
 		}
 
 		val likeCommand = SessionCommand("com.musify.mu.ACTION_LIKE", Bundle.EMPTY)
-		val likeButton = CommandButton.Builder()
+		val likeButton = androidx.media3.session.CommandButton.Builder()
 			.setDisplayName("Like")
 			.setIconResId(R.drawable.ic_favorite_border_24)
 			.setSessionCommand(likeCommand)
@@ -399,13 +399,17 @@ class PlayerService : MediaLibraryService() {
 							val id = session.player.currentMediaItem?.mediaId
 							if (id != null) {
 								val liked = repo.isLiked(id)
-								if (liked) repo.unlike(id) else repo.like(id)
+								if (liked) {
+									repo.unlike(id)
+								} else {
+									repo.like(id)
+								}
 							}
 						} catch (_: Exception) { }
 					}
-					return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+					return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
 				}
-				return com.google.common.util.concurrent.Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
+				return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
 			}
 			override fun onPlaybackResumption(
 				session: MediaSession,
@@ -672,6 +676,7 @@ class PlayerService : MediaLibraryService() {
 
 		_queue = null
 		serviceScope.cancel()
+
 
 		// Clear state on destroy - only if components were initialized
 		if (componentsInitialized) {

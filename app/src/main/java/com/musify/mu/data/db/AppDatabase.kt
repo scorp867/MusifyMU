@@ -6,7 +6,7 @@ import com.musify.mu.data.db.entities.*
 
 @Database(
     entities = [Track::class, Playlist::class, PlaylistItem::class, Like::class, FavoritesOrder::class, LyricsMap::class, PlayHistory::class],
-    version = 8,
+    version = 13,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
