@@ -127,8 +127,15 @@ class VoiceControlManager(
             when (cmd) {
                 CommandController.Command.PLAY -> {
                     if (!player.isPlaying) {
-                        player.play()
-                        android.util.Log.d("VoiceControlManager", "Voice command: Play")
+                        try {
+                            // Prefer MediaController path if available
+                            if (player is androidx.media3.session.MediaController) {
+                                (player as androidx.media3.session.MediaController).play()
+                            } else {
+                                player.play()
+                            }
+                            android.util.Log.d("VoiceControlManager", "Voice command: Play")
+                        } catch (_: Exception) { player.play() }
                     }
                 }
 
