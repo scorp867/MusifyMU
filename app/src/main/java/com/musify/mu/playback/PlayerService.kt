@@ -83,8 +83,18 @@ class PlayerService : MediaLibraryService() {
 		 */
 		suspend fun getOrCreateMediaCache(context: Context): SimpleCache = cacheMutex.withLock {
 			mediaCache ?: run {
-				val cacheDir = File(context.cacheDir, "media3_cache")
-				val cacheEvictor = LeastRecentlyUsedCacheEvictor(500 * 1024 * 1024L) // 500MB cache
+				// Try to use external files directory first for better visibility
+				val cacheDir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+					// For Android 11+, use external files dir if available
+					context.getExternalFilesDir("media3_cache") ?: File(context.cacheDir, "media3_cache")
+				} else {
+					// For older versions, use cache dir
+					File(context.cacheDir, "media3_cache")
+				}
+				cacheDir.mkdirs()
+				android.util.Log.d("PlayerService", "Media cache directory: ${cacheDir.absolutePath}")
+				
+				val cacheEvictor = LeastRecentlyUsedCacheEvictor(1000 * 1024 * 1024L) // Increased to 1GB cache
 				@Suppress("DEPRECATION")
 				SimpleCache(cacheDir, cacheEvictor).also { mediaCache = it }
 			}
@@ -100,7 +110,7 @@ class PlayerService : MediaLibraryService() {
 			val cacheDataSourceFactory = CacheDataSource.Factory()
 				.setCache(cache)
 				.setUpstreamDataSourceFactory(DefaultDataSource.Factory(context))
-				.setCacheWriteDataSinkFactory(null) // Disable writing to cache for now
+				.setCacheWriteDataSinkFactory(CacheDataSource.Factory().setCache(cache)) // Enable cache writing
 
 			// Create media source factory with caching
 			val mediaSourceFactory = DefaultMediaSourceFactory(cacheDataSourceFactory)
@@ -366,8 +376,8 @@ class PlayerService : MediaLibraryService() {
 
 		val likeCommand = SessionCommand("com.musify.mu.ACTION_LIKE", Bundle.EMPTY)
 		val likeButton = androidx.media3.session.CommandButton.Builder()
-			.setDisplayName("Like")
-			.setIconResId(R.drawable.ic_favorite_border_24)
+			.setDisplayName("Add to Favorites")
+			.setIconResId(android.R.drawable.ic_input_add)
 			.setSessionCommand(likeCommand)
 			.build()
 
@@ -548,6 +558,12 @@ class PlayerService : MediaLibraryService() {
 	}
 
 	override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? {
+		// Ensure the player is initialized when a controller connects
+		// This fixes the issue where songs won't play after app restart from recents
+		if (mediaLibrarySession != null && _player == null) {
+			android.util.Log.d("PlayerService", "Controller connected but player not initialized, initializing now")
+			ensurePlayerInitialized()
+		}
 		return mediaLibrarySession
 	}
 

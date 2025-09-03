@@ -26,8 +26,9 @@ object CoilImageLoaderConfig {
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(context.cacheDir.resolve("coil_artwork_cache"))
-                    .maxSizeBytes(150 * 1024 * 1024) // Increased to 150MB
+                    .directory(context.getExternalFilesDir("coil_artwork_cache") 
+                        ?: context.cacheDir.resolve("coil_artwork_cache"))
+                    .maxSizeBytes(300 * 1024 * 1024) // Increased to 300MB
                     .build()
             }
             .okHttpClient {
@@ -63,8 +64,9 @@ object CoilImageLoaderConfig {
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(context.cacheDir.resolve("coil_artwork_cache"))
-                    .maxSizeBytes(50 * 1024 * 1024) // 50MB disk cache
+                    .directory(context.getExternalFilesDir("coil_artwork_cache") 
+                        ?: context.cacheDir.resolve("coil_artwork_cache"))
+                    .maxSizeBytes(100 * 1024 * 1024) // Increased to 100MB disk cache
                     .build()
             }
             .respectCacheHeaders(false)

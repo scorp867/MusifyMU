@@ -45,7 +45,8 @@ class LocalFilesService private constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Core components
-    private val cacheDir = context.cacheDir.resolve("spotify_artwork_cache").apply { mkdirs() }
+    private val cacheDir = (context.getExternalFilesDir("spotify_artwork_cache") 
+        ?: context.cacheDir.resolve("spotify_artwork_cache")).apply { mkdirs() }
     private val mediaStoreReader = MediaStoreReader.getInstance(
         context,
         MediaStoreReader.MediaStoreReaderOptions(

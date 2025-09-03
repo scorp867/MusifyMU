@@ -89,11 +89,9 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun isLiked(mediaId: String): Boolean = db.dao().isLiked(mediaId)
 
     // Get favorites from database (these are user-created, not cached)
-    // Filter out deleted tracks by checking against current cached tracks
+    // Return all favorites from database without filtering - tracks might not be cached yet
     suspend fun favorites(): List<Track> {
-        val databaseFavorites = db.dao().getFavorites()
-        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
-        return databaseFavorites.filter { track -> currentTrackIds.contains(track.mediaId) }
+        return db.dao().getFavorites()
     }
     suspend fun saveFavoritesOrder(order: List<FavoritesOrder>) = db.dao().upsertFavoriteOrder(order)
 
@@ -105,17 +103,13 @@ class LibraryRepository private constructor(private val context: Context, privat
     }
 
     // Get recently added/played from database (these track user interactions, not cached)
-    // Filter out deleted tracks by checking against current cached tracks
+    // Return all recently added from database without filtering - tracks might not be cached yet
     suspend fun recentlyAdded(limit: Int = 20): List<Track> {
-        val databaseRecent = db.dao().getRecentlyAdded(limit)
-        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
-        return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
+        return db.dao().getRecentlyAdded(limit)
     }
 
     suspend fun recentlyPlayed(limit: Int = 20): List<Track> {
-        val databaseRecent = db.dao().getRecentlyPlayed(limit)
-        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
-        return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
+        return db.dao().getRecentlyPlayed(limit)
     }
     suspend fun recordPlayed(mediaId: String) = db.dao().insertOrUpdatePlayHistory(mediaId)
 

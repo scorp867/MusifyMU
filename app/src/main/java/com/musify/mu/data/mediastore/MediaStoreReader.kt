@@ -143,8 +143,8 @@ class MediaStoreReader private constructor(
 
                         // Validate track meets our criteria
                         if (duration >= options.minDurationMs) {
-                            // Extract metadata and album art using MediaMetadataRetriever
-                            val (hasEmbeddedArt, metadata) = extractMetadataAndArt(contentUri)
+                            // Only check for album art existence, don't extract it yet
+                            val (hasEmbeddedArt, metadata) = checkMetadataOnly(contentUri)
 
                             val track = Track(
                                 mediaId = contentUri.toString(),
@@ -153,8 +153,8 @@ class MediaStoreReader private constructor(
                                 album = metadata.album ?: album,
                                 durationMs = metadata.duration ?: duration,
                                 artUri = if (hasEmbeddedArt) {
-                                    // Generate cached artwork URI
-                                    generateArtworkUri(contentUri.toString())
+                                    // Mark that this track has embedded art, but don't extract it yet
+                                    "has_embedded_art:${contentUri}"
                                 } else {
                                     // Fallback to album art URI
                                     albumId.takeIf { it > 0 }?.let {
@@ -244,7 +244,49 @@ class MediaStoreReader private constructor(
     }
 
     /**
+     * Check metadata and album art existence without extracting the art
+     */
+    private suspend fun checkMetadataOnly(uri: Uri): Pair<Boolean, Metadata> = withContext(Dispatchers.IO) {
+        val retriever = MediaMetadataRetriever()
+        return@withContext try {
+            retriever.setDataSource(context, uri)
+
+            // Only check if embedded picture exists, don't extract it
+            val hasEmbeddedArt = try {
+                retriever.embeddedPicture != null
+            } catch (e: Exception) {
+                false
+            }
+
+            // Extract metadata
+            val metadata = Metadata(
+                title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE),
+                artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST),
+                album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM),
+                albumArtist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST),
+                genre = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_GENRE),
+                duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull(),
+                year = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_YEAR)?.toIntOrNull(),
+                trackNumber = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER)?.toIntOrNull()
+            )
+
+            Pair(hasEmbeddedArt, metadata)
+
+        } catch (e: Exception) {
+            Log.w(TAG, "Error checking metadata from $uri", e)
+            Pair(false, Metadata())
+        } finally {
+            try {
+                retriever.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing MediaMetadataRetriever", e)
+            }
+        }
+    }
+
+    /**
      * Extract metadata and album art using MediaMetadataRetriever (Spotify style)
+     * This is called on-demand when artwork is actually needed
      */
     suspend fun extractMetadataAndArt(uri: Uri): Pair<Boolean, Metadata> = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
@@ -375,11 +417,28 @@ class MediaStoreReader private constructor(
             }
         }
 
+        // Register for multiple MediaStore URIs to catch all changes
         contentResolver.registerContentObserver(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             true,
             contentObserver!!
         )
+        
+        // Also register for internal storage (some devices use this)
+        contentResolver.registerContentObserver(
+            MediaStore.Audio.Media.INTERNAL_CONTENT_URI,
+            true,
+            contentObserver!!
+        )
+        
+        // Register for the files URI to catch file system changes
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            contentResolver.registerContentObserver(
+                MediaStore.Files.getContentUri("external"),
+                true,
+                contentObserver!!
+            )
+        }
 
         Log.d(TAG, "Started listening for MediaStore changes")
     }

@@ -69,7 +69,8 @@ object OnDemandArtworkLoader {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val diskDir: File by lazy {
-        File(appContext.cacheDir, "on_demand_artwork").apply { if (!exists()) mkdirs() }
+        (appContext.getExternalFilesDir("on_demand_artwork") 
+            ?: File(appContext.cacheDir, "on_demand_artwork")).apply { if (!exists()) mkdirs() }
     }
 
     // Per-mediaUri flows to notify UI when artwork becomes available
@@ -133,10 +134,18 @@ object OnDemandArtworkLoader {
 
     suspend fun loadArtwork(mediaUri: String?): String? {
         if (mediaUri.isNullOrBlank()) return null
-        if (failedKeys.contains(mediaUri)) return null
-        if (loading.putIfAbsent(mediaUri, true) == true) {
+        
+        // Handle the new "has_embedded_art:" format
+        val actualUri = if (mediaUri.startsWith("has_embedded_art:")) {
+            mediaUri.removePrefix("has_embedded_art:")
+        } else {
+            mediaUri
+        }
+        
+        if (failedKeys.contains(actualUri)) return null
+        if (loading.putIfAbsent(actualUri, true) == true) {
             // Another extraction in progress; return what we have
-            return getCachedUri(mediaUri)
+            return getCachedUri(actualUri)
         }
         // quick memory lookup
         inMemoryCache.get(mediaUri)?.let { cached ->
@@ -189,24 +198,24 @@ object OnDemandArtworkLoader {
                 if (resized !== bmp) bmp.recycle()
                 resized.recycle()
                 val uriString = "file://${cacheFile.absolutePath}"
-                val previousValue = inMemoryCache.get(mediaUri)
-                inMemoryCache.put(mediaUri, uriString)
+                val previousValue = inMemoryCache.get(actualUri)
+                inMemoryCache.put(actualUri, uriString)
                 // Only notify observers if value changed
                 if (previousValue != uriString) {
-                    flowFor(mediaUri).value = uriString
+                    flowFor(actualUri).value = uriString
                 }
-                loading.remove(mediaUri)
+                loading.remove(actualUri)
                 return@withContext uriString
             } catch (e: Exception) {
                 // Negative cache to avoid repeated attempts during session
-                val previousValue = inMemoryCache.get(mediaUri)
-                inMemoryCache.put(mediaUri, NONE_SENTINEL)
-                failedKeys.add(mediaUri)
+                val previousValue = inMemoryCache.get(actualUri)
+                inMemoryCache.put(actualUri, NONE_SENTINEL)
+                failedKeys.add(actualUri)
                 // Only notify observers if this is the first failure
                 if (previousValue != NONE_SENTINEL) {
-                    flowFor(mediaUri).value = null
+                    flowFor(actualUri).value = null
                 }
-                loading.remove(mediaUri)
+                loading.remove(actualUri)
                 null
             } finally {
                 try { retriever.release() } catch (_: Exception) {}
