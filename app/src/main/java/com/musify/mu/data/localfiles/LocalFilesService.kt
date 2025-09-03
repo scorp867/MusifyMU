@@ -250,15 +250,21 @@ class LocalFilesService private constructor(
      */
     private fun convertQueryResultToTracks(queryResult: QueryResult): List<Track> {
         return queryResult.tracks.map { localTrack ->
+            val computedArtUri = if (localTrack.hasEmbeddedArt) mediaStoreReader.generateArtworkUri(localTrack.mediaId) else null
+            val existingArtUri = computedArtUri?.let { uriStr ->
+                val path = uriStr.removePrefix("file://")
+                try {
+                    val f = java.io.File(path)
+                    if (f.exists() && f.isFile) uriStr else null
+                } catch (_: Exception) { null }
+            }
             Track(
                 mediaId = localTrack.mediaId,
                 title = localTrack.title,
                 artist = localTrack.artist,
                 album = localTrack.album,
                 durationMs = localTrack.durationMs,
-                artUri = if (localTrack.hasEmbeddedArt) {
-                    mediaStoreReader.generateArtworkUri(localTrack.mediaId)
-                } else null,
+                artUri = existingArtUri,
                 albumId = localTrack.albumId,
                 dateAddedSec = localTrack.dateAddedSec,
                 genre = localTrack.genre,

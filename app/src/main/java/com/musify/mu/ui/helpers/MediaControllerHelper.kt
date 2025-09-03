@@ -33,15 +33,29 @@ fun rememberMediaController(): MediaController? {
         var controllerFuture: ListenableFuture<MediaController>? = null
         
         val job = CoroutineScope(Dispatchers.Main).launch {
-            try {
-                val sessionToken = SessionToken(
-                    context,
-                    ComponentName(context, PlayerService::class.java)
-                )
-                controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
-                controller = controllerFuture.await()
-            } catch (e: Exception) {
-                android.util.Log.e("MediaControllerHelper", "Failed to connect to MediaController", e)
+            val sessionToken = SessionToken(
+                context,
+                ComponentName(context, PlayerService::class.java)
+            )
+            // Small retry loop to handle racey service/session availability
+            var attempts = 0
+            var connected = false
+            var lastError: Exception? = null
+            while (attempts < 3 && !connected) {
+                try {
+                    controllerFuture = MediaController.Builder(context, sessionToken).buildAsync()
+                    controller = controllerFuture.await()
+                    connected = (controller != null)
+                } catch (e: Exception) {
+                    lastError = e
+                    try { controllerFuture?.cancel(true) } catch (_: Exception) {}
+                    // Backoff
+                    kotlinx.coroutines.delay(400L * (attempts + 1))
+                }
+                attempts++
+            }
+            if (!connected && lastError != null) {
+                android.util.Log.e("MediaControllerHelper", "Failed to connect to MediaController", lastError)
             }
         }
         

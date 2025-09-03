@@ -47,6 +47,7 @@ class SimpleBackgroundDataManager private constructor(
 
     // Track if we've already initialized
     private var isInitialized = false
+    private var collectionStarted = false
 
     // Coroutine scope for background operations
     private val scope = CoroutineScope(SupervisorJob())
@@ -67,28 +68,37 @@ class SimpleBackgroundDataManager private constructor(
             // Initialize the Spotify-style local files service
             localFilesService.initialize()
 
-            // Collect tracks from the service (now with proper caching)
-            localFilesService.tracks.collect { tracks ->
-                val previous = _cachedTracks.value
-                val changed = (previous.size != tracks.size) || (previous.firstOrNull()?.mediaId != tracks.firstOrNull()?.mediaId)
+            // Set initial snapshot without waiting on a long-lived collect
+            val initial = localFilesService.tracks.value
+            _cachedTracks.value = initial
+            _loadingState.value = LoadingState.Completed(initial.size)
 
-                _cachedTracks.value = tracks
-                Log.d(TAG, "Received ${tracks.size} tracks from LocalFilesService")
+            // Start long-lived collection in manager scope (not tied to composition)
+            if (!collectionStarted) {
+                collectionStarted = true
+                scope.launch {
+                    localFilesService.tracks.collect { tracks ->
+                        val previous = _cachedTracks.value
+                        val changed = (previous.size != tracks.size) || (previous.firstOrNull()?.mediaId != tracks.firstOrNull()?.mediaId)
 
-                if (tracks.isNotEmpty()) {
-                    if (changed) {
-                        // Cache to database only if set meaningfully changed
-                        Log.d(TAG, "Caching ${tracks.size} tracks to database (changed=true)...")
-                        db.dao().upsertTracks(tracks)
-                    } else {
-                        Log.d(TAG, "Skipping DB upsert (no meaningful change)")
+                        _cachedTracks.value = tracks
+                        Log.d(TAG, "Received ${tracks.size} tracks from LocalFilesService")
+
+                        if (tracks.isNotEmpty()) {
+                            if (changed) {
+                                // Cache to database only if set meaningfully changed
+                                Log.d(TAG, "Caching ${tracks.size} tracks to database (changed=true)...")
+                                db.dao().upsertTracks(tracks)
+                            } else {
+                                Log.d(TAG, "Skipping DB upsert (no meaningful change)")
+                            }
+
+                            _loadingState.value = LoadingState.Completed(tracks.size)
+                        } else {
+                            _loadingState.value = LoadingState.Completed(0)
+                            Log.w(TAG, "No tracks found during initialization")
+                        }
                     }
-
-                    _loadingState.value = LoadingState.Completed(tracks.size)
-                    Log.d(TAG, "App launch initialization completed: ${tracks.size} tracks cached")
-                } else {
-                    _loadingState.value = LoadingState.Completed(0)
-                    Log.w(TAG, "No tracks found during initialization")
                 }
             }
 
@@ -97,6 +107,10 @@ class SimpleBackgroundDataManager private constructor(
             isInitialized = true
             Log.d(TAG, "Data manager initialized successfully")
 
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Expected if caller scope is cancelled (e.g., composition left); do not treat as error
+            Log.d(TAG, "Initialization coroutine cancelled")
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error during app launch initialization", e)
             _loadingState.value = LoadingState.Error(e.message ?: "Initialization failed")

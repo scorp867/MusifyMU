@@ -16,6 +16,9 @@ import kotlinx.coroutines.channels.Channel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import java.util.concurrent.ConcurrentLinkedQueue
+import android.os.Handler
+import android.os.Looper
+import java.util.concurrent.CountDownLatch
 import kotlin.collections.ArrayDeque
 import kotlin.random.Random
 import java.util.UUID
@@ -816,11 +819,40 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
 
     // Private helper methods
 
+    private fun <T> onPlayerThread(block: () -> T): T {
+        val appLooper = player.applicationLooper
+        return if (Looper.myLooper() == appLooper) {
+            block()
+        } else {
+            val latch = CountDownLatch(1)
+            var result: T? = null
+            Handler(appLooper).post {
+                try {
+                    result = block()
+                } finally {
+                    latch.countDown()
+                }
+            }
+            try { latch.await() } catch (_: InterruptedException) { }
+            @Suppress("UNCHECKED_CAST")
+            (result as T)
+        }
+    }
+
     private fun getCombinedQueue(): List<QueueItem> {
         // Construct the combined queue directly from the player's timeline to ensure accurate ordering
         return try {
-            val count = player.mediaItemCount
-            if (count <= 0) {
+            // Read a consistent snapshot of the player's items on the player thread
+            val playerItems: List<MediaItem> = onPlayerThread {
+                val size = player.mediaItemCount
+                if (size <= 0) emptyList() else buildList(size) {
+                    for (i in 0 until size) {
+                        val mi = try { player.getMediaItemAt(i) } catch (_: Exception) { null }
+                        if (mi != null) add(mi)
+                    }
+                }
+            }
+            if (playerItems.isEmpty()) {
                 // Fallback to local lists if player is empty
                 val fallback = mutableListOf<QueueItem>()
                 fallback.addAll(mainList)
@@ -842,8 +874,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                 addToBuckets(mainList)
 
                 val result = mutableListOf<QueueItem>()
-                for (i in 0 until count) {
-                    val mi = player.getMediaItemAt(i) ?: continue
+                for ((index, mi) in playerItems.withIndex()) {
                     val match = buckets[mi.mediaId]?.removeFirstOrNull()
                     if (match != null) {
                         // Keep reference identity to support === mapping
@@ -853,7 +884,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
                         result.add(
                             QueueItem(
                                 mediaItem = mi,
-                                position = i,
+                                position = index,
                                 source = QueueSource.USER_ADDED,
                                 context = currentContext
                             )
@@ -1020,7 +1051,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     fun onTrackChanged(mediaId: String) {
         // Sync our current index with the player's current index to keep trimming and visibility accurate
         val playerIndex = try {
-            player.currentMediaItemIndex
+            onPlayerThread { player.currentMediaItemIndex }
         } catch (_: Exception) { -1 }
         if (playerIndex >= 0) {
             currentIndex = playerIndex.coerceIn(0, (getQueueSize() - 1).coerceAtLeast(0))

@@ -82,14 +82,13 @@
                 <action android:name="androidx.media3.session.MediaLibraryService" />
             </intent-filter>
 
-            <!-- Media session service -->
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
 
-            <!-- Media browser service -->
+            <!-- Handle headset/media button broadcasts when app is not running -->
             <intent-filter>
-                <action android:name="android.media.browse.MediaBrowserService" />
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </service>
 
