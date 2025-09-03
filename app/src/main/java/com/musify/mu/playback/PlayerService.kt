@@ -83,7 +83,9 @@ class PlayerService : MediaLibraryService() {
 		 */
 		suspend fun getOrCreateMediaCache(context: Context): SimpleCache = cacheMutex.withLock {
 			mediaCache ?: run {
-				val cacheDir = File(context.cacheDir, "media3_cache")
+				// Persist cache in app-specific external storage so it survives process death and is user-accessible
+				val baseDir = context.getExternalFilesDir(null) ?: context.cacheDir
+				val cacheDir = File(baseDir, "media3_cache").apply { mkdirs() }
 				val cacheEvictor = LeastRecentlyUsedCacheEvictor(500 * 1024 * 1024L) // 500MB cache
 				@Suppress("DEPRECATION")
 				SimpleCache(cacheDir, cacheEvictor).also { mediaCache = it }
