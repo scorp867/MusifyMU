@@ -26,7 +26,8 @@ data class Track(
     val dateModified: Long = 0,
     val displayName: String? = null,
     val relativePath: String? = null,
-    val albumArtist: String? = null
+    val albumArtist: String? = null,
+    val hasEmbeddedArtwork: Boolean = false // True if track has embedded album art
 )
 
 @Entity(tableName = "playlist")

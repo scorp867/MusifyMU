@@ -74,6 +74,18 @@
             </intent-filter>
         </activity>
 
+        <!-- Media Button Receiver for headset controls -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+            <meta-data
+                android:name="androidx.media3.session.MediaButtonReceiver"
+                android:value="com.musify.mu.playback.PlayerService" />
+        </receiver>
+
         <!-- Background Playback Service -->
         <service
             android:name=".playback.PlayerService"

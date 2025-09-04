@@ -181,22 +181,20 @@ fun NowPlayingBar(
                 // Album artwork with rounded corners (compact)
                 // Use key to force recomposition when track changes
                 key(currentTrack.mediaId) {
-                    Artwork(
-                        data = currentTrack.artUri,
-                        contentDescription = currentTrack.title,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(10.dp)),
-                        shape = null,
-                        mediaUri = currentTrack.mediaId,
-                        cacheKey = currentTrack.mediaId, // Stable cache key
-                        albumId = currentTrack.albumId,
-                        enableOnDemand = true
+                    Box(
+                        modifier = Modifier.size(48.dp)
                     ) {
+                        CompactArtwork(
+                            trackUri = currentTrack.mediaId,
+                            modifier = Modifier.fillMaxSize(),
+                            shape = RoundedCornerShape(10.dp)
+                        )
                         if (isPlaying) {
-                            Box(modifier = Modifier.matchParentSize()) {
-                                PlayingIndicator(modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp))
-                            }
+                            PlayingIndicator(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(2.dp)
+                            )
                         }
                     }
                 }

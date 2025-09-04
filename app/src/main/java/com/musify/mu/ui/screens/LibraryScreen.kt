@@ -38,6 +38,7 @@ import com.musify.mu.util.toMediaItem
 import com.musify.mu.ui.components.AlphabeticalScrollBar
 import com.musify.mu.ui.components.generateAlphabet
 import com.musify.mu.ui.components.getFirstLetter
+import com.musify.mu.ui.components.TrackArtwork
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.playback.QueueContextHelper
 import kotlinx.coroutines.delay
@@ -132,9 +133,9 @@ fun LibraryScreen(
             }
 
             // Observe the cached tracks flow for real-time updates (this is the single source of truth)
-            repo.dataManager.cachedTracks.collect { cachedTracks ->
-                android.util.Log.d("LibraryScreen", "Cache updated: ${cachedTracks.size} tracks")
-                allTracks = cachedTracks
+            repo.dataManager.tracks.collect { tracks ->
+                android.util.Log.d("LibraryScreen", "Cache updated: ${tracks.size} tracks")
+                allTracks = tracks
                 isLoading = false
             }
         } else {
@@ -307,7 +308,7 @@ fun LibraryScreen(
                 val end = (visibleItems.maxOf { it.index } + 5).coerceAtMost(visualTracks.lastIndex)
                 if (start <= end && visualTracks.isNotEmpty()) {
                     val prefetchUris: List<String> = visualTracks.subList(start, end + 1).map { it.mediaId }
-                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(prefetchUris)
+                    repo.dataManager.prefetchArtwork(prefetchUris)
                 }
             }
     }
@@ -459,11 +460,11 @@ private fun TrackItem(
                         .clip(RoundedCornerShape(8.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    com.musify.mu.ui.components.SmartArtwork(
-                        artworkUri = track.artUri, // Use pre-extracted artwork from database
-                        mediaUri = track.mediaId,
+                    TrackArtwork(
+                        trackUri = track.mediaId,
                         contentDescription = track.title,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.fillMaxSize(),
+                        shape = RoundedCornerShape(8.dp)
                     )
                 }
 

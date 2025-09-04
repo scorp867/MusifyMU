@@ -97,26 +97,22 @@ fun CompactTrackRow(
                 ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Artwork(
-                data = artData,
-                mediaUri = mediaUri,
-                albumId = null,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(52.dp),
-                enableOnDemand = true,
-                cacheKey = mediaUri // Add stable cache key to prevent re-loading
-            ) {
-                Box(modifier = Modifier.fillMaxSize()) {
-                    if (showIndicator) {
-                        PlayingIndicator(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(2.dp)
-                        )
-                    }
-                    if (extraArtOverlay != null) {
-                        extraArtOverlay()
-                    }
+            Box(modifier = Modifier.size(52.dp)) {
+                TrackArtwork(
+                    trackUri = mediaUri,
+                    contentDescription = contentDescription,
+                    modifier = Modifier.fillMaxSize(),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                if (showIndicator) {
+                    PlayingIndicator(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(2.dp)
+                    )
+                }
+                if (extraArtOverlay != null) {
+                    extraArtOverlay()
                 }
             }
 

@@ -203,8 +203,8 @@ class MusifyMusicWidgetProvider : AppWidgetProvider() {
 	private suspend fun loadArtworkFromOnDemand(context: Context, mediaId: String): Bitmap? {
 		return withContext(Dispatchers.IO) {
 			try {
-				val cached = com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(mediaId)
-				val uriStr = cached ?: com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(mediaId)
+				val cached = com.musify.mu.util.SpotifyStyleArtworkLoader.getCachedArtworkUri(mediaId)
+				val uriStr = cached ?: runBlocking { com.musify.mu.util.SpotifyStyleArtworkLoader.loadArtwork(mediaId) }
 				if (uriStr.isNullOrBlank()) return@withContext null
 				val request = ImageRequest.Builder(context)
 					.data(uriStr)

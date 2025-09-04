@@ -113,7 +113,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                             val end = max.coerceAtMost(tracks.lastIndex)
                             if (start <= end) {
                                 val ids = tracks.subList(start, end + 1).map { it.mediaId }
-                                com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                                repo.dataManager.prefetchArtwork(ids)
                             }
                         }
                 }
@@ -203,7 +203,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                         val end = max.coerceAtMost(tracks.lastIndex)
                         if (start <= end) {
                             val ids = tracks.subList(start, end + 1).map { it.mediaId }
-                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                            repo.dataManager.prefetchArtwork(ids)
                         }
                     }
             }

@@ -2,6 +2,7 @@ package com.musify.mu.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -42,13 +43,11 @@ fun TrackPickerSheet(
                         headlineContent = { Text(t.title) },
                         supportingContent = { Text(t.artist) },
                         leadingContent = {
-                            com.musify.mu.ui.components.Artwork(
-                                data = t.artUri,
-                                mediaUri = t.mediaId,
-                                albumId = t.albumId,
+                            TrackArtwork(
+                                trackUri = t.mediaId,
                                 contentDescription = t.title,
                                 modifier = Modifier.size(40.dp),
-                                enableOnDemand = true
+                                shape = RoundedCornerShape(6.dp)
                             )
                         },
                         trailingContent = {

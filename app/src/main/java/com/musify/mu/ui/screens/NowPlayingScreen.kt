@@ -44,6 +44,8 @@ import kotlinx.coroutines.withContext
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.AnimatedBackground
 import com.musify.mu.ui.components.EnhancedLyricsView
+import com.musify.mu.ui.components.LargeArtwork
+import com.musify.mu.ui.components.CompactArtwork
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.ui.helpers.resolveTrack
 import org.burnoutcrew.reorderable.rememberReorderableLazyListState
@@ -252,10 +254,9 @@ fun NowPlayingScreen(navController: NavController) {
                 coroutineScope.launch(Dispatchers.IO) {
                     try {
                         // Store the custom artwork using the new Spotify-style approach
-                        val customArtworkUri = com.musify.mu.util.OnDemandArtworkLoader.storeCustomArtwork(track.mediaId, imageUri, context)
+                        val customArtworkUri = com.musify.mu.util.SpotifyStyleArtworkLoader.storeCustomArtwork(track.mediaId, imageUri)
                         if (customArtworkUri != null) {
-                            // Save to LocalFilesService for persistence (Spotify's approach)
-                            repo.dataManager.localFilesService.saveCustomArtwork(track.mediaId, customArtworkUri)
+                            // Artwork is already cached by SpotifyStyleArtworkLoader
                             withContext(Dispatchers.Main) {
                                 android.widget.Toast.makeText(context, "Custom artwork set successfully", android.widget.Toast.LENGTH_SHORT).show()
                             }
@@ -523,14 +524,10 @@ fun NowPlayingScreen(navController: NavController) {
                             animationSpec = tween(400, easing = FastOutSlowInEasing),
                             label = "artCrossfade"
                         ) { _ ->
-                            com.musify.mu.ui.components.Artwork(
-                                data = track.artUri,
-                                mediaUri = track.mediaId,
-                                albumId = track.albumId,
-                                contentDescription = track.title,
+                            LargeArtwork(
+                                trackUri = track.mediaId,
                                 modifier = Modifier.fillMaxSize(),
-                                enableOnDemand = true,
-                                cacheKey = track.mediaId // Stable cache key
+                                shape = RoundedCornerShape(16.dp)
                             )
                         }
 
@@ -1093,7 +1090,7 @@ fun NowPlayingScreen(navController: NavController) {
                                 val e = end.coerceAtMost(visualQueueItems.lastIndex)
                                 if (s <= e) {
                                     val ids = visualQueueItems.subList(s, e + 1).map { it.mediaItem.mediaId }
-                                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(ids)
+                                    repo.dataManager.prefetchArtwork(ids)
                                 }
                             }
                         }
@@ -1155,11 +1152,10 @@ fun NowPlayingScreen(navController: NavController) {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    com.musify.mu.ui.components.SimpleArtwork(
-                                        albumId = t.albumId,
+                                    CompactArtwork(
                                         trackUri = t.mediaId,
-                                        artUri = t.artUri,
-                                        modifier = Modifier.size(48.dp)
+                                        modifier = Modifier.size(48.dp),
+                                        shape = RoundedCornerShape(8.dp)
                                     )
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(t.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)

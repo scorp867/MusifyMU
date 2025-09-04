@@ -24,7 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
-import com.musify.mu.ui.components.Artwork
+import com.musify.mu.ui.components.AlbumArtwork
+import com.musify.mu.ui.components.TrackArtwork
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.util.toMediaItem
@@ -67,7 +68,7 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                         }
                         val mediaUris = visibleTracks.mapNotNull { it.mediaId }
                         if (mediaUris.isNotEmpty()) {
-                            com.musify.mu.util.OnDemandArtworkLoader.prefetch(mediaUris)
+                            repo.dataManager.prefetchArtwork(mediaUris)
                         }
                     }
             }
@@ -82,7 +83,12 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
                             if (albumArt != null) {
-                                Artwork(data = albumArt, mediaUri = tracks.firstOrNull()?.mediaId, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize(), enableOnDemand = true)
+                                AlbumArtwork(
+                                    albumId = tracks.firstOrNull()?.albumId,
+                                    firstTrackUri = tracks.firstOrNull()?.mediaId,
+                                    contentDescription = "Album artwork",
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             } else {
                                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant))
                             }
@@ -113,7 +119,12 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                             }
                             Box(modifier = Modifier.size(32.dp)) {
                                 if (albumArt != null) {
-                                    Artwork(data = albumArt, mediaUri = tracks.firstOrNull()?.mediaId, albumId = null, contentDescription = null, modifier = Modifier.fillMaxSize(), enableOnDemand = true)
+                                    AlbumArtwork(
+                                    albumId = tracks.firstOrNull()?.albumId,
+                                    firstTrackUri = tracks.firstOrNull()?.mediaId,
+                                    contentDescription = "Album artwork",
+                                    modifier = Modifier.fillMaxSize()
+                                )
                                 } else {
                                     Box(Modifier.fillMaxSize().background(Color.LightGray))
                                 }

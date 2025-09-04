@@ -6,7 +6,7 @@ import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.AppDao
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.db.entities.*
-import com.musify.mu.data.media.SimpleBackgroundDataManager
+import com.musify.mu.data.media.SpotifyStyleDataManager
 import com.musify.mu.data.media.LoadingState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +20,7 @@ class LibraryRepository private constructor(private val context: Context, privat
 
     // Create data manager instance - this will be initialized by the app
     val dataManager by lazy {
-        SimpleBackgroundDataManager.get(context, db)
+        SpotifyStyleDataManager.getInstance(context, db)
     }
 
     // Background loading progress
@@ -67,7 +67,7 @@ class LibraryRepository private constructor(private val context: Context, privat
     suspend fun removeFromPlaylist(playlistId: Long, mediaId: String) = db.dao().removeItem(playlistId, mediaId)
     suspend fun playlistTracks(playlistId: Long): List<Track> {
         val databaseTracks = db.dao().getPlaylistTracks(playlistId)
-        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        val currentTrackIds = dataManager.tracks.value.map { it.mediaId }.toSet()
         // If cache is empty (e.g., before first scan completes), show DB results to avoid empty playlists
         if (currentTrackIds.isEmpty()) return databaseTracks
         // Otherwise, filter out tracks that no longer exist on device
@@ -92,7 +92,7 @@ class LibraryRepository private constructor(private val context: Context, privat
     // Filter out deleted tracks by checking against current cached tracks
     suspend fun favorites(): List<Track> {
         val databaseFavorites = db.dao().getFavorites()
-        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        val currentTrackIds = dataManager.tracks.value.map { it.mediaId }.toSet()
         return databaseFavorites.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
     suspend fun saveFavoritesOrder(order: List<FavoritesOrder>) = db.dao().upsertFavoriteOrder(order)
@@ -101,20 +101,20 @@ class LibraryRepository private constructor(private val context: Context, privat
     fun getTrackByMediaId(mediaId: String): Track? {
         // Use the cached tracks directly from the data manager's StateFlow
         // This avoids calling getAllTracks() repeatedly
-        return dataManager.cachedTracks.value.find { it.mediaId == mediaId }
+        return dataManager.tracks.value.find { it.mediaId == mediaId }
     }
 
     // Get recently added/played from database (these track user interactions, not cached)
     // Filter out deleted tracks by checking against current cached tracks
     suspend fun recentlyAdded(limit: Int = 20): List<Track> {
         val databaseRecent = db.dao().getRecentlyAdded(limit)
-        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        val currentTrackIds = dataManager.tracks.value.map { it.mediaId }.toSet()
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
 
     suspend fun recentlyPlayed(limit: Int = 20): List<Track> {
         val databaseRecent = db.dao().getRecentlyPlayed(limit)
-        val currentTrackIds = dataManager.cachedTracks.value.map { it.mediaId }.toSet()
+        val currentTrackIds = dataManager.tracks.value.map { it.mediaId }.toSet()
         return databaseRecent.filter { track -> currentTrackIds.contains(track.mediaId) }
     }
     suspend fun recordPlayed(mediaId: String) = db.dao().insertOrUpdatePlayHistory(mediaId)

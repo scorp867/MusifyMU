@@ -42,7 +42,9 @@ import kotlinx.coroutines.launch
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
-import com.musify.mu.ui.components.Artwork
+import com.musify.mu.ui.components.SpotifyStyleArtwork
+import com.musify.mu.ui.components.TrackArtwork
+import com.musify.mu.ui.components.AlbumArtwork
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.playback.LocalMediaController
 import com.musify.mu.data.db.entities.Playlist
@@ -93,7 +95,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var showSongEditor by remember { mutableStateOf(false) }
     var editingTrack by remember { mutableStateOf<Track?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val cachedTracks by repo.dataManager.cachedTracks.collectAsStateWithLifecycle(initialValue = emptyList())
+    val cachedTracks by repo.dataManager.tracks.collectAsStateWithLifecycle(initialValue = emptyList())
 
     val listState = rememberLazyListState()
 
@@ -110,7 +112,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 .filter { it.artUri.isNullOrBlank() || it.artUri?.startsWith("content://media/external/audio/albumart") == true }
                 .map { it.mediaId }
             if (visibleTrackUris.isNotEmpty()) {
-                repo.dataManager.localFilesService.prefetchArtwork(visibleTrackUris)
+                repo.dataManager.prefetchArtwork(visibleTrackUris)
             }
         }
     }
@@ -149,8 +151,8 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
 
     // Listen for changes in cached tracks and refresh home screen data
     LaunchedEffect(Unit) {
-        repo.dataManager.cachedTracks.collectLatest { cachedTracks ->
-            android.util.Log.d("HomeScreen", "Cached tracks changed: ${cachedTracks.size} tracks, refreshing home data")
+        repo.dataManager.tracks.collectLatest { tracks ->
+            android.util.Log.d("HomeScreen", "Cached tracks changed: ${tracks.size} tracks, refreshing home data")
             refreshData()
         }
     }
@@ -610,13 +612,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                             headlineContent = { Text(t.title) },
                                             supportingContent = { Text(t.artist) },
                                             leadingContent = {
-                                                Artwork(
-                                                    data = t.artUri,
-                                                    mediaUri = t.mediaId,
-                                                    albumId = t.albumId,
+                                                TrackArtwork(
+                                                    trackUri = t.mediaId,
                                                     contentDescription = t.title,
                                                     modifier = Modifier.size(40.dp),
-                                                    enableOnDemand = true
+                                                    shape = RoundedCornerShape(6.dp)
                                                 )
                                             },
                                             modifier = Modifier.clickable {
@@ -678,13 +678,12 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                             headlineContent = { Text(a.albumName) },
                                             supportingContent = { Text(a.artistName) },
                                             leadingContent = {
-                                                Artwork(
-                                                    data = a.artUri,
-                                                    mediaUri = null,
+                                                AlbumArtwork(
                                                     albumId = a.albumId,
+                                                    firstTrackUri = null, // Will be determined by album ID
                                                     contentDescription = a.albumName,
                                                     modifier = Modifier.size(40.dp),
-                                                    enableOnDemand = true
+                                                    shape = RoundedCornerShape(6.dp)
                                                 )
                                             },
                                             modifier = Modifier.clickable {
@@ -761,7 +760,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
                 val uris = visibleTracks.map { it.mediaId }
                 if (uris.isNotEmpty()) {
-                    com.musify.mu.util.OnDemandArtworkLoader.prefetch(uris)
+                    repo.dataManager.prefetchArtwork(uris)
                 }
                 // Simple artwork loading - no preloading needed
             }
@@ -988,14 +987,12 @@ private fun TrackCard(
                 .clip(RoundedCornerShape(14.dp))
                 .shadow(6.dp, RoundedCornerShape(14.dp))
         ) {
-            com.musify.mu.ui.components.Artwork(
-                data = track.artUri,
-                mediaUri = track.mediaId,
-                albumId = track.albumId,
-                contentDescription = track.title,
-                modifier = Modifier.fillMaxSize(),
-                enableOnDemand = true
-            ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                TrackArtwork(
+                    trackUri = track.mediaId,
+                    contentDescription = track.title,
+                    modifier = Modifier.fillMaxSize()
+                )
                 if (isCurrent) {
                     com.musify.mu.ui.components.PlayingIndicator(
                         modifier = Modifier

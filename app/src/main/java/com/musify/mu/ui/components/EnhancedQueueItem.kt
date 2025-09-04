@@ -220,14 +220,11 @@ fun EnhancedQueueTrackItem(
                     .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Artwork(
-                    data = track.artUri,
-                    mediaUri = track.mediaId,
-                    albumId = track.albumId,
-                    cacheKey = track.mediaId,
+                TrackArtwork(
+                    trackUri = track.mediaId,
                     contentDescription = track.title,
                     modifier = Modifier.fillMaxSize(),
-                    enableOnDemand = true
+                    shape = RoundedCornerShape(8.dp)
                 )
 
                 // Play next indicator

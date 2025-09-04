@@ -2,15 +2,10 @@ package com.musify.mu.data.localfiles
 
 import android.content.Context
 import android.util.Log
-import com.musify.mu.data.db.entities.Track
-import com.musify.mu.data.mediastore.MediaStoreReader
-import com.musify.mu.data.proto.OpenedAudioFilesStorage
-import com.musify.mu.data.proto.OpenedAudioFilesStorageImpl
-import com.musify.mu.data.proto.QueryResult
-import com.musify.mu.data.proto.QueryResultStorage
-import com.musify.mu.data.proto.QueryResultStorageImpl
-import com.musify.mu.data.proto.CustomArtworkStorage
-import com.musify.mu.data.proto.CustomArtworkStorageImpl
+import com.musify.mu.data.localfiles.mediastore.MediaStoreReader
+import com.musify.mu.data.localfiles.mediastore.OpenedAudioFiles
+import com.musify.mu.data.localfiles.permissions.LocalFilesPermissionInteractor
+import com.musify.mu.data.localfiles.proto.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,21 +13,25 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
- * Spotify-style LocalFilesService that coordinates scanning and provides the API
+ * Main local files service that coordinates MediaStore scanning, permission handling,
+ * and data management. Based on Spotify's LocalFilesService architecture.
+ * 
+ * This service acts as the central hub for all local file operations and maintains
+ * the in-memory index of local tracks.
  */
 class LocalFilesService private constructor(
     private val context: Context
 ) {
     companion object {
         private const val TAG = "LocalFilesService"
-        private const val MIN_DURATION_MS = 1000L // 1 second minimum
-
+        
         @Volatile
         private var INSTANCE: LocalFilesService? = null
-
+        
         fun getInstance(context: Context): LocalFilesService {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: LocalFilesService(context.applicationContext).also {
@@ -41,429 +40,356 @@ class LocalFilesService private constructor(
             }
         }
     }
-
+    
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
+    private val mutex = Mutex()
+    
     // Core components
-    private val cacheDir = context.cacheDir.resolve("spotify_artwork_cache").apply { mkdirs() }
-    private val mediaStoreReader = MediaStoreReader.getInstance(
-        context,
-        MediaStoreReader.MediaStoreReaderOptions(
-            minDurationMs = MIN_DURATION_MS,
-            cacheDir = cacheDir
-        )
+    private lateinit var mediaStoreReader: MediaStoreReader
+    private lateinit var openedAudioFiles: OpenedAudioFiles
+    private lateinit var permissionInteractor: LocalFilesPermissionInteractor
+    private lateinit var artworkLoader: LocalFileImageLoader
+    
+    // Configuration
+    private val options = MediaStoreReaderOptions(
+        durationMin = 30000, // 30 seconds minimum
+        includeAlarms = false,
+        includeRingtones = false,
+        includeNotifications = false,
+        includePodcasts = true,
+        includeAudiobooks = true,
+        enableDocumentTreeScanning = true
     )
-
-    private val openedFilesStorage: OpenedAudioFilesStorage = OpenedAudioFilesStorageImpl(context)
-    private val queryResultStorage: QueryResultStorage = QueryResultStorageImpl(context)
-    private val customArtworkStorage: CustomArtworkStorage = CustomArtworkStorageImpl(context)
-
-    // State flows
-    private val _tracks = MutableStateFlow<List<Track>>(emptyList())
-    val tracks: StateFlow<List<Track>> = _tracks.asStateFlow()
-
-    private val _isScanning = MutableStateFlow(false)
-    val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
-
-    private val _lastScanTime = MutableStateFlow<Long?>(null)
-    val lastScanTime: StateFlow<Long?> = _lastScanTime.asStateFlow()
-
+    
+    // In-memory index (acts as native delegate replacement)
+    private val _tracks = MutableStateFlow<List<LocalTrack>>(emptyList())
+    val tracks: StateFlow<List<LocalTrack>> = _tracks.asStateFlow()
+    
+    private val _albums = MutableStateFlow<List<LocalAlbum>>(emptyList())
+    val albums: StateFlow<List<LocalAlbum>> = _albums.asStateFlow()
+    
+    private val _artists = MutableStateFlow<List<LocalArtist>>(emptyList())
+    val artists: StateFlow<List<LocalArtist>> = _artists.asStateFlow()
+    
+    private val _scanState = MutableStateFlow<ScanState>(ScanState.Idle)
+    val scanState: StateFlow<ScanState> = _scanState.asStateFlow()
+    
     private var isInitialized = false
-
+    private var isListening = false
+    
     /**
-     * Initialize the service (call this at app startup)
+     * Initialize the service with all required components
      */
-    suspend fun initialize() {
-        if (isInitialized) return
-
-        Log.d(TAG, "Initializing LocalFilesService")
-
-        try {
-            // Load any previously opened files
-            val openedFiles = openedFilesStorage.load()
-            Log.d(TAG, "Loaded ${openedFiles.permanentFiles.size} opened files")
-
-            // Try to load cached QueryResult first (Spotify's efficient approach)
-            val cachedResult = queryResultStorage.load()
-            if (cachedResult != null) {
-                Log.d(TAG, "Using cached QueryResult from ${System.currentTimeMillis() - cachedResult.timestamp}ms ago")
-                val tracks = convertQueryResultToTracks(cachedResult)
-                val tracksWithCustomArt = applyCustomArtwork(tracks)
-                _tracks.value = tracksWithCustomArt
-                _lastScanTime.value = cachedResult.timestamp
-            } else {
-                Log.d(TAG, "No valid cache found, performing initial scan")
-                refreshTracks()
-            }
-
-            // Start listening for MediaStore changes
-            mediaStoreReader.startListening {
-                scope.launch {
-                    refreshTracks()
-                }
-            }
-
-            isInitialized = true
-            Log.d(TAG, "LocalFilesService initialized successfully")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize LocalFilesService", e)
-        }
-    }
-
-    /**
-     * Refresh tracks by running a new scan
-     */
-    suspend fun refreshTracks() {
-        if (_isScanning.value) {
-            Log.d(TAG, "Scan already in progress, skipping")
+    suspend fun initialize(): Unit = mutex.withLock {
+        if (isInitialized) {
+            Log.d(TAG, "Service already initialized")
             return
         }
-
-        _isScanning.value = true
-
+        
         try {
-            Log.d(TAG, "Starting track refresh")
-
-            val startTime = System.currentTimeMillis()
-
-            // Run the MediaStore scan
-            val scannedTracks = mediaStoreReader.runQuery()
-
-            // Merge with opened files if any
-            val openedFiles = openedFilesStorage.load()
-            val mergedTracks = mergeWithOpenedFiles(scannedTracks, openedFiles)
-
-            // Apply custom artwork
-            val tracksWithCustomArt = applyCustomArtwork(mergedTracks)
-
-            // Create QueryResult for caching
-            val queryResult = QueryResult(
-                tracks = scannedTracks.map { track ->
-                    com.musify.mu.data.proto.LocalTrack(
-                        mediaId = track.mediaId,
-                        title = track.title,
-                        artist = track.artist,
-                        album = track.album,
-                        durationMs = track.durationMs,
-                        artUri = track.artUri,
-                        albumId = track.albumId,
-                        dateAddedSec = track.dateAddedSec,
-                        genre = track.genre,
-                        year = track.year,
-                        track = track.track,
-                        albumArtist = track.albumArtist,
-                        hasEmbeddedArt = track.artUri != null,
-                        filePath = null
-                    )
-                },
-                timestamp = System.currentTimeMillis(),
-                scanDurationMs = System.currentTimeMillis() - startTime
-            )
-
-            // Cache the QueryResult (Spotify's approach)
-            queryResultStorage.save(queryResult)
-
-            // Update the state
-            _tracks.value = tracksWithCustomArt
-            _lastScanTime.value = System.currentTimeMillis()
-
-            val scanDuration = System.currentTimeMillis() - startTime
-            Log.d(TAG, "Track refresh completed in ${scanDuration}ms with ${tracksWithCustomArt.size} tracks")
-
+            Log.d(TAG, "Initializing LocalFilesService...")
+            
+            // Initialize components
+            permissionInteractor = LocalFilesPermissionInteractor.getInstance(context)
+            openedAudioFiles = OpenedAudioFiles.getInstance(context)
+            mediaStoreReader = MediaStoreReader.getInstance(context, options)
+            artworkLoader = LocalFileImageLoader.getInstance(context)
+            
+            // Initialize sub-components
+            openedAudioFiles.initialize()
+            artworkLoader.initialize()
+            
+            // Check permissions and start initial scan if available
+            if (permissionInteractor.canScanLocalFiles()) {
+                performInitialScan()
+                startListening()
+            } else {
+                Log.w(TAG, "Cannot scan local files - missing permissions")
+                _scanState.value = ScanState.PermissionRequired
+            }
+            
+            isInitialized = true
+            Log.d(TAG, "LocalFilesService initialized successfully")
+            
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to refresh tracks", e)
-        } finally {
-            _isScanning.value = false
+            Log.e(TAG, "Error initializing LocalFilesService", e)
+            _scanState.value = ScanState.Error("Initialization failed: ${e.message}")
         }
     }
-
+    
     /**
-     * Add a file to the opened files list
+     * Perform initial scan of local files
      */
-    suspend fun addOpenedFile(uri: String) {
-        openedFilesStorage.addFile(uri)
-        Log.d(TAG, "Added opened file: $uri")
+    private suspend fun performInitialScan() {
+        try {
+            _scanState.value = ScanState.Scanning("Scanning local music library...")
+            
+            Log.d(TAG, "Starting initial scan...")
+            val queryResult = mediaStoreReader.runQuery(openedAudioFiles)
+            
+            // Process results into UI models
+            updateInMemoryIndex(queryResult)
+            
+            _scanState.value = ScanState.Completed(queryResult.totalCount)
+            Log.d(TAG, "Initial scan completed with ${queryResult.totalCount} files")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during initial scan", e)
+            _scanState.value = ScanState.Error("Scan failed: ${e.message}")
+        }
     }
-
+    
     /**
-     * Remove a file from the opened files list
+     * Start listening for MediaStore changes
      */
-    suspend fun removeOpenedFile(uri: String) {
-        openedFilesStorage.removeFile(uri)
-        Log.d(TAG, "Removed opened file: $uri")
+    private suspend fun startListening() {
+        if (isListening) return
+        
+        mediaStoreReader.startListening { handle ->
+            Log.d(TAG, "MediaStore changed: $handle")
+            scope.launch {
+                performIncrementalScan(handle)
+            }
+        }
+        
+        isListening = true
+        Log.d(TAG, "Started listening for MediaStore changes")
     }
-
+    
     /**
-     * Get tracks filtered by search query
+     * Perform incremental scan when MediaStore changes
      */
-    fun searchTracks(query: String): List<Track> {
+    private suspend fun performIncrementalScan(handle: String) = mutex.withLock {
+        try {
+            Log.d(TAG, "Performing incremental scan due to change: $handle")
+            
+            val queryResult = mediaStoreReader.runQuery(openedAudioFiles)
+            updateInMemoryIndex(queryResult)
+            
+            Log.d(TAG, "Incremental scan completed with ${queryResult.totalCount} files")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during incremental scan", e)
+        }
+    }
+    
+    /**
+     * Update the in-memory index with new query results
+     * This replaces Spotify's native delegate functionality
+     */
+    private suspend fun updateInMemoryIndex(queryResult: QueryResult) {
+        val tracks = queryResult.localFiles.map { localFile ->
+            LocalTrack(
+                id = localFile.path,
+                title = localFile.metadata.title ?: "Unknown",
+                artist = localFile.metadata.artist ?: "Unknown",
+                album = localFile.metadata.album ?: "Unknown",
+                albumArtist = localFile.metadata.albumArtist,
+                duration = localFile.metadata.duration ?: 0,
+                year = localFile.metadata.year,
+                trackNumber = localFile.metadata.trackNumber,
+                genre = localFile.metadata.genre,
+                albumId = localFile.metadata.albumId,
+                dateAdded = localFile.metadata.dateAdded ?: 0,
+                hasEmbeddedArtwork = localFile.imageState == ImageState.HAS_IMAGE
+            )
+        }.sortedWith(
+            compareByDescending<LocalTrack> { it.dateAdded }
+                .thenBy { it.artist.lowercase() }
+                .thenBy { it.album.lowercase() }
+                .thenBy { it.trackNumber ?: 0 }
+        )
+        
+        val albums = tracks
+            .filter { it.albumId != null }
+            .groupBy { it.albumId }
+            .map { (albumId, albumTracks) ->
+                val firstTrack = albumTracks.first()
+                LocalAlbum(
+                    id = albumId!!,
+                    name = firstTrack.album,
+                    artist = firstTrack.albumArtist ?: firstTrack.artist,
+                    trackCount = albumTracks.size,
+                    year = albumTracks.mapNotNull { it.year }.minOrNull()
+                )
+            }
+            .sortedBy { it.name.lowercase() }
+        
+        val artists = tracks
+            .groupBy { it.artist }
+            .map { (artistName, artistTracks) ->
+                LocalArtist(
+                    name = artistName,
+                    albumCount = artistTracks.mapNotNull { it.albumId }.distinct().size,
+                    trackCount = artistTracks.size
+                )
+            }
+            .sortedBy { it.name.lowercase() }
+        
+        // Update flows
+        _tracks.value = tracks
+        _albums.value = albums
+        _artists.value = artists
+        
+        Log.d(TAG, "Updated in-memory index: ${tracks.size} tracks, ${albums.size} albums, ${artists.size} artists")
+    }
+    
+    /**
+     * API methods for accessing data (LocalFilesEndpoint equivalent)
+     */
+    
+    /**
+     * Get all tracks
+     */
+    fun getTracks(): LocalTracksResponse {
+        return LocalTracksResponse(
+            tracks = _tracks.value,
+            albums = _albums.value,
+            artists = _artists.value,
+            totalTracks = _tracks.value.size
+        )
+    }
+    
+    /**
+     * Get tracks with search filter
+     */
+    fun searchTracks(query: String): List<LocalTrack> {
         if (query.isBlank()) return _tracks.value
-
+        
         val lowercaseQuery = query.lowercase()
         return _tracks.value.filter { track ->
             track.title.lowercase().contains(lowercaseQuery) ||
             track.artist.lowercase().contains(lowercaseQuery) ||
-            track.album.lowercase().contains(lowercaseQuery)
+            track.album.lowercase().contains(lowercaseQuery) ||
+            track.genre?.lowercase()?.contains(lowercaseQuery) == true
         }
     }
-
-    /**
-     * Get tracks by artist
-     */
-    fun getTracksByArtist(artist: String): List<Track> {
-        return _tracks.value.filter { it.artist.equals(artist, ignoreCase = true) }
-    }
-
+    
     /**
      * Get tracks by album
      */
-    fun getTracksByAlbum(album: String): List<Track> {
-        return _tracks.value.filter { it.album.equals(album, ignoreCase = true) }
+    fun getTracksByAlbum(albumId: Long): List<LocalTrack> {
+        return _tracks.value.filter { it.albumId == albumId }
     }
-
+    
     /**
-     * Get unique artists
+     * Get tracks by artist
      */
-    fun getArtists(): List<String> {
-        return _tracks.value
-            .map { it.artist }
-            .distinct()
-            .sortedBy { it.lowercase() }
-    }
-
-    /**
-     * Get unique albums with their track counts
-     */
-    fun getAlbums(): List<Triple<String, String, Int>> { // albumName, artistName, trackCount
-        return _tracks.value
-            .groupBy { it.albumId }
-            .map { (_, tracks) ->
-                val firstTrack = tracks.first()
-                Triple(firstTrack.album, firstTrack.artist, tracks.size)
-            }
-            .sortedBy { it.first.lowercase() }
-    }
-
-    /**
-     * Convert QueryResult to Track entities
-     */
-    private fun convertQueryResultToTracks(queryResult: QueryResult): List<Track> {
-        return queryResult.tracks.map { localTrack ->
-            val computedArtUri = if (localTrack.hasEmbeddedArt) mediaStoreReader.generateArtworkUri(localTrack.mediaId) else null
-            val existingArtUri = computedArtUri?.let { uriStr ->
-                val path = uriStr.removePrefix("file://")
-                try {
-                    val f = java.io.File(path)
-                    if (f.exists() && f.isFile) uriStr else null
-                } catch (_: Exception) { null }
-            }
-            Track(
-                mediaId = localTrack.mediaId,
-                title = localTrack.title,
-                artist = localTrack.artist,
-                album = localTrack.album,
-                durationMs = localTrack.durationMs,
-                artUri = existingArtUri,
-                albumId = localTrack.albumId,
-                dateAddedSec = localTrack.dateAddedSec,
-                genre = localTrack.genre,
-                year = localTrack.year,
-                track = localTrack.track,
-                albumArtist = localTrack.albumArtist
-            )
+    fun getTracksByArtist(artistName: String): List<LocalTrack> {
+        return _tracks.value.filter { 
+            it.artist.equals(artistName, ignoreCase = true) ||
+            it.albumArtist?.equals(artistName, ignoreCase = true) == true
         }
     }
-
+    
     /**
-     * Apply custom artwork to tracks
+     * Add permanent file URI (e.g., from SAF)
      */
-    private suspend fun applyCustomArtwork(tracks: List<Track>): List<Track> {
-        val customArtworkMap = customArtworkStorage.loadAll()
-        return tracks.map { track ->
-            val customArtUri = customArtworkMap[track.mediaId]
-            if (customArtUri != null) {
-                track.copy(artUri = customArtUri)
-            } else {
-                track
-            }
+    suspend fun addPermanentFile(uri: android.net.Uri) {
+        openedAudioFiles.addPermanentFile(uri)
+        // Trigger a rescan to include the new file
+        scope.launch {
+            performIncrementalScan("manual_add")
         }
     }
-
+    
     /**
-     * Save custom artwork for a track
+     * Add temporary file URI (session only)
      */
-    suspend fun saveCustomArtwork(trackUri: String, artworkUri: String) {
-        customArtworkStorage.save(trackUri, artworkUri)
-        Log.d(TAG, "Saved custom artwork for track: $trackUri")
-
-        // Update the current tracks list with the new artwork
-        val updatedTracks = _tracks.value.map { track ->
-            if (track.mediaId == trackUri) {
-                track.copy(artUri = artworkUri)
-            } else {
-                track
-            }
+    fun addTemporaryFile(uri: android.net.Uri) {
+        openedAudioFiles.addTemporaryFile(uri)
+        // Trigger a rescan to include the new file
+        scope.launch {
+            performIncrementalScan("temp_add")
         }
-        _tracks.value = updatedTracks
-
-        // Also update the cache to ensure immediate availability
-        queryResultStorage.clear() // Force refresh of cached results
     }
-
+    
     /**
-     * Get custom artwork for a track
-     */
-    suspend fun getCustomArtwork(trackUri: String): String? {
-        return customArtworkStorage.load(trackUri)
-    }
-
-    /**
-     * Clear all caches (useful for debugging or when cache becomes corrupted)
-     */
-    suspend fun clearCache() {
-        queryResultStorage.clear()
-        customArtworkStorage.clear()
-        _tracks.value = emptyList()
-        _lastScanTime.value = null
-        Log.d(TAG, "All caches cleared")
-    }
-
-    /**
-     * Force a fresh scan (bypassing cache)
+     * Force refresh the entire library
      */
     suspend fun forceRefresh() {
-        Log.d(TAG, "Forcing fresh scan (clearing cache first)")
-        queryResultStorage.clear()
-        refreshTracks()
+        if (!isInitialized) return
+        
+        scope.launch {
+            performInitialScan()
+        }
     }
-
+    
     /**
-     * Prefetch artwork for a list of tracks to reduce loading delays
+     * Handle permission changes
      */
-    suspend fun prefetchArtwork(trackUris: List<String>) {
-        if (trackUris.isEmpty()) return
-
-        withContext(Dispatchers.IO) {
-            val urisToPrefetch = trackUris.take(20) // Limit to prevent overwhelming
-            urisToPrefetch.forEach { trackUri ->
-                // Check if we already have custom artwork
-                val customArt = customArtworkStorage.load(trackUri)
-                if (customArt != null) {
-                    // Custom artwork already available
-                    return@forEach
-                }
-
-                // Check if embedded artwork is cached
-                val cachedUri = com.musify.mu.util.OnDemandArtworkLoader.getCachedUri(trackUri)
-                if (cachedUri == null) {
-                    // Trigger background loading
-                    com.musify.mu.util.OnDemandArtworkLoader.loadArtwork(trackUri)
+    suspend fun onPermissionsChanged() {
+        permissionInteractor.updatePermissionState()
+        
+        if (permissionInteractor.canScanLocalFiles()) {
+            if (!isInitialized) {
+                initialize()
+            } else {
+                performInitialScan()
+                if (!isListening) {
+                    startListening()
                 }
             }
+        } else {
+            _scanState.value = ScanState.PermissionRequired
         }
     }
-
+    
     /**
-     * Clean up old artwork files that are no longer referenced
+     * Get artwork for a track
      */
-    suspend fun cleanupOldArtwork() = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "Starting artwork cleanup")
-
-            val currentArtworkFiles = _tracks.value
-                .mapNotNull { it.artUri }
-                .filter { it.startsWith("file://") }
-                .map { it.removePrefix("file://").substringAfterLast("/") }
-                .toSet()
-
-            val cacheFiles = cacheDir.listFiles { file ->
-                file.isFile && file.name.endsWith(".jpg")
-            } ?: emptyArray()
-
-            var deletedCount = 0
-            cacheFiles.forEach { file ->
-                if (file.name !in currentArtworkFiles) {
-                    if (file.delete()) {
-                        deletedCount++
-                    }
-                }
-            }
-
-            Log.d(TAG, "Artwork cleanup completed: deleted $deletedCount old files")
-
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to cleanup old artwork", e)
-        }
+    suspend fun getArtwork(trackUri: String): String? {
+        return artworkLoader.loadArtwork(trackUri)
     }
-
+    
     /**
-     * Merge scanned tracks with opened files
-     */
-    private suspend fun mergeWithOpenedFiles(
-        scannedTracks: List<Track>,
-        openedFiles: com.musify.mu.data.proto.OpenedAudioFiles
-    ): List<Track> = withContext(Dispatchers.IO) {
-        val mergedTracks = scannedTracks.toMutableList()
-
-        // Add any opened files that weren't found in the scan
-        for (fileUri in openedFiles.getAllFiles()) {
-            if (mergedTracks.none { it.mediaId == fileUri }) {
-                // Try to extract metadata from this file
-                try {
-                    val track = extractTrackFromUri(fileUri)
-                    if (track != null) {
-                        mergedTracks.add(track)
-                        Log.d(TAG, "Added opened file track: ${track.title}")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to extract metadata from opened file: $fileUri", e)
-                }
-            }
-        }
-
-        // Sort by date added (most recent first)
-        mergedTracks.sortedByDescending { it.dateAddedSec }
-    }
-
-    /**
-     * Extract track metadata from a URI (for opened files not in MediaStore)
-     */
-    private suspend fun extractTrackFromUri(uriString: String): Track? = withContext(Dispatchers.IO) {
-        try {
-            val uri = android.net.Uri.parse(uriString)
-            val (hasEmbeddedArt, metadata) = mediaStoreReader.extractMetadataAndArt(uri)
-
-            Track(
-                mediaId = uriString,
-                title = metadata.title ?: "Unknown",
-                artist = metadata.artist ?: "Unknown",
-                album = metadata.album ?: "Unknown",
-                durationMs = metadata.duration ?: 0,
-                artUri = if (hasEmbeddedArt) {
-                    mediaStoreReader.generateArtworkUri(uriString)
-                } else null,
-                albumId = null,
-                dateAddedSec = System.currentTimeMillis() / 1000,
-                genre = metadata.genre,
-                year = metadata.year,
-                track = metadata.trackNumber,
-                albumArtist = metadata.albumArtist
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to extract track from URI: $uriString", e)
-            null
-        }
-    }
-
-    /**
-     * Clean up resources
+     * Cleanup resources
      */
     fun cleanup() {
         mediaStoreReader.stopListening()
-        scope.launch {
-            cleanupOldArtwork()
-        }
+        isListening = false
         Log.d(TAG, "LocalFilesService cleaned up")
+    }
+}
+
+/**
+ * Represents the current scanning state
+ */
+sealed class ScanState {
+    object Idle : ScanState()
+    data class Scanning(val message: String) : ScanState()
+    data class Completed(val trackCount: Int) : ScanState()
+    data class Error(val message: String) : ScanState()
+    object PermissionRequired : ScanState()
+}
+
+/**
+ * Placeholder for artwork loading functionality
+ * This would be implemented similar to the old OnDemandArtworkLoader
+ * but following Spotify's ID3/APIC approach
+ */
+class LocalFileImageLoader private constructor(
+    private val context: Context
+) {
+    companion object {
+        @Volatile
+        private var INSTANCE: LocalFileImageLoader? = null
+        
+        fun getInstance(context: Context): LocalFileImageLoader {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: LocalFileImageLoader(context.applicationContext).also {
+                    INSTANCE = it
+                }
+            }
+        }
+    }
+    
+    suspend fun initialize() {
+        // Initialize artwork loading system
+    }
+    
+    suspend fun loadArtwork(trackUri: String): String? {
+        // TODO: Implement ID3/APIC artwork extraction
+        return null
     }
 }

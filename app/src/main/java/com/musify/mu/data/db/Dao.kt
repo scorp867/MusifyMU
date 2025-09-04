@@ -11,6 +11,9 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTracks(tracks: List<Track>)
 
+    @Query("DELETE FROM track")
+    suspend fun deleteAllTracks()
+
     @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
     suspend fun getAllTracks(): List<Track>
 

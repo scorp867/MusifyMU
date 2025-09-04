@@ -679,7 +679,7 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
         emptyList()
     }
 
-    fun getQueueSize(): Int = try { player.mediaItemCount } catch (_: Exception) { mainList.size + priorityList.size + userList.size }
+    fun getQueueSize(): Int = try { onPlayerThread { player.mediaItemCount } } catch (_: Exception) { mainList.size + priorityList.size + userList.size }
 
     fun getCurrentIndex(): Int = currentIndex
 
@@ -1258,6 +1258,10 @@ class QueueManager(private val player: ExoPlayer, private val queueState: QueueS
     /**
      * Get queue statistics for debugging and UI display
      */
+    // Public methods to get queue items for state saving
+    fun getPlayNextQueue(): List<String> = priorityList.map { it.id }
+    fun getUserQueue(): List<String> = userList.map { it.id }
+
     fun getQueueStatistics(): QueueStatistics {
         val combined = getCombinedQueue()
         return QueueStatistics(

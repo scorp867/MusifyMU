@@ -8,10 +8,11 @@ import coil.ImageLoaderFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import com.musify.mu.data.media.SimpleBackgroundDataManager
+import com.musify.mu.data.media.SpotifyStyleDataManager
 import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.util.CoilImageLoaderConfig
+import com.musify.mu.util.SpotifyStyleArtworkLoader
 import com.musify.mu.util.isLowMemoryDevice
 
 class MusifyApp : Application(), ImageLoaderFactory {
@@ -21,8 +22,8 @@ class MusifyApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize on-demand artwork loader with application context
-        com.musify.mu.util.OnDemandArtworkLoader.init(this)
+        // Initialize Spotify-style artwork loader with application context
+        SpotifyStyleArtworkLoader.initialize(this)
         
         // Clear Coil's memory cache on app start to prevent flickering from stale cache
         newImageLoader().memoryCache?.clear()
