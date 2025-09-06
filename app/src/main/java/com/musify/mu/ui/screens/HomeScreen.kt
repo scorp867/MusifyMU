@@ -739,18 +739,17 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         }
     }
 
-    // Prefetch embedded art for visible recent lists (row-based prefetch for the main column)
-    LaunchedEffect(listState, recentAdded, recentPlayed, favorites) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
-            .distinctUntilChanged()
-            .collectLatest { _ ->
-                val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
-                val uris = visibleTracks.map { it.mediaId }
-                if (uris.isNotEmpty()) {
-                    repo.dataManager.prefetchArtwork(uris)
-                }
-                // Simple artwork loading - no preloading needed
-            }
+    // Reduce scroll-triggered prefetch: perform a one-time light prefetch for Home lists
+    LaunchedEffect(recentAdded, recentPlayed, favorites) {
+        val uris = (recentAdded + recentPlayed + favorites)
+            .asSequence()
+            .map { it.mediaId }
+            .distinct()
+            .take(80)
+            .toList()
+        if (uris.isNotEmpty()) {
+            repo.dataManager.prefetchArtwork(uris)
+        }
     }
 
     // Song Details Editor Dialog

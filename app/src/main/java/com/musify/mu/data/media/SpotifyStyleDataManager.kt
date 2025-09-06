@@ -295,14 +295,35 @@ class SpotifyStyleDataManager private constructor(
      * Prefetch artwork for a list of track URIs
      */
     suspend fun prefetchArtwork(trackUris: List<String>) {
-        Log.d(TAG, "Prefetching artwork for ${trackUris.size} tracks")
+        if (trackUris.isEmpty()) return
+        // Avoid log spam and redundant work: filter to unknown URIs, cap batch size
+        val distinct = trackUris.distinct().take(100)
         val currentTracks = _tracks.value
-        trackUris.forEach { uri ->
+
+        // Seed negative cache for tracks known to have no embedded art
+        val knownNoArt = currentTracks.asSequence()
+            .filter { it.hasEmbeddedArtwork == false }
+            .map { it.mediaId }
+            .filter { distinct.contains(it) }
+            .toList()
+        if (knownNoArt.isNotEmpty()) {
+            SpotifyStyleArtworkLoader.seedNoArtwork(knownNoArt)
+        }
+
+        // Filter to URIs that we don't already know the result for
+        val toProcess = distinct.filter { uri -> !SpotifyStyleArtworkLoader.isArtworkKnown(uri) }
+        if (toProcess.isEmpty()) return
+
+        Log.v(TAG, "Prefetching artwork for ${toProcess.size} tracks")
+        toProcess.chunked(10).forEachIndexed { batchIndex, batch ->
             scope.launch {
-                // Get hasEmbeddedArtwork flag for optimization
-                val track = currentTracks.find { it.mediaId == uri }
-                val hasEmbeddedArt = track?.hasEmbeddedArtwork
-                SpotifyStyleArtworkLoader.loadArtwork(uri, hasEmbeddedArt)
+                if (batchIndex > 0) kotlinx.coroutines.delay(80L * batchIndex)
+                batch.forEach { uri ->
+                    scope.launch {
+                        val track = currentTracks.find { it.mediaId == uri }
+                        SpotifyStyleArtworkLoader.loadArtwork(uri, track?.hasEmbeddedArtwork)
+                    }
+                }
             }
         }
     }

@@ -126,22 +126,22 @@ object SpotifyStyleArtworkLoader {
     suspend fun loadArtwork(trackUri: String, hasEmbeddedArtwork: Boolean? = null): String? {
         if (trackUri.isBlank()) return null
 
-        // Optimization: If we know the track doesn't have embedded artwork, don't attempt extraction
-        if (hasEmbeddedArtwork == false) {
-            Log.v(TAG, "Skipping artwork extraction for $trackUri - no embedded artwork")
-            cacheNoArtwork(trackUri)
-            return null
-        }
-
-        // Check if we've already failed to extract artwork for this URI
+        // Short-circuit if we've already processed this URI
         if (failedExtractions.contains(trackUri)) {
             return null
         }
 
-        // Check memory cache first
+        // Check memory cache first (note: sentinel is handled as null by getCachedArtworkUri)
         val cached = getCachedArtworkUri(trackUri)
         if (cached != null) {
             return cached
+        }
+
+        // Optimization: If caller knows there's no embedded artwork, cache and skip (log once)
+        if (hasEmbeddedArtwork == false) {
+            Log.v(TAG, "Skipping artwork extraction for $trackUri - no embedded artwork")
+            cacheNoArtwork(trackUri)
+            return null
         }
 
         // Check content-based cache for duplicate files
@@ -431,6 +431,30 @@ object SpotifyStyleArtworkLoader {
                 }
             }
         }
+    }
+
+    /**
+     * Seed the negative cache for URIs known to have no embedded artwork.
+     * This avoids redundant extraction attempts and log spam.
+     */
+    fun seedNoArtwork(trackUris: Collection<String>) {
+        if (!::appContext.isInitialized) return
+        if (trackUris.isEmpty()) return
+        trackUris.forEach { uri ->
+            failedExtractions.add(uri)
+            // Mark in memory cache using sentinel without verbose logging
+            memoryCache.put(uri, CACHE_SENTINEL)
+            uriFlows[uri]?.value = null
+        }
+    }
+
+    /**
+     * Returns true if artwork is already cached in memory or known to be missing.
+     */
+    fun isArtworkKnown(trackUri: String): Boolean {
+        val inMemory = memoryCache.get(trackUri) != null
+        val knownMissing = failedExtractions.contains(trackUri)
+        return inMemory || knownMissing
     }
     
     /**

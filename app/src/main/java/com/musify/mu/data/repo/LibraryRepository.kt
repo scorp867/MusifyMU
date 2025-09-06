@@ -155,10 +155,22 @@ class LibraryRepository @Inject constructor(
         @Volatile private var INSTANCE: LibraryRepository? = null
         fun get(context: Context): LibraryRepository =
             INSTANCE ?: synchronized(this) {
-                val db = DatabaseProvider.get(context)
-                val dataManager = SpotifyStyleDataManager.getInstance(context, db)
-                INSTANCE ?: LibraryRepository(context.applicationContext, db, dataManager).also {
-                    INSTANCE = it
+                // Prefer Hilt-provided singleton if available
+                try {
+                    val entryPoint = dagger.hilt.android.EntryPoints.get(
+                        context.applicationContext,
+                        com.musify.mu.di.AppEntryPoints::class.java
+                    )
+                    val repo = entryPoint.libraryRepository()
+                    INSTANCE = repo
+                    repo
+                } catch (_: Throwable) {
+                    // Fallback to manual instantiation (e.g., in tests)
+                    val db = DatabaseProvider.get(context)
+                    val dataManager = SpotifyStyleDataManager.getInstance(context, db)
+                    INSTANCE ?: LibraryRepository(context.applicationContext, db, dataManager).also {
+                        INSTANCE = it
+                    }
                 }
             }
     }
