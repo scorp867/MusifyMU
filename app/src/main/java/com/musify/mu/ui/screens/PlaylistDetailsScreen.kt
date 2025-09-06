@@ -45,7 +45,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay: (List<Track>, Int) -> Unit) {
     val viewModel: LibraryViewModel = hiltViewModel()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var title by remember { mutableStateOf("Playlist") }
     val scope = rememberCoroutineScope()
@@ -54,10 +53,10 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     var allTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
     LaunchedEffect(playlistId) {
-        tracks = repo.playlistTracks(playlistId)
-        title = repo.playlists().find { it.id == playlistId }?.name ?: "Playlist"
+        tracks = viewModel.playlistTracks(playlistId)
+        title = viewModel.getPlaylists().find { it.id == playlistId }?.name ?: "Playlist"
         // Load all tracks so TrackPicker has something to show even if the library screen wasn't opened yet
-        allTracks = repo.getAllTracks()
+        allTracks = viewModel.getAllTracks()
     }
 
     // Separate visual state from actual data state for playlists
@@ -102,7 +101,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                         tracks = visualTracks.toList()
                         val mediaIds = tracks.map { it.mediaId }
                         // Persist order in DB
-                        repo.reorderPlaylist(playlistId, mediaIds)
+                        viewModel.reorderPlaylist(playlistId, mediaIds)
                     } catch (e: Exception) {
                         // Revert on failure
                         visualTracks = tracks
@@ -150,7 +149,7 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                         val end = max.coerceAtMost(visualTracks.lastIndex)
                         if (start <= end) {
                             val ids = visualTracks.subList(start, end + 1).map { it.mediaId }
-                            repo.dataManager.prefetchArtwork(ids)
+                            viewModel.prefetchArtwork(ids)
                         }
                     }
             }
@@ -253,9 +252,9 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                                                         // Perform actual removal in background
                                                         scope.launch {
                                                             try {
-                                                                repo.removeFromPlaylist(playlistId, track.mediaId)
+                                                                viewModel.removeFromPlaylist(playlistId, track.mediaId)
                                                                 // Reload actual tracks from database
-                                                                val newTracks = repo.playlistTracks(playlistId)
+                                                                val newTracks = viewModel.playlistTracks(playlistId)
                                                                 tracks = newTracks
                                                                 // Success - remove from pending operations
                                                                 removeOperations = removeOperations - track.mediaId
@@ -295,8 +294,8 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     if (showPicker) {
         TrackPickerSheet(allTracks = allTracks, onDismiss = { showPicker = false }) { ids ->
             scope.launch {
-                repo.addToPlaylist(playlistId, ids)
-                tracks = repo.playlistTracks(playlistId)
+                viewModel.addToPlaylist(playlistId, ids)
+                tracks = viewModel.playlistTracks(playlistId)
                 showPicker = false
             }
         }
