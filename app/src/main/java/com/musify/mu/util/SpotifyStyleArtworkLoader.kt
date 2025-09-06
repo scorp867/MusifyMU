@@ -126,11 +126,10 @@ object SpotifyStyleArtworkLoader {
     suspend fun loadArtwork(trackUri: String, hasEmbeddedArtwork: Boolean? = null): String? {
         if (trackUri.isBlank()) return null
 
-        // Optimization: If we know the track doesn't have embedded artwork, don't attempt extraction
-        if (hasEmbeddedArtwork == false) {
-            Log.v(TAG, "Skipping artwork extraction for $trackUri - no embedded artwork")
-            cacheNoArtwork(trackUri)
-            return null
+        // Check memory cache first (including negative cache)
+        val cached = memoryCache.get(trackUri)
+        if (cached != null) {
+            return if (cached == CACHE_SENTINEL) null else cached
         }
 
         // Check if we've already failed to extract artwork for this URI
@@ -138,10 +137,14 @@ object SpotifyStyleArtworkLoader {
             return null
         }
 
-        // Check memory cache first
-        val cached = getCachedArtworkUri(trackUri)
-        if (cached != null) {
-            return cached
+        // Optimization: If we know the track doesn't have embedded artwork, don't attempt extraction
+        if (hasEmbeddedArtwork == false) {
+            // Only log this once per track, not on every check
+            if (!failedExtractions.contains(trackUri)) {
+                Log.v(TAG, "Skipping artwork extraction for $trackUri - no embedded artwork")
+                cacheNoArtwork(trackUri)
+            }
+            return null
         }
 
         // Check content-based cache for duplicate files
@@ -388,7 +391,8 @@ object SpotifyStyleArtworkLoader {
         // Update flow with null
         uriFlows[trackUri]?.value = null
         
-        Log.v(TAG, "Cached no artwork for: $trackUri")
+        // Don't log this on every call - it creates too much noise
+        // Log.v(TAG, "Cached no artwork for: $trackUri")
     }
     
     /**
@@ -413,8 +417,18 @@ object SpotifyStyleArtworkLoader {
     fun prefetchArtwork(trackUris: List<String>) {
         if (!::appContext.isInitialized) return
 
+        // Filter out already cached URIs before processing
+        val uncachedUris = trackUris.distinct()
+            .filter { uri -> 
+                val cached = memoryCache.get(uri)
+                cached == null && !failedExtractions.contains(uri) && !loadingUris.contains(uri)
+            }
+            .take(50) // Reduce from 100 to 50 to prevent overwhelming the system
+
+        if (uncachedUris.isEmpty()) return
+
         // Process in optimized batches to avoid overwhelming the system
-        trackUris.distinct().take(100).chunked(10).forEachIndexed { batchIndex, batch ->
+        uncachedUris.chunked(5).forEachIndexed { batchIndex, batch ->
             scope.launch {
                 // Stagger batch processing to prevent resource contention
                 if (batchIndex > 0) {
@@ -422,7 +436,8 @@ object SpotifyStyleArtworkLoader {
                 }
 
                 batch.forEach { trackUri ->
-                    if (!failedExtractions.contains(trackUri) && getCachedArtworkUri(trackUri) == null) {
+                    // Double-check before launching (state might have changed)
+                    if (!failedExtractions.contains(trackUri) && !loadingUris.contains(trackUri)) {
                         // Launch each artwork load as a separate coroutine for better parallelism
                         scope.launch {
                             loadArtwork(trackUri)
