@@ -6,6 +6,8 @@ import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.data.localfiles.LocalFilesService
 import com.musify.mu.data.media.SpotifyStyleDataManager
 import com.musify.mu.data.repo.LibraryRepository
+import com.musify.mu.data.repo.PlaybackStateStore
+import com.musify.mu.data.repo.QueueStateStore
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,9 +35,11 @@ object AppModule {
     @Singleton
     fun provideSpotifyStyleDataManager(
         @ApplicationContext context: Context,
-        database: AppDatabase
+        database: AppDatabase,
+        localFilesService: LocalFilesService
     ): SpotifyStyleDataManager {
-        return SpotifyStyleDataManager.getInstance(context, database)
+        // Remove singleton pattern usage and create directly
+        return SpotifyStyleDataManager(context, database)
     }
 
     @Provides
@@ -46,5 +50,21 @@ object AppModule {
         dataManager: SpotifyStyleDataManager
     ): LibraryRepository {
         return LibraryRepository(context, database, dataManager)
+    }
+
+    @Provides
+    @Singleton
+    fun providePlaybackStateStore(
+        @ApplicationContext context: Context
+    ): PlaybackStateStore {
+        return PlaybackStateStore(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideQueueStateStore(
+        @ApplicationContext context: Context
+    ): QueueStateStore {
+        return QueueStateStore(context)
     }
 }
