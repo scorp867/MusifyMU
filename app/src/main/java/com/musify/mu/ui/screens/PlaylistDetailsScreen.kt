@@ -20,6 +20,8 @@ import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import androidx.compose.material.icons.Icons
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.musify.mu.ui.viewmodels.LibraryViewModel
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.DragHandle
@@ -41,6 +43,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay: (List<Track>, Int) -> Unit) {
+    val viewModel: LibraryViewModel = hiltViewModel()
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }

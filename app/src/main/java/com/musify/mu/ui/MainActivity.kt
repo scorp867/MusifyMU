@@ -51,7 +51,9 @@ import com.musify.mu.ui.helpers.rememberMediaController
 import com.musify.mu.ui.helpers.resolveTrack
 import com.musify.mu.ui.helpers.PlaybackRestorer
 import com.musify.mu.ui.helpers.MediaControllerListener
+import dagger.hilt.android.AndroidEntryPoint
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     
     // Store Media3 controller independently to avoid shadowing Activity.mediaController (framework)
@@ -211,8 +213,8 @@ private fun AppContent(
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
     val stateStore = remember { PlaybackStateStore(context) }
+    val repo = remember { LibraryRepository.get(context) } // Keep for now, will be replaced with ViewModel later
     val playbackRestorer = remember { PlaybackRestorer(context, repo, stateStore) }
 
     // Initialize library data on app launch (after permissions are granted)

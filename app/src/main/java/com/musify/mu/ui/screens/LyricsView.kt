@@ -15,14 +15,19 @@ import androidx.navigation.NavController
 import com.musify.mu.data.repo.LyricsStateStore
 import com.musify.mu.lyrics.LrcLine
 import com.musify.mu.playback.LocalMediaController
+import com.musify.mu.ui.viewmodels.LyricsViewModel
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.runtime.collectAsState
 
 @Composable
-fun LyricsView(navController: NavController) {
+fun LyricsView(
+    navController: NavController,
+    viewModel: LyricsViewModel = hiltViewModel()
+) {
     val context = LocalContext.current
-    val lyricsStateStore = remember { LyricsStateStore.getInstance(context) }
     
     // Observe lyrics state from the store
-    val lyricsState by lyricsStateStore.currentLyrics.collectAsState()
+    val lyricsState by viewModel.currentLyrics.collectAsState()
     
     val controller = LocalMediaController.current
     val currentMediaId: String? = controller?.currentMediaItem?.mediaId

@@ -90,8 +90,8 @@ class SpotifyStyleDataManager private constructor(
                 
                 _tracks.value = tracks
                 
-                // Prefetch artwork for visible tracks
-                if (tracks.isNotEmpty()) {
+                // Prefetch artwork for visible tracks only after scan completion
+                if (tracks.isNotEmpty() && scanState is ScanState.Completed) {
                     prefetchArtworkForTracks(tracks.take(20)) // Prefetch first 20 tracks
                 }
                 

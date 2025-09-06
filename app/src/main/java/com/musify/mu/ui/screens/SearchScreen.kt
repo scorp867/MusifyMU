@@ -27,10 +27,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.navigation.Screen
+import com.musify.mu.ui.viewmodels.SearchViewModel
 
 import kotlinx.coroutines.launch
 import com.musify.mu.playback.rememberQueueOperations
@@ -45,17 +47,17 @@ fun SearchScreen(
     navController: NavController,
     onPlay: (List<Track>, Int) -> Unit
 ) {
-    val context = LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
+    val viewModel: SearchViewModel = hiltViewModel()
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val lazyListState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
-    var query by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var isSearching by remember { mutableStateOf(false) }
-    var searchJob by remember { mutableStateOf<Job?>(null) }
+    val results by viewModel.searchResults.collectAsState()
+    val isSearching by viewModel.isSearching.collectAsState()
+    val searchHistory by viewModel.searchHistory.collectAsState()
+
+    var currentQuery by remember { mutableStateOf("") }
     var hasSearched by remember { mutableStateOf(false) }
 
     // Background gradient
@@ -68,30 +70,6 @@ fun SearchScreen(
     )
 
     // Debounced search function
-    fun performSearch(searchQuery: String) {
-        searchJob?.cancel()
-        if (searchQuery.isBlank()) {
-            results = emptyList()
-            isSearching = false
-            hasSearched = false
-            return
-        }
-
-        isSearching = true
-        searchJob = coroutineScope.launch {
-            delay(300) // Debounce delay
-            try {
-                val searchResults = repo.search(searchQuery.trim())
-                results = searchResults
-                hasSearched = true
-            } catch (e: Exception) {
-                android.util.Log.e("SearchScreen", "Search failed", e)
-                results = emptyList()
-            } finally {
-                isSearching = false
-            }
-        }
-    }
 
     // Auto-focus search field when screen opens
     LaunchedEffect(Unit) {
@@ -141,10 +119,10 @@ fun SearchScreen(
                 )
             ) {
                 OutlinedTextField(
-                    value = query,
+                    value = currentQuery,
                     onValueChange = { newQuery ->
-                        query = newQuery
-                        performSearch(newQuery)
+                        currentQuery = newQuery
+                        viewModel.search(newQuery)
                     },
                     label = { Text("Search songs, artists, albums...") },
                     placeholder = { Text("What do you want to listen to?") },
@@ -164,13 +142,12 @@ fun SearchScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                             }
-                            if (query.isNotEmpty()) {
+                            if (currentQuery.isNotEmpty()) {
                                 IconButton(
                                     onClick = {
-                                        query = ""
-                                        results = emptyList()
+                                        currentQuery = ""
+                                        viewModel.clearSearch()
                                         hasSearched = false
-                                        searchJob?.cancel()
                                     }
                                 ) {
                                     Icon(
@@ -220,7 +197,7 @@ fun SearchScreen(
                     }
                     "no_results" -> {
                         SearchEmptyState(
-                            query = query,
+                            query = currentQuery,
                             isNoResults = true
                         )
                     }

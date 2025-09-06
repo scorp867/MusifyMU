@@ -42,6 +42,9 @@ import kotlinx.coroutines.launch
 import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.musify.mu.ui.viewmodels.HomeViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.musify.mu.ui.components.SpotifyStyleArtwork
 import com.musify.mu.ui.components.TrackArtwork
 import com.musify.mu.ui.components.AlbumArtwork
@@ -77,14 +80,15 @@ val LocalScrollState = compositionLocalOf<LazyListState?> { null }
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
+    val viewModel: HomeViewModel = hiltViewModel()
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
     val controller = LocalMediaController.current
 
-    var recentPlayed by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var recentAdded by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var favorites by remember { mutableStateOf<List<Track>>(emptyList()) }
+    val recentPlayed by viewModel.recentlyPlayed.collectAsState()
+    val recentAdded by viewModel.recentlyAdded.collectAsState()
+    val favorites by viewModel.favorites.collectAsState()
     var customPlaylists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var refreshTrigger by remember { mutableStateOf(0) }
@@ -122,21 +126,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         scope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val recentPlayedData = repo.recentlyPlayed(12)
-                    val recentAddedData = repo.recentlyAdded(12)
-                    val favoritesData = repo.favorites()
                     val customPlaylistsData = repo.playlists()
 
                     withContext(Dispatchers.Main) {
-                        recentPlayed = recentPlayedData
-                        android.util.Log.d("HomeScreen", "Recently played loaded: ${recentPlayed.size} tracks")
-
-                        recentAdded = recentAddedData
-                        android.util.Log.d("HomeScreen", "Recently added loaded: ${recentAdded.size} tracks")
-
-                        favorites = favoritesData
-                        android.util.Log.d("HomeScreen", "Favorites loaded: ${favorites.size} tracks")
-
                         customPlaylists = customPlaylistsData
                         android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
                         // stop showing shimmer after first refresh
@@ -168,14 +160,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     MediaControllerListener(
         controller = controller,
         onMediaItemTransition = { _, _ ->
-            scope.launch {
-                withContext(Dispatchers.IO) {
-                    val updated = repo.recentlyPlayed(12)
-                    withContext(Dispatchers.Main) {
-                        recentPlayed = updated
-                    }
-                }
-            }
+                // Recent played is now handled by the viewModel
         }
     )
 
@@ -230,7 +215,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
             modifier = Modifier
                 .fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = endPadding, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            // Performance optimizations
+            userScrollEnabled = true
         ) {
             // Welcome header with animation (settings button removed per new design)
             item {

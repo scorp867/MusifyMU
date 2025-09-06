@@ -22,6 +22,8 @@ import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import org.burnoutcrew.reorderable.*
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.musify.mu.ui.viewmodels.LibraryViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
@@ -39,6 +41,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track>, Int) -> Unit) {
+    val viewModel: LibraryViewModel = hiltViewModel()
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var title by remember { mutableStateOf("") }

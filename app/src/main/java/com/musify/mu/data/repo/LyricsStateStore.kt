@@ -15,12 +15,18 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /**
  * A store that manages lyrics loading and caching
  * Ensures lyrics are loaded only once per track
  */
-class LyricsStateStore(private val context: Context) {
+@Singleton
+class LyricsStateStore @Inject constructor(
+    private val context: Context,
+    private val lyricsRepo: LyricsRepository
+) {
     
     data class LyricsState(
         val mediaId: String,
@@ -34,7 +40,6 @@ class LyricsStateStore(private val context: Context) {
     private val _currentLyrics = MutableStateFlow<LyricsState?>(null)
     val currentLyrics: StateFlow<LyricsState?> = _currentLyrics.asStateFlow()
     
-    private val lyricsRepo = LyricsRepository(context)
     private val lyricsCache = mutableMapOf<String, LyricsState>()
     
     /**
@@ -339,14 +344,4 @@ class LyricsStateStore(private val context: Context) {
         }
     }
     
-    companion object {
-        @Volatile
-        private var INSTANCE: LyricsStateStore? = null
-        
-        fun getInstance(context: Context): LyricsStateStore {
-            return INSTANCE ?: synchronized(this) {
-                INSTANCE ?: LyricsStateStore(context.applicationContext).also { INSTANCE = it }
-            }
-        }
-    }
 }

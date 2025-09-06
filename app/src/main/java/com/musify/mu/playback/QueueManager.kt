@@ -32,7 +32,10 @@ import java.util.UUID
  * - Advanced shuffle with anti-repetition algorithms
  * - Efficient queue operations with proper data structures
  */
-class QueueManager(private val player: ExoPlayer, private val queueState: QueueStateStore? = null) {
+class QueueManager(
+    private val player: ExoPlayer, 
+    private val queueState: QueueStateStore? = null
+) {
     private val logTag = "QueueManagerDBG"
 
     // Internal queues are maintained as MutableLists for reorderable operations

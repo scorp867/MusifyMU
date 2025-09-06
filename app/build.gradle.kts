@@ -2,8 +2,9 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.22"
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
+    id("com.google.dagger.hilt.android")
 }
 
 android {
@@ -122,6 +123,12 @@ dependencies {
     // WebRTC Android (Threema prebuilt) for access to org.webrtc audio processing
     implementation("ch.threema:webrtc-android:100.0.0")
 
+    // Hilt for Dependency Injection
+    implementation("com.google.dagger:hilt-android:2.48")
+    ksp("com.google.dagger:hilt-compiler:2.48")
+    implementation("androidx.hilt:hilt-navigation-compose:1.1.0")
+
+    implementation("com.squareup:javapoet:1.13.0")
 
 }
 

@@ -65,7 +65,9 @@ data class LyricsMap(
     val offsetMs: Long = 0
 )
 
-@Entity(tableName = "play_history", primaryKeys = ["mediaId", "playedAt"])
+@Entity(tableName = "play_history",
+    primaryKeys = ["mediaId", "playedAt"]
+)
 data class PlayHistory(
     val mediaId: String,
     val playedAt: Long = System.currentTimeMillis()

@@ -48,10 +48,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.platform.LocalDensity
-import com.musify.mu.data.repo.LyricsRepository
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.musify.mu.data.repo.LyricsStateStore
 import com.musify.mu.lyrics.LrcLine
 import com.musify.mu.lyrics.LrcParser
+import com.musify.mu.ui.viewmodels.LyricsViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,15 +67,14 @@ fun EnhancedLyricsView(
     mediaId: String?,
     currentPositionMs: Long,
     dominantColor: Color,
-    vibrantColor: Color
+    vibrantColor: Color,
+    viewModel: LyricsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val lyricsRepo = remember { LyricsRepository(context) }
-    val lyricsStateStore = remember { LyricsStateStore.getInstance(context) }
     val coroutineScope = rememberCoroutineScope()
 
     // Observe lyrics state from the store
-    val lyricsState by lyricsStateStore.currentLyrics.collectAsState()
+    val lyricsState by viewModel.currentLyrics.collectAsState()
 
     // Local state for UI interactions
     var isEditing by remember { mutableStateOf(false) }
@@ -155,8 +155,8 @@ fun EnhancedLyricsView(
         mediaId?.let { id ->
             coroutineScope.launch(Dispatchers.IO) {
                 // Clear cache and reload
-                lyricsStateStore.clearCache(id)
-                lyricsStateStore.loadLyrics(id)
+                viewModel.clearCache(id)
+                viewModel.loadLyrics(id)
             }
         }
     }
@@ -181,21 +181,23 @@ fun EnhancedLyricsView(
 
                         // Save to repository regardless of format
                         mediaId?.let { id ->
-                            if (isLrcFormat) {
-                                lyricsRepo.attachLrc(id, uri)
-                                // Update state store with LRC
-                                lyricsStateStore.updateLyrics(id, text, parsedLines, true)
-                            } else {
-                                // Treat as plain text if no timestamps found
-                                lyricsRepo.attachText(id, text)
-                                lyricsStateStore.updateLyrics(id, text, emptyList(), false)
+                            coroutineScope.launch {
+                                if (isLrcFormat) {
+                                    viewModel.attachLrc(id, uri)
+                                    // Update state store with LRC
+                                    viewModel.updateLyrics(id, text, parsedLines, true)
+                                } else {
+                                    // Treat as plain text if no timestamps found
+                                    viewModel.attachText(id, text)
+                                    viewModel.updateLyrics(id, text, emptyList(), false)
+                                }
                             }
                         }
                     }
                 } catch (e: Exception) {
                     // Show error
                     mediaId?.let { id ->
-                        lyricsStateStore.updateLyrics(
+                        viewModel.updateLyrics(
                             id,
                             "Error importing LRC file",
                             emptyList(),
@@ -257,9 +259,9 @@ fun EnhancedLyricsView(
                                             }
                                             val fileUri =
                                                 Uri.parse("file://${context.filesDir}/$fileName")
-                                            lyricsRepo.attachLrc(id, fileUri)
+                                            viewModel.attachLrc(id, fileUri)
                                             // Update state store
-                                            lyricsStateStore.updateLyrics(
+                                            viewModel.updateLyrics(
                                                 id,
                                                 editingText,
                                                 parsedLines,
@@ -267,9 +269,9 @@ fun EnhancedLyricsView(
                                             )
                                         } else {
                                             // Save as plain text
-                                            lyricsRepo.attachText(id, editingText)
+                                            viewModel.attachText(id, editingText)
                                             // Update state store
-                                            lyricsStateStore.updateLyrics(
+                                            viewModel.updateLyrics(
                                                 id,
                                                 editingText,
                                                 emptyList(),
@@ -400,9 +402,9 @@ fun EnhancedLyricsView(
                                         }
                                         val fileUri =
                                             Uri.parse("file://${context.filesDir}/$fileName")
-                                        lyricsRepo.attachLrc(id, fileUri)
+                                        viewModel.attachLrc(id, fileUri)
                                         // Update state store
-                                        lyricsStateStore.updateLyrics(
+                                        viewModel.updateLyrics(
                                             id,
                                             editingText,
                                             parsedLines,
@@ -410,9 +412,9 @@ fun EnhancedLyricsView(
                                         )
                                     } else {
                                         // Save as plain text
-                                        lyricsRepo.attachText(id, editingText)
+                                        viewModel.attachText(id, editingText)
                                         // Update state store
-                                        lyricsStateStore.updateLyrics(
+                                        viewModel.updateLyrics(
                                             id,
                                             editingText,
                                             emptyList(),
@@ -505,9 +507,9 @@ fun EnhancedLyricsView(
                                                 }
                                                 val fileUri =
                                                     Uri.parse("file://${context.filesDir}/$fileName")
-                                                lyricsRepo.attachLrc(id, fileUri)
+                                                viewModel.attachLrc(id, fileUri)
                                                 // Update state store
-                                                lyricsStateStore.updateLyrics(
+                                                viewModel.updateLyrics(
                                                     id,
                                                     updatedText,
                                                     updatedLrcLines,
@@ -763,7 +765,7 @@ fun EnhancedLyricsView(
                                 // Update store with empty plain text for this mediaId so UI reflects editing state
                                 mediaId?.let { id ->
                                     coroutineScope.launch {
-                                        lyricsStateStore.updateLyrics(id, "", emptyList(), false)
+                                        viewModel.updateLyrics(id, "", emptyList(), false)
                                     }
                                 }
                                 showImportDialog = false

@@ -20,28 +20,31 @@ object CoilImageLoaderConfig {
         return ImageLoader.Builder(context)
             .memoryCache {
                 MemoryCache.Builder(context)
-                    .maxSizePercent(0.20) // Increased to 20% for better performance
+                    .maxSizePercent(0.25) // Increased to 25% for better performance
                     .strongReferencesEnabled(true)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("coil_artwork_cache"))
-                    .maxSizeBytes(150 * 1024 * 1024) // Increased to 150MB
+                    .maxSizeBytes(200 * 1024 * 1024) // Increased to 200MB for larger cache
                     .build()
             }
             .okHttpClient {
                 OkHttpClient.Builder()
-                    .connectTimeout(8, TimeUnit.SECONDS) // Faster timeout
-                    .readTimeout(12, TimeUnit.SECONDS)
-                    .writeTimeout(12, TimeUnit.SECONDS)
+                    .connectTimeout(5, TimeUnit.SECONDS) // Faster timeout for better UX
+                    .readTimeout(10, TimeUnit.SECONDS)
+                    .writeTimeout(10, TimeUnit.SECONDS)
                     .retryOnConnectionFailure(true)
                     .build()
             }
             .respectCacheHeaders(false)
-            .allowHardware(false) // Disable hardware acceleration to prevent artwork flickering
+            .allowHardware(true) // Disable hardware acceleration to prevent artwork flickering
             .crossfade(false)
             .networkObserverEnabled(false) // Disable network observer for local files
+            // Performance optimizations
+            .bitmapConfig(android.graphics.Bitmap.Config.RGB_565) // Use RGB_565 for better memory efficiency
+            .allowRgb565(true)
             .apply {
                 if (android.util.Log.isLoggable("CoilImageLoader", android.util.Log.DEBUG)) {
                     logger(DebugLogger())

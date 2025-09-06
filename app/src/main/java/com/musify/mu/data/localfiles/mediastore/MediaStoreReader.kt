@@ -85,7 +85,7 @@ class MediaStoreReader private constructor(
     /**
      * Run the main MediaStore query with Spotify's exact filtering logic
      */
-    suspend fun runQuery(openedAudioFiles: OpenedAudioFiles? = null): QueryResult = withContext(Dispatchers.IO) {
+    suspend fun runQuery(openedAudioFiles: OpenedAudioFiles? = null, skipArtworkExtraction: Boolean = true): QueryResult = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Starting Spotify-style MediaStore query")
             
@@ -99,12 +99,12 @@ class MediaStoreReader private constructor(
             val localFiles = mutableListOf<LocalFile>()
             
             // Query MediaStore
-            val mediaStoreFiles = queryMediaStore(selection, selectionArgs, sortOrder)
+            val mediaStoreFiles = queryMediaStore(selection, selectionArgs, sortOrder, skipArtworkExtraction)
             localFiles.addAll(mediaStoreFiles)
             
             // Merge in opened audio files (permanent + temporary URIs)
             openedAudioFiles?.let { openedFiles ->
-                val openedLocalFiles = processOpenedAudioFiles(openedFiles)
+                val openedLocalFiles = processOpenedAudioFiles(openedFiles, skipArtworkExtraction)
                 localFiles.addAll(openedLocalFiles)
             }
             
@@ -126,7 +126,8 @@ class MediaStoreReader private constructor(
     private suspend fun queryMediaStore(
         selection: String,
         selectionArgs: Array<String>?,
-        sortOrder: String
+        sortOrder: String,
+        skipArtworkExtraction: Boolean = true
     ): List<LocalFile> = withContext(Dispatchers.IO) {
         val localFiles = mutableListOf<LocalFile>()
         
@@ -143,7 +144,7 @@ class MediaStoreReader private constructor(
             
             while (cursor.moveToNext()) {
                 try {
-                    val localFile = processMediaStoreRow(cursor, columnIndices)
+                    val localFile = processMediaStoreRow(cursor, columnIndices, skipArtworkExtraction)
                     localFile?.let { localFiles.add(it) }
                 } catch (e: Exception) {
                     Log.w(TAG, "Error processing MediaStore row at position ${cursor.position}", e)
@@ -154,7 +155,7 @@ class MediaStoreReader private constructor(
         localFiles
     }
     
-    private fun processMediaStoreRow(cursor: Cursor, indices: ColumnIndices): LocalFile? {
+    private fun processMediaStoreRow(cursor: Cursor, indices: ColumnIndices, skipArtworkExtraction: Boolean = true): LocalFile? {
         try {
             val id = cursor.getLong(indices.id)
             val contentUri = ContentUris.withAppendedId(
@@ -168,8 +169,13 @@ class MediaStoreReader private constructor(
                 return null
             }
             
-            // Check for embedded artwork during initial scan - Spotify's approach
-            val hasEmbeddedArt = checkForEmbeddedArtwork(contentUri)
+            // Skip artwork checking during initial scan for better performance
+            val hasEmbeddedArt = if (skipArtworkExtraction) {
+                Log.v(TAG, "Skipping artwork check for fast scan: $contentUri")
+                false
+            } else {
+                checkForEmbeddedArtwork(contentUri)
+            }
             val finalMetadata = metadata.copy(hasEmbeddedArtwork = hasEmbeddedArt)
             
             return LocalFile(
@@ -212,7 +218,7 @@ class MediaStoreReader private constructor(
         )
     }
     
-    private suspend fun processOpenedAudioFiles(openedFiles: OpenedAudioFiles): List<LocalFile> = withContext(Dispatchers.IO) {
+    private suspend fun processOpenedAudioFiles(openedFiles: OpenedAudioFiles, skipArtworkExtraction: Boolean = false): List<LocalFile> = withContext(Dispatchers.IO) {
         val localFiles = mutableListOf<LocalFile>()
         
         // Process both permanent and temporary files
@@ -220,7 +226,7 @@ class MediaStoreReader private constructor(
         
         allOpenedUris.forEach { uri ->
             try {
-                val metadata = extractMetadataFromUri(uri)
+                val metadata = extractMetadataFromUri(uri, skipArtworkExtraction)
                 if ((metadata.duration ?: 0) >= options.durationMin) {
                     localFiles.add(
                         LocalFile(
@@ -242,21 +248,27 @@ class MediaStoreReader private constructor(
      * Extract metadata from URI using MediaMetadataRetriever
      * This is where album art detection happens (getEmbeddedPicture())
      */
-    private suspend fun extractMetadataFromUri(uri: Uri): LocalFileMetadata = withContext(Dispatchers.IO) {
+    private suspend fun extractMetadataFromUri(uri: Uri, skipArtworkExtraction: Boolean = false): LocalFileMetadata = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         return@withContext try {
             retriever.setDataSource(context, uri)
             
             // Check for embedded artwork (ID3/APIC) - Spotify's approach
-            val hasEmbeddedArt = try {
-                val artworkBytes = retriever.embeddedPicture
-                artworkBytes != null && artworkBytes.isNotEmpty()
-            } catch (e: Exception) {
-                Log.v(TAG, "No embedded artwork found for $uri: ${e.message}")
+            val hasEmbeddedArt = if (skipArtworkExtraction) {
+                // Skip artwork extraction for fast initial scan
+                Log.v(TAG, "Skipping artwork extraction for fast scan: $uri")
                 false
+            } else {
+                try {
+                    val artworkBytes = retriever.embeddedPicture
+                    artworkBytes != null && artworkBytes.isNotEmpty()
+                } catch (e: Exception) {
+                    Log.v(TAG, "No embedded artwork found for $uri: ${e.message}")
+                    false
+                }
             }
-            
-            if (hasEmbeddedArt) {
+
+            if (hasEmbeddedArt && !skipArtworkExtraction) {
                 Log.d(TAG, "Found embedded artwork for: $uri")
             }
             

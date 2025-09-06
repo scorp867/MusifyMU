@@ -32,7 +32,12 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
+import javax.inject.Inject
+import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import com.musify.mu.R
 import com.musify.mu.ui.MainActivity
 import com.musify.mu.data.repo.LibraryRepository
@@ -70,7 +75,39 @@ fun Track.toMediaItem(): MediaItem {
 }
 
 @UnstableApi
+@AndroidEntryPoint
 class PlayerService : MediaLibraryService() {
+
+    @Inject
+    lateinit var exoPlayer: ExoPlayer
+
+    @Inject
+    lateinit var libraryRepository: LibraryRepository
+
+    @Inject
+    lateinit var playbackStateStore: PlaybackStateStore
+
+    @Inject
+    lateinit var queueStateStore: QueueStateStore
+
+    @Inject
+    lateinit var lyricsStateStore: LyricsStateStore
+
+    @Inject
+    lateinit var audioFocusManager: AudioFocusManager
+
+    @Inject
+    lateinit var queueManager: QueueManager
+
+    private val lifecycleObserver = object : DefaultLifecycleObserver {
+        override fun onStop(owner: LifecycleOwner) {
+            // App is going to background - save state
+            if (componentsInitialized && instance === this@PlayerService) {
+                android.util.Log.d("PlayerService", "App going to background - saving state")
+                saveCompletePlaybackState()
+            }
+        }
+    }
 
 	companion object {
 		// Singleton instance to prevent multiple service instances
@@ -115,15 +152,10 @@ class PlayerService : MediaLibraryService() {
 		}
 	}
 
-	private var _player: ExoPlayer? = null
-	private val player: ExoPlayer get() = _player ?: throw IllegalStateException("Player not initialized")
-	private var _queue: QueueManager? = null
-	private val queue: QueueManager get() = _queue ?: throw IllegalStateException("Queue not initialized")
-	private lateinit var repo: LibraryRepository
-	private lateinit var stateStore: PlaybackStateStore
-	private lateinit var queueStateStore: QueueStateStore
-	private lateinit var lyricsStateStore: LyricsStateStore
-	private lateinit var audioFocusManager: AudioFocusManager
+	private val player: ExoPlayer get() = exoPlayer
+	private val queue: QueueManager get() = queueManager
+	private val repo: LibraryRepository get() = libraryRepository
+	private val stateStore: PlaybackStateStore get() = playbackStateStore
 	private var componentsInitialized = false
 	private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 	private var lastLoadedLyricsId: String? = null
@@ -145,27 +177,15 @@ class PlayerService : MediaLibraryService() {
 		}
 
 		// If we already have a properly initialized player and queue with matching session, return
-		if (_player != null && _queue != null && _player === mediaLibrarySession?.player) {
+		if (exoPlayer === mediaLibrarySession?.player) {
 			android.util.Log.d("PlayerService", "Player already initialized and session matches")
 			return
 		}
 
 		android.util.Log.d("PlayerService", "Initializing player and queue")
 
-		// Only create a new player if we don't have one
-		val newPlayer = if (_player == null) {
-			runBlocking { createOptimizedExoPlayer(this@PlayerService) }.also { _player = it }
-		} else {
-			_player!! // Use existing player
-		}
-
-		// Only create QueueManager if we don't have one, to prevent duplicates
-		if (_queue == null) {
-			_queue = QueueManager(newPlayer, queueStateStore)
-			QueueManagerProvider.setInstance(queue)
-
-			// Attach listeners only once when QueueManager is first created
-			newPlayer.addListener(object : Player.Listener {
+		// Attach listeners to the injected player
+		exoPlayer.addListener(object : Player.Listener {
 				override fun onIsPlayingChanged(isPlaying: Boolean) {
 					if (hasValidMedia) {
 						// Media3 will manage the notification lifecycle via provider
@@ -269,15 +289,11 @@ class PlayerService : MediaLibraryService() {
 					}
 				}
 			})
-			android.util.Log.d("PlayerService", "Created new QueueManager")
-		} else {
-			android.util.Log.d("PlayerService", "Reusing existing QueueManager")
-		}
 
-		// Update the session with the current player only if it's different
-		if (mediaLibrarySession?.player !== newPlayer) {
+		// Update the session with the injected player
+		if (mediaLibrarySession?.player !== exoPlayer) {
 			android.util.Log.d("PlayerService", "Updating media session player")
-		mediaLibrarySession?.player = newPlayer
+			mediaLibrarySession?.player = exoPlayer
 		}
 	}
 
@@ -308,30 +324,22 @@ class PlayerService : MediaLibraryService() {
 		}
 
 		try {
-			_player?.release()
-			_player = null
+			exoPlayer.release()
 		} catch (e: Exception) {
 			android.util.Log.d("PlayerService", "Player was already released")
 		}
 
-		_queue = null
+		// Remove lifecycle observer
+		try {
+			ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver)
+		} catch (e: Exception) {
+			android.util.Log.d("PlayerService", "Failed to remove lifecycle observer", e)
+		}
+
 		serviceScope.cancel()
 
-
-		// Clear state on destroy - only if components were initialized
-		if (componentsInitialized) {
-			try {
-				serviceScope.launch(Dispatchers.IO) {
-					try {
-						stateStore.clear()
-					} catch (e: Exception) {
-						android.util.Log.w("PlayerService", "Failed to clear state on destroy", e)
-					}
-				}
-			} catch (e: Exception) {
-				android.util.Log.d("PlayerService", "State store was not initialized")
-			}
-		}
+		// NOTE: DO NOT clear state on destroy - only clear when explicitly requested by user
+		// State should persist across service restarts and system memory pressure
 
 		// Release Media3 cache
 		try {
@@ -365,16 +373,11 @@ class PlayerService : MediaLibraryService() {
 		// This ensures no notifications appear until actual playback begins
 
 		try {
-			repo = LibraryRepository.get(this)
-			stateStore = PlaybackStateStore(this)
-			queueStateStore = QueueStateStore(this)
-			lyricsStateStore = LyricsStateStore.getInstance(this)
-			// Lazy: player and queue are created on first playback request
-
+			// All dependencies are now injected via Hilt
 			// Player listeners are attached in ensurePlayerInitialized() when needed
 
-			// Initialize audio focus manager
-			audioFocusManager = AudioFocusManager(this) { focusChange ->
+			// Initialize audio focus manager callback
+			audioFocusManager.setCallback { focusChange ->
 				when (focusChange) {
 					android.media.AudioManager.AUDIOFOCUS_GAIN -> {
 						player.volume = 1.0f
@@ -397,6 +400,10 @@ class PlayerService : MediaLibraryService() {
 			}
 			audioFocusManagerInitialized = true
 			componentsInitialized = true
+
+			// Register lifecycle observer for background state saving
+			ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
+
 		} catch (e: Exception) {
 			android.util.Log.e("PlayerService", "Error during service initialization", e)
 			stopSelf()
@@ -468,12 +475,12 @@ class PlayerService : MediaLibraryService() {
 						val startPositionMs: Long
 
 						// Check if there is an existing queue with player access on main thread
-						if (_player != null && _player!!.mediaItemCount > 0) {
-							for (i in 0 until _player!!.mediaItemCount) {
-								currentItems.add(_player!!.getMediaItemAt(i))
+						if (exoPlayer.mediaItemCount > 0) {
+							for (i in 0 until exoPlayer.mediaItemCount) {
+								currentItems.add(exoPlayer.getMediaItemAt(i))
 							}
-							startIndex = _player!!.currentMediaItemIndex.coerceAtLeast(0)
-							startPositionMs = _player!!.currentPosition
+							startIndex = exoPlayer.currentMediaItemIndex.coerceAtLeast(0)
+							startPositionMs = exoPlayer.currentPosition
 							future.set(MediaSession.MediaItemsWithStartPosition(currentItems, startIndex, startPositionMs))
 							android.util.Log.d("PlayerService", "Resuming with existing queue: ${currentItems.size} items")
 							return@launch
@@ -507,7 +514,7 @@ class PlayerService : MediaLibraryService() {
 										serviceScope.launch {
 											kotlinx.coroutines.delay(1000) // Wait for queue to be ready
 											try {
-												if (queueState != null && _queue != null) {
+												if (queueState != null && queue != null) {
 													// Restore play-next items
 													if (queueState.playNextItems.isNotEmpty()) {
 														val playNextTracks = queueState.playNextItems.mapNotNull { id ->
@@ -517,7 +524,7 @@ class PlayerService : MediaLibraryService() {
 														if (playNextTracks.isNotEmpty()) {
 															runBlocking(Dispatchers.Main) {
 																try {
-																	_queue?.playNext(playNextTracks.map { it.toMediaItem() }.toMutableList())
+																	queue?.playNext(playNextTracks.map { it.toMediaItem() }.toMutableList())
 																	android.util.Log.d("PlayerService", "Restored ${playNextTracks.size} play-next items")
 																} catch (e: Exception) {
 																	android.util.Log.w("PlayerService", "Failed to restore play-next items", e)
@@ -535,7 +542,7 @@ class PlayerService : MediaLibraryService() {
 														if (userQueueTracks.isNotEmpty()) {
 															runBlocking(Dispatchers.Main) {
 																try {
-																	_queue?.addToUserQueue(userQueueTracks.map { it.toMediaItem() }.toMutableList())
+																	queue?.addToUserQueue(userQueueTracks.map { it.toMediaItem() }.toMutableList())
 																	android.util.Log.d("PlayerService", "Restored ${userQueueTracks.size} user-queue items")
 																} catch (e: Exception) {
 																	android.util.Log.w("PlayerService", "Failed to restore user-queue items", e)
@@ -673,11 +680,8 @@ class PlayerService : MediaLibraryService() {
 			}
 		}
 
-		// Create optimized player immediately instead of using placeholder
-		val initialPlayer = runBlocking { createOptimizedExoPlayer(this@PlayerService) }
-		_player = initialPlayer
-
-		mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(this, initialPlayer, callback)
+		// Use manually initialized player
+		mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(this, exoPlayer, callback)
 			.setId("MusifyMU_Session")
 			.setShowPlayButtonIfPlaybackIsSuppressed(false)
 			.setSessionActivity(createPlayerActivityIntent())
@@ -725,7 +729,7 @@ class PlayerService : MediaLibraryService() {
 				mediaButtonStopJob = serviceScope.launch(Dispatchers.Main) {
 					kotlinx.coroutines.delay(3000) // Wait 3 seconds for initialization
 					try {
-						if (_player != null && _player!!.mediaItemCount == 0 && !_player!!.isPlaying) {
+						if (exoPlayer.mediaItemCount == 0 && !exoPlayer.isPlaying) {
 							android.util.Log.d("PlayerService", "No media available after media button press - stopping service")
 							stopSelf()
 						}
@@ -754,12 +758,12 @@ class PlayerService : MediaLibraryService() {
 
 		try {
 			// Immediately pause playback and stop any foreground notifications
-			_player?.pause()
+			exoPlayer.pause()
 			stopForeground(STOP_FOREGROUND_REMOVE)
 			android.util.Log.d("PlayerService", "Playback stopped and foreground removed")
 
 			// Save comprehensive queue and playback state
-			if (componentsInitialized && _queue != null && _player != null) {
+			if (componentsInitialized) {
 				saveCompletePlaybackState()
 			}
 
@@ -789,8 +793,8 @@ class PlayerService : MediaLibraryService() {
 
 	private fun saveCompletePlaybackState() {
 		try {
-			val currentPlayer = _player!!
-			val currentQueue = _queue!!
+			val currentPlayer = exoPlayer
+			val currentQueue = queueManager
 
 			// Get all queue items including main queue, play next, and user queue
 			val allQueueItems = mutableListOf<String>()

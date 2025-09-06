@@ -26,6 +26,8 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.AlbumArtwork
 import com.musify.mu.ui.components.TrackArtwork
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.musify.mu.ui.viewmodels.LibraryViewModel
 import com.musify.mu.ui.components.EnhancedSwipeableItem
 import com.musify.mu.ui.components.CompactTrackRow
 import com.musify.mu.playback.LocalPlaybackMediaId
@@ -37,6 +39,7 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (List<Track>, Int) -> Unit) {
+    val viewModel: LibraryViewModel = hiltViewModel()
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }

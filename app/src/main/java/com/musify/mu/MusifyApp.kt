@@ -5,6 +5,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -15,6 +16,7 @@ import com.musify.mu.util.CoilImageLoaderConfig
 import com.musify.mu.util.SpotifyStyleArtworkLoader
 import com.musify.mu.util.isLowMemoryDevice
 
+@HiltAndroidApp
 class MusifyApp : Application(), ImageLoaderFactory {
     // Global application scope for background coroutines
     val applicationScope = CoroutineScope(SupervisorJob())
@@ -34,7 +36,7 @@ class MusifyApp : Application(), ImageLoaderFactory {
 
         android.util.Log.d("MusifyApp", "Simple Musify app initialized successfully")
 
-        // Track app foreground/background state
+        // Track app foreground/background state and save state when going to background
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
             override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
                 AppForegroundState.isInForeground = true

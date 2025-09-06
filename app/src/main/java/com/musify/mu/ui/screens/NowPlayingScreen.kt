@@ -44,6 +44,8 @@ import kotlinx.coroutines.withContext
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.components.AnimatedBackground
 import com.musify.mu.ui.components.EnhancedLyricsView
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.musify.mu.ui.viewmodels.LibraryViewModel
 import com.musify.mu.ui.components.LargeArtwork
 import com.musify.mu.ui.components.CompactArtwork
 import com.musify.mu.ui.navigation.Screen
@@ -87,6 +89,7 @@ import kotlinx.coroutines.withContext
 )
 @Composable
 fun NowPlayingScreen(navController: NavController) {
+    val viewModel: LibraryViewModel = hiltViewModel()
     val controller = LocalMediaController.current
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
@@ -309,7 +312,7 @@ fun NowPlayingScreen(navController: NavController) {
             // Load like state with IO dispatcher
             currentTrack?.let { t ->
                 withContext(Dispatchers.IO) {
-                    val liked = repo.isLiked(t.mediaId)
+                    val liked = viewModel.isLiked(t.mediaId)
                     withContext(Dispatchers.Main) {
                         isLiked = liked
                     }
@@ -325,7 +328,7 @@ fun NowPlayingScreen(navController: NavController) {
                     // refresh like state on track change
                     coroutineScope.launch {
                         withContext(Dispatchers.IO) {
-                            val liked = repo.isLiked(t.mediaId)
+                            val liked = viewModel.isLiked(t.mediaId)
                             withContext(Dispatchers.Main) {
                                 isLiked = liked
                             }
@@ -921,7 +924,7 @@ fun NowPlayingScreen(navController: NavController) {
                             IconButton(onClick = {
                                 val t = currentTrack ?: return@IconButton
                                 coroutineScope.launch {
-                                    if (isLiked) repo.unlike(t.mediaId) else repo.like(t.mediaId)
+                                    if (isLiked) viewModel.unlike(t.mediaId) else viewModel.like(t.mediaId)
                                     isLiked = !isLiked
                                 }
                             }) {
@@ -1005,7 +1008,7 @@ fun NowPlayingScreen(navController: NavController) {
             ) {
                 // Sticky header with now playing and play/pause, plus a single context header above it
                 val currentQueueItem = controller?.currentMediaItem
-                val t = currentQueueItem?.let { repo.getTrackByMediaId(it.mediaId) ?: it.toTrack() }
+                val t = currentQueueItem?.let { viewModel.getTrackByMediaId(it.mediaId) ?: it.toTrack() }
                 val qState by rememberQueueState()
                 val queueChanges by com.musify.mu.playback.rememberQueueChanges()
                 val queueItems = remember(qState.currentIndex, qState.playNextCount, qState.totalItems, controller?.currentMediaItem?.mediaId) {
@@ -1090,7 +1093,7 @@ fun NowPlayingScreen(navController: NavController) {
                                 val e = end.coerceAtMost(visualQueueItems.lastIndex)
                                 if (s <= e) {
                                     val ids = visualQueueItems.subList(s, e + 1).map { it.mediaItem.mediaId }
-                                    repo.dataManager.prefetchArtwork(ids)
+                                    viewModel.prefetchArtwork(ids)
                                 }
                             }
                         }
@@ -1172,7 +1175,7 @@ fun NowPlayingScreen(navController: NavController) {
                     // Removed section headers; one unified header + sticky now playing row remain
                     // Use visual queue items with stable keys
                     itemsIndexed(visualQueueItems, key = { _, item -> "queue_${item.uid}" }) { idx, qi ->
-                        val vt = repo.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
+                        val vt = viewModel.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
                         ReorderableItem(reorderState, key = "queue_${qi.uid}") { isDragging ->
                             com.musify.mu.ui.components.EnhancedSwipeableItem(
                                 onSwipeRight = {

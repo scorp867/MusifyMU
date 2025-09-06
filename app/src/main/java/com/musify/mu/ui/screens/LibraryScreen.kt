@@ -29,10 +29,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.data.media.LoadingState
 import com.musify.mu.util.PermissionManager
+import com.musify.mu.ui.viewmodels.LibraryViewModel
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.util.toMediaItem
 import com.musify.mu.ui.components.AlphabeticalScrollBar
@@ -72,14 +74,13 @@ fun LibraryScreen(
     onPlay: (List<Track>, Int) -> Unit,
     hasPermissions: Boolean = true
 ) {
-    val context = LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
+    val viewModel: LibraryViewModel = hiltViewModel()
     val haptic = LocalHapticFeedback.current
     val controller = LocalMediaController.current
     val queueOperationsManager = rememberQueueOperations()
 
-    var allTracks by remember { mutableStateOf<List<Track>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    val allTracks by viewModel.allTracks.collectAsState()
+    val isLoading by remember { derivedStateOf { viewModel.loadingState.value is LoadingState.Idle || viewModel.loadingState.value is LoadingState.Loading } }
     var searchQuery by remember { mutableStateOf("") }
     var visualSearchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
@@ -89,11 +90,7 @@ fun LibraryScreen(
     var isProcessingQueueOps by remember { mutableStateOf(false) }
 
     // Debounced search with visual-only immediate feedback
-    val tracks = if (searchQuery.isBlank()) allTracks else allTracks.filter { t ->
-        t.title.contains(searchQuery, ignoreCase = true) ||
-                t.artist.contains(searchQuery, ignoreCase = true) ||
-                t.album.contains(searchQuery, ignoreCase = true)
-    }
+    val tracks = if (searchQuery.isBlank()) allTracks else viewModel.searchTracks(searchQuery)
 
     // Visual tracks for immediate search feedback
     val visualTracks = if (visualSearchQuery.isBlank()) allTracks else allTracks.filter { t ->
@@ -125,7 +122,7 @@ fun LibraryScreen(
             coroutineScope.launch {
                 try {
                     android.util.Log.d("LibraryScreen", "Ensuring data manager is initialized...")
-                    repo.dataManager.ensureInitialized()
+                    viewModel.ensureDataManagerInitialized()
                     android.util.Log.d("LibraryScreen", "Data manager ready")
                 } catch (e: Exception) {
                     android.util.Log.e("LibraryScreen", "Failed to initialize data manager", e)
@@ -133,15 +130,13 @@ fun LibraryScreen(
             }
 
             // Observe the cached tracks flow for real-time updates (this is the single source of truth)
-            repo.dataManager.tracks.collect { tracks ->
+            viewModel.dataManagerTracks.collect { tracks ->
                 android.util.Log.d("LibraryScreen", "Cache updated: ${tracks.size} tracks")
-                allTracks = tracks
-                isLoading = false
+                // allTracks and isLoading are already managed by ViewModel state
             }
         } else {
             android.util.Log.d("LibraryScreen", "No permissions granted, clearing tracks")
-            isLoading = false
-            allTracks = emptyList()
+            // allTracks and isLoading are already managed by ViewModel state
         }
     }
 
@@ -209,7 +204,9 @@ fun LibraryScreen(
                         contentPadding = PaddingValues(start = 16.dp, end = 44.dp, top = 8.dp, bottom = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         // Performance optimizations for smooth scrolling
-                        flingBehavior = rememberSnapFlingBehavior(listState)
+                        flingBehavior = rememberSnapFlingBehavior(listState),
+                        // Additional performance optimizations
+                        userScrollEnabled = true
                     ) {
                         itemsIndexed(visualTracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
 
@@ -308,7 +305,7 @@ fun LibraryScreen(
                 val end = (visibleItems.maxOf { it.index } + 5).coerceAtMost(visualTracks.lastIndex)
                 if (start <= end && visualTracks.isNotEmpty()) {
                     val prefetchUris: List<String> = visualTracks.subList(start, end + 1).map { it.mediaId }
-                    repo.dataManager.prefetchArtwork(prefetchUris)
+                    viewModel.prefetchArtwork(prefetchUris)
                 }
             }
     }

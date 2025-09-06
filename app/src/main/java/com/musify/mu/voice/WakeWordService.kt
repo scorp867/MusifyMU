@@ -638,6 +638,13 @@ class WakeWordService : Service() {
         android.util.Log.w("WakeWordService", "Falling back to direct AudioRecord capture")
         showToast("Using fallback audio capture")
 
+        // Check for RECORD_AUDIO permission before proceeding
+        if (!hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            android.util.Log.w("WakeWordService", "Cannot use fallback AudioRecord: RECORD_AUDIO permission not granted")
+            showToast("Microphone permission required for voice commands")
+            return
+        }
+
         // Clean up WebRTC
         try { webRtcCapture?.stop() } catch (_: Exception) {}
         webRtcCapture = null

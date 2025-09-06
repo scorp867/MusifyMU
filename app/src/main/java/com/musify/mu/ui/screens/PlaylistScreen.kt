@@ -14,9 +14,12 @@ import androidx.navigation.NavController
 import com.musify.mu.data.db.entities.Playlist
 import com.musify.mu.data.repo.LibraryRepository
 import kotlinx.coroutines.launch
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.musify.mu.ui.viewmodels.LibraryViewModel
 
 @Composable
 fun PlaylistScreen(navController: NavController) {
+    val viewModel: LibraryViewModel = hiltViewModel()
     val context = LocalContext.current
     val repo = remember { LibraryRepository.get(context) }
     var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Main local files service that coordinates MediaStore scanning, permission handling,
@@ -123,16 +124,19 @@ class LocalFilesService private constructor(
     private suspend fun performInitialScan() {
         try {
             _scanState.value = ScanState.Scanning("Scanning local music library...")
-            
+
             Log.d(TAG, "Starting initial scan...")
-            val queryResult = mediaStoreReader.runQuery(openedAudioFiles)
-            
+            val queryResult = withContext(Dispatchers.IO) {
+                // Skip artwork extraction for fast initial scan
+                mediaStoreReader.runQuery(openedAudioFiles, skipArtworkExtraction = true)
+            }
+
             // Process results into UI models
             updateInMemoryIndex(queryResult)
-            
+
             _scanState.value = ScanState.Completed(queryResult.totalCount)
             Log.d(TAG, "Initial scan completed with ${queryResult.totalCount} files")
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error during initial scan", e)
             _scanState.value = ScanState.Error("Scan failed: ${e.message}")
@@ -162,12 +166,15 @@ class LocalFilesService private constructor(
     private suspend fun performIncrementalScan(handle: String) = mutex.withLock {
         try {
             Log.d(TAG, "Performing incremental scan due to change: $handle")
-            
-            val queryResult = mediaStoreReader.runQuery(openedAudioFiles)
+
+            val queryResult = withContext(Dispatchers.IO) {
+                // Skip artwork extraction for faster incremental scans
+                mediaStoreReader.runQuery(openedAudioFiles, skipArtworkExtraction = true)
+            }
             updateInMemoryIndex(queryResult)
-            
+
             Log.d(TAG, "Incremental scan completed with ${queryResult.totalCount} files")
-            
+
         } catch (e: Exception) {
             Log.e(TAG, "Error during incremental scan", e)
         }
@@ -177,7 +184,7 @@ class LocalFilesService private constructor(
      * Update the in-memory index with new query results
      * This replaces Spotify's native delegate functionality
      */
-    private suspend fun updateInMemoryIndex(queryResult: QueryResult) {
+    private suspend fun updateInMemoryIndex(queryResult: QueryResult) = withContext(Dispatchers.Default) {
         val tracks = queryResult.localFiles.map { localFile ->
             LocalTrack(
                 id = localFile.path,

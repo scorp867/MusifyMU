@@ -15,16 +15,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class LibraryRepository private constructor(private val context: Context, private val db: AppDatabase) {
+@Singleton
+class LibraryRepository @Inject constructor(
+    private val context: Context,
+    private val db: AppDatabase,
+    private val injectedDataManager: SpotifyStyleDataManager
+) {
 
-    // Create data manager instance - this will be initialized by the app
-    val dataManager by lazy {
-        SpotifyStyleDataManager.getInstance(context, db)
-    }
+    // Data manager is now injected via constructor
 
     // Background loading progress
-    val loadingState: StateFlow<LoadingState> = dataManager.loadingState
+    val loadingState: StateFlow<LoadingState> = injectedDataManager.loadingState
+    
+    // Expose dataManager for external access
+    val dataManager: SpotifyStyleDataManager = injectedDataManager
 
     // Fast access to all tracks from cache - fallback to database if cache is empty
     fun getAllTracks(): List<Track> {
@@ -149,7 +156,8 @@ class LibraryRepository private constructor(private val context: Context, privat
         fun get(context: Context): LibraryRepository =
             INSTANCE ?: synchronized(this) {
                 val db = DatabaseProvider.get(context)
-                INSTANCE ?: LibraryRepository(context.applicationContext, db).also {
+                val dataManager = SpotifyStyleDataManager.getInstance(context, db)
+                INSTANCE ?: LibraryRepository(context.applicationContext, db, dataManager).also {
                     INSTANCE = it
                 }
             }
