@@ -214,7 +214,7 @@ private fun AppContent(
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val stateStore = remember { PlaybackStateStore(context) }
-    val repo = remember { LibraryRepository.get(context) } // Keep for now, will be replaced with ViewModel later
+    val repo = remember { LibraryRepository.get(context) } // Keep for now; UI uses ViewModels elsewhere
     val playbackRestorer = remember { PlaybackRestorer(context, repo, stateStore) }
 
     // Initialize library data on app launch (after permissions are granted)

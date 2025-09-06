@@ -92,7 +92,6 @@ fun NowPlayingScreen(navController: NavController) {
     val viewModel: LibraryViewModel = hiltViewModel()
     val controller = LocalMediaController.current
     val context = LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
 
     // Get or create VoiceControlManager singleton
     val voiceControlManager = remember {
@@ -296,7 +295,7 @@ fun NowPlayingScreen(navController: NavController) {
 
         // Initial state setup
         coroutineScope.launch {
-            currentTrack = resolveTrack(controller.currentMediaItem, repo)
+            currentTrack = resolveTrack(controller.currentMediaItem, com.musify.mu.data.repo.LibraryRepository.get(context))
             isPlaying = controller.isPlaying
             shuffleOn = controller.shuffleModeEnabled
             repeatMode = when(controller.repeatMode) {
@@ -323,7 +322,7 @@ fun NowPlayingScreen(navController: NavController) {
         // Add listener for real-time updates
         val listener = object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
-                currentTrack = resolveTrack(mediaItem, repo)
+                currentTrack = resolveTrack(mediaItem, com.musify.mu.data.repo.LibraryRepository.get(context))
                 currentTrack?.let { t ->
                     // refresh like state on track change
                     coroutineScope.launch {

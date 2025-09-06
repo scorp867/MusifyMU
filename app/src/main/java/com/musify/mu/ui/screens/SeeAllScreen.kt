@@ -42,8 +42,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 @Composable
 fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track>, Int) -> Unit) {
     val viewModel: LibraryViewModel = hiltViewModel()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
     var title by remember { mutableStateOf("") }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     val scope = rememberCoroutineScope()
@@ -63,9 +61,9 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
     // Load tracks asynchronously
     LaunchedEffect(type) {
         tracks = when (type) {
-            "recently_played" -> repo.recentlyPlayed(200)
-            "recently_added" -> repo.recentlyAdded(200)
-            "favorites" -> repo.favorites()
+            "recently_played" -> viewModel.recentlyPlayed(200)
+            "recently_added" -> viewModel.recentlyAdded(200)
+            "favorites" -> viewModel.favorites()
             else -> emptyList()
         }
     }
@@ -85,7 +83,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                 val order = tracks.mapIndexed { index, track ->
                     com.musify.mu.data.db.entities.FavoritesOrder(track.mediaId, index)
                 }
-                repo.saveFavoritesOrder(order)
+                viewModel.saveFavoritesOrder(order)
             }
         }
     ) else null
@@ -116,7 +114,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                             val end = max.coerceAtMost(tracks.lastIndex)
                             if (start <= end) {
                                 val ids = tracks.subList(start, end + 1).map { it.mediaId }
-                                repo.dataManager.prefetchArtwork(ids)
+                                viewModel.prefetchArtwork(ids)
                             }
                         }
                 }
@@ -206,7 +204,7 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                         val end = max.coerceAtMost(tracks.lastIndex)
                         if (start <= end) {
                             val ids = tracks.subList(start, end + 1).map { it.mediaId }
-                            repo.dataManager.prefetchArtwork(ids)
+                            viewModel.prefetchArtwork(ids)
                         }
                     }
             }
