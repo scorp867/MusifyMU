@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.debounce
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import com.musify.mu.playback.LocalMediaController
@@ -299,6 +300,7 @@ fun LibraryScreen(
     LaunchedEffect(listState, visualTracks) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.toList() }
             .distinctUntilChanged()
+            .debounce(300) // Debounce to avoid rapid-fire calls during scrolling
             .collectLatest { visibleItems: List<LazyListItemInfo> ->
                 if (visibleItems.isEmpty()) return@collectLatest
                 val start = (visibleItems.minOf { it.index } - 5).coerceAtLeast(0)

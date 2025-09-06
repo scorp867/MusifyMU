@@ -13,6 +13,8 @@ import com.musify.mu.util.SpotifyStyleArtworkLoader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,6 +46,8 @@ class SpotifyStyleDataManager private constructor(
     
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val localFilesService = LocalFilesService.getInstance(context)
+    private var prefetchJob: Job? = null
+    private val prefetchedSets = mutableSetOf<String>()
     
     // Exposed state flows for UI
     private val _tracks = MutableStateFlow<List<Track>>(emptyList())
@@ -292,17 +296,46 @@ class SpotifyStyleDataManager private constructor(
     }
     
     /**
-     * Prefetch artwork for a list of track URIs
+     * Prefetch artwork for a list of track URIs with debouncing
      */
     suspend fun prefetchArtwork(trackUris: List<String>) {
-        Log.d(TAG, "Prefetching artwork for ${trackUris.size} tracks")
-        val currentTracks = _tracks.value
-        trackUris.forEach { uri ->
-            scope.launch {
-                // Get hasEmbeddedArtwork flag for optimization
-                val track = currentTracks.find { it.mediaId == uri }
-                val hasEmbeddedArt = track?.hasEmbeddedArtwork
-                SpotifyStyleArtworkLoader.loadArtwork(uri, hasEmbeddedArt)
+        if (trackUris.isEmpty()) return
+        
+        // Cancel previous prefetch job to debounce rapid calls
+        prefetchJob?.cancel()
+        
+        prefetchJob = scope.launch {
+            // Small delay to debounce rapid scroll events
+            delay(100)
+            
+            // Filter out already prefetched URIs
+            val newUris = trackUris.filter { uri ->
+                !prefetchedSets.contains(uri)
+            }
+            
+            if (newUris.isEmpty()) return@launch
+            
+            // Only log when actually prefetching new tracks  
+            if (newUris.size > 0) {
+                Log.d(TAG, "Prefetching artwork for ${newUris.size} new tracks")
+            }
+            
+            // Mark as prefetched to avoid duplicate work
+            prefetchedSets.addAll(newUris)
+            
+            // Clean up old entries if set gets too large
+            if (prefetchedSets.size > 1000) {
+                prefetchedSets.clear()
+            }
+            
+            val currentTracks = _tracks.value
+            newUris.forEach { uri ->
+                launch {
+                    // Get hasEmbeddedArtwork flag for optimization
+                    val track = currentTracks.find { it.mediaId == uri }
+                    val hasEmbeddedArt = track?.hasEmbeddedArtwork
+                    SpotifyStyleArtworkLoader.loadArtwork(uri, hasEmbeddedArt)
+                }
             }
         }
     }
