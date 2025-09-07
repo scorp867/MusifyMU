@@ -108,7 +108,7 @@ class EnhancedLibraryRepository @Inject constructor(
             }
             
             // Fallback to database
-            database.dao().getTrackByMediaId(mediaId)?.also {
+            database.dao().getTrack(mediaId)?.also {
                 cacheManager.cacheTrack(it)
             }
             

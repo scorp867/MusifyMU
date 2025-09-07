@@ -47,7 +47,7 @@ class MediaScanningService @Inject constructor(
     suspend fun initialize() = scanMutex.withLock {
         if (isInitialized) {
             Log.d(TAG, "MediaScanningService already initialized")
-            return
+            return@withLock
         }
         
         try {
@@ -129,7 +129,7 @@ class MediaScanningService @Inject constructor(
      * Extract artwork for specific tracks (centralized artwork extraction)
      */
     suspend fun extractArtworkForTracks(trackUris: List<String>) = scanMutex.withLock {
-        if (trackUris.isEmpty()) return
+        if (trackUris.isEmpty()) return@withLock
         
         try {
             Log.d(TAG, "Extracting artwork for ${trackUris.size} tracks")

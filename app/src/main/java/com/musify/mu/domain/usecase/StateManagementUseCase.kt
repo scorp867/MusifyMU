@@ -134,7 +134,7 @@ class StateManagementUseCase @Inject constructor(
      */
     suspend fun clearAppState() {
         dataStore.updateData { preferences ->
-            preferences.toMutablePreferences().clear()
+            preferences.toMutablePreferences().apply { clear() }
         }
         playbackUseCase.clearPlaybackState()
         cacheManager.clearAllCaches()

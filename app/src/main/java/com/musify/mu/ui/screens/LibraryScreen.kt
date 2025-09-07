@@ -89,8 +89,9 @@ fun LibraryScreen(
     var queueOperationsState by remember { mutableStateOf<Map<String, QueueOperation>>(emptyMap()) }
     var isProcessingQueueOps by remember { mutableStateOf(false) }
 
-    // Debounced search with visual-only immediate feedback
-    val tracks = if (searchQuery.isBlank()) allTracks else viewModel.searchTracks(searchQuery)
+    // Get search results from ViewModel state
+    val uiState by viewModel.uiState.collectAsState()
+    val tracks = if (searchQuery.isBlank()) allTracks else uiState.searchResults
 
     // Visual tracks for immediate search feedback
     val visualTracks = if (visualSearchQuery.isBlank()) allTracks else allTracks.filter { t ->
@@ -105,6 +106,9 @@ fun LibraryScreen(
             isSearching = true
             kotlinx.coroutines.delay(300) // 300ms debounce
             searchQuery = visualSearchQuery
+            if (visualSearchQuery.isNotBlank()) {
+                viewModel.searchTracks(visualSearchQuery)
+            }
             isSearching = false
         }
     }

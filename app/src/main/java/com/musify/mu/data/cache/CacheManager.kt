@@ -94,8 +94,8 @@ class CacheManager @Inject constructor(
         return CacheStats(
             trackCacheSize = trackCache.size(),
             trackCacheMaxSize = trackCache.maxSize(),
-            trackCacheHitCount = trackCache.hitCount(),
-            trackCacheMissCount = trackCache.missCount(),
+            trackCacheHitCount = 0L, // Android LruCache doesn't have hitCount()
+            trackCacheMissCount = 0L, // Android LruCache doesn't have missCount()
             artworkCacheSize = artworkCache.size(),
             artworkCacheMaxSize = artworkCache.maxSize(),
             searchCacheSize = searchCache.size(),

@@ -39,7 +39,7 @@ class ArtworkUseCase @Inject constructor(
     /**
      * Get cache statistics
      */
-    fun getArtworkCacheStats(): SpotifyStyleArtworkLoader.CacheStats {
+    fun getArtworkCacheStats(): com.musify.mu.util.ArtworkCacheStats {
         return SpotifyStyleArtworkLoader.getCacheStats()
     }
     
