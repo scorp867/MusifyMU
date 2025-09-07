@@ -47,7 +47,8 @@ fun TrackPickerSheet(
                                 trackUri = t.mediaId,
                                 contentDescription = t.title,
                                 modifier = Modifier.size(40.dp),
-                                shape = RoundedCornerShape(6.dp)
+                                shape = RoundedCornerShape(6.dp),
+                                targetSizePx = 128
                             )
                         },
                         trailingContent = {

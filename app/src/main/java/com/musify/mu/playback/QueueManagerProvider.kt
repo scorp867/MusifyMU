@@ -21,6 +21,10 @@ object QueueManagerProvider {
     }
 
     fun getInstance(): QueueManager? = instance
+
+    fun clearInstance() {
+        instance = null
+    }
 }
 
 /**

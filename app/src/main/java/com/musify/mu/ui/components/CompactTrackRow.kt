@@ -102,7 +102,8 @@ fun CompactTrackRow(
                     trackUri = mediaUri,
                     contentDescription = contentDescription,
                     modifier = Modifier.fillMaxSize(),
-                    shape = RoundedCornerShape(8.dp)
+                    shape = RoundedCornerShape(8.dp),
+                    targetSizePx = 128
                 )
                 if (showIndicator) {
                     PlayingIndicator(

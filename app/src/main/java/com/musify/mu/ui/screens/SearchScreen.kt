@@ -33,6 +33,7 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.ui.navigation.Screen
 import com.musify.mu.ui.viewmodels.SearchViewModel
+import com.musify.mu.ui.components.TrackArtwork
 
 import kotlinx.coroutines.launch
 import com.musify.mu.playback.rememberQueueOperations
@@ -290,13 +291,15 @@ private fun SearchResultItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Album artwork
-            AsyncImage(
-                model = track.artUri,
+            TrackArtwork(
+                trackUri = track.mediaId,
                 contentDescription = track.title,
                 modifier = Modifier
                     .size(56.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f))
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)),
+                shape = RoundedCornerShape(8.dp),
+                targetSizePx = 128
             )
 
             Spacer(modifier = Modifier.width(12.dp))

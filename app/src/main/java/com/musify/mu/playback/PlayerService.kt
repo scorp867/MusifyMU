@@ -163,6 +163,7 @@ class PlayerService : MediaLibraryService() {
 	private var mediaButtonStopJob: kotlinx.coroutines.Job? = null
 
 	private var mediaLibrarySession: MediaLibraryService.MediaLibrarySession? = null
+	private val releaseOnce = java.util.concurrent.atomic.AtomicBoolean(false)
 	private var hasValidMedia = false
 	private var currentMediaIdCache: String? = null
 	private var audioFocusManagerInitialized = false
@@ -318,18 +319,7 @@ class PlayerService : MediaLibraryService() {
 		// Note: Media3 notification provider is managed automatically
 		// We don't need to manually clear it - Media3 handles this
 
-		try {
-			mediaLibrarySession?.release()
-			mediaLibrarySession = null
-		} catch (e: Exception) {
-			android.util.Log.d("PlayerService", "Media session was already released")
-		}
-
-		try {
-			exoPlayer.release()
-		} catch (e: Exception) {
-			android.util.Log.d("PlayerService", "Player was already released")
-		}
+		releasePlayerAndSessionIfNeeded("onDestroy")
 
 		// Remove lifecycle observer
 		try {
@@ -354,6 +344,11 @@ class PlayerService : MediaLibraryService() {
 	// Reset queue initialization state for fresh start
 	queueInitialized = false
 	lastQueueItemCount = 0
+	
+	// Clear QueueManager provider instance to avoid holding onto old player
+	try {
+		QueueManagerProvider.clearInstance()
+	} catch (_: Exception) { }
 	
 	// Clear singleton instance
 	instance = null
@@ -807,22 +802,8 @@ class PlayerService : MediaLibraryService() {
 				saveCompletePlaybackState()
 			}
 
-		// Release media session immediately
-		try {
-			mediaLibrarySession?.release()
-			mediaLibrarySession = null
-			android.util.Log.d("PlayerService", "Media session released")
-		} catch (e: Exception) {
-			android.util.Log.w("PlayerService", "Error releasing media session", e)
-		}
 
-		// CRITICAL FIX: Release ExoPlayer immediately to prevent dead thread access
-		try {
-			exoPlayer.release()
-			android.util.Log.d("PlayerService", "ExoPlayer released in onTaskRemoved")
-		} catch (e: Exception) {
-			android.util.Log.w("PlayerService", "Error releasing ExoPlayer in onTaskRemoved", e)
-		}
+		releasePlayerAndSessionIfNeeded("onTaskRemoved")
 
 		// Stop service completely - no notifications should remain
 		stopSelf()
@@ -841,6 +822,28 @@ class PlayerService : MediaLibraryService() {
 		// Reset queue initialization state for fresh start
 		queueInitialized = false
 		lastQueueItemCount = 0
+	}
+
+	private fun releasePlayerAndSessionIfNeeded(reason: String) {
+		if (!releaseOnce.compareAndSet(false, true)) {
+			android.util.Log.d("PlayerService", "Release already performed, skipping ($reason)")
+			return
+		}
+		// Release media session first
+		try {
+			mediaLibrarySession?.release()
+			mediaLibrarySession = null
+			android.util.Log.d("PlayerService", "Media session released ($reason)")
+		} catch (e: Exception) {
+			android.util.Log.w("PlayerService", "Error releasing media session ($reason)", e)
+		}
+		// Then release player
+		try {
+			exoPlayer.release()
+			android.util.Log.d("PlayerService", "ExoPlayer released ($reason)")
+		} catch (e: Exception) {
+			android.util.Log.w("PlayerService", "Error releasing ExoPlayer ($reason)", e)
+		}
 	}
 
 	private fun saveCompletePlaybackState() {

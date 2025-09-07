@@ -33,7 +33,8 @@ fun SpotifyStyleArtwork(
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
     shape: Shape? = null,
-    enableOnDemand: Boolean = true
+    enableOnDemand: Boolean = true,
+    targetSizePx: Int? = null
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
@@ -69,17 +70,27 @@ fun SpotifyStyleArtwork(
         if (artworkUri != null) {
             // Display the extracted artwork
             AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(artworkUri)
-                    .dispatcher(Dispatchers.IO)
-                    .memoryCachePolicy(CachePolicy.ENABLED)
-                    .diskCachePolicy(CachePolicy.ENABLED)
-                    .memoryCacheKey(artworkUri)
-                    .diskCacheKey(artworkUri)
-                    .crossfade(false) // Disable to prevent flickering
-                    .size(Size.ORIGINAL)
-                    .scale(Scale.FILL)
-                    .build(),
+                model = run {
+                    val builder = ImageRequest.Builder(context)
+                        .data(artworkUri)
+                        .dispatcher(Dispatchers.IO)
+                        .memoryCachePolicy(CachePolicy.ENABLED)
+                        .diskCachePolicy(CachePolicy.ENABLED)
+                        .crossfade(false) // Disable to prevent flickering
+                        .scale(Scale.FILL)
+
+                    if (targetSizePx != null) {
+                        builder.size(targetSizePx)
+                        builder.memoryCacheKey("${artworkUri}#${targetSizePx}")
+                        builder.diskCacheKey("${artworkUri}#${targetSizePx}")
+                    } else {
+                        builder.size(Size.ORIGINAL)
+                        builder.memoryCacheKey("${artworkUri}#orig")
+                        builder.diskCacheKey("${artworkUri}#orig")
+                    }
+
+                    builder.build()
+                },
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
@@ -124,14 +135,16 @@ fun TrackArtwork(
     trackUri: String?,
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
-    shape: Shape? = null
+    shape: Shape? = null,
+    targetSizePx: Int? = null
 ) {
     SpotifyStyleArtwork(
         trackUri = trackUri,
         contentDescription = contentDescription ?: "Track artwork",
         modifier = modifier,
         shape = shape,
-        enableOnDemand = true
+        enableOnDemand = true,
+        targetSizePx = targetSizePx
     )
 }
 
@@ -149,7 +162,8 @@ fun CompactArtwork(
         contentDescription = "Now playing artwork",
         modifier = modifier,
         shape = shape,
-        enableOnDemand = true
+        enableOnDemand = true,
+        targetSizePx = 128
     )
 }
 
@@ -167,7 +181,8 @@ fun LargeArtwork(
         contentDescription = "Full-screen artwork",
         modifier = modifier,
         shape = shape,
-        enableOnDemand = true
+        enableOnDemand = true,
+        targetSizePx = null
     )
 }
 

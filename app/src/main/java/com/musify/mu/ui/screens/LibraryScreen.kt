@@ -461,7 +461,8 @@ private fun TrackItem(
                         trackUri = track.mediaId,
                         contentDescription = track.title,
                         modifier = Modifier.fillMaxSize(),
-                        shape = RoundedCornerShape(8.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        targetSizePx = 128
                     )
                 }
 
