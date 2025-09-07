@@ -924,7 +924,7 @@ fun NowPlayingScreen(navController: NavController) {
                             IconButton(onClick = {
                                 val t = currentTrack ?: return@IconButton
                                 coroutineScope.launch {
-                                    if (isLiked) viewModel.unlike(t.mediaId) else viewModel.like(t.mediaId)
+                                    if (isLiked) viewModel.unlikeTrack(t.mediaId) else viewModel.likeTrack(t.mediaId)
                                     isLiked = !isLiked
                                 }
                             }) {
