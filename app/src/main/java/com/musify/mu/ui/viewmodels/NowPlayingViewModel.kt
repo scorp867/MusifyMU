@@ -8,6 +8,7 @@ import androidx.media3.session.MediaController
 import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import com.musify.mu.lyrics.LrcParser
+import com.musify.mu.lyrics.LyricLine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -54,8 +55,8 @@ class NowPlayingViewModel @Inject constructor(
     val isLiked: StateFlow<Boolean> = _isLiked.asStateFlow()
     
     // Lyrics
-    private val _lyrics = MutableStateFlow<List<LrcParser.LyricLine>?>(null)
-    val lyrics: StateFlow<List<LrcParser.LyricLine>?> = _lyrics.asStateFlow()
+    private val _lyrics = MutableStateFlow<List<LyricLine>?>(null)
+    val lyrics: StateFlow<List<LyricLine>?> = _lyrics.asStateFlow()
     
     private val _currentLyricIndex = MutableStateFlow(-1)
     val currentLyricIndex: StateFlow<Int> = _currentLyricIndex.asStateFlow()

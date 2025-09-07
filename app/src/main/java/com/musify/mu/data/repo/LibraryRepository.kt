@@ -151,6 +151,18 @@ class LibraryRepository @Inject constructor(
     // Artwork cache update from playback metadata
     suspend fun updateTrackArt(mediaId: String, artUri: String?) = db.dao().updateTrackArt(mediaId, artUri)
 
+    companion object {
+        @Volatile private var INSTANCE: LibraryRepository? = null
+        fun get(context: Context): LibraryRepository =
+            INSTANCE ?: synchronized(this) {
+                val db = DatabaseProvider.get(context)
+                val dataManager = SpotifyStyleDataManager.getInstance(context, db)
+                INSTANCE ?: LibraryRepository(context.applicationContext, db, dataManager).also {
+                    INSTANCE = it
+                }
+            }
+    }
+
     // ----- Search history (persisted locally, independent of play history) -----
     private val searchPrefs by lazy { context.getSharedPreferences("search_history_prefs", Context.MODE_PRIVATE) }
     private val searchKey = "history"

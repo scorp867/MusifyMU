@@ -25,12 +25,21 @@ import kotlinx.coroutines.launch
  * 
  * This replaces SimpleBackgroundDataManager with the new Spotify-based approach.
  */
-class SpotifyStyleDataManager constructor(
+class SpotifyStyleDataManager private constructor(
     private val context: Context,
     private val db: AppDatabase
 ) {
     companion object {
         private const val TAG = "SpotifyDataManager"
+        
+        @Volatile
+        private var INSTANCE: SpotifyStyleDataManager? = null
+        
+        fun getInstance(context: Context, db: AppDatabase): SpotifyStyleDataManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: SpotifyStyleDataManager(context, db).also { INSTANCE = it }
+            }
+        }
     }
     
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)

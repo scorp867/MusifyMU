@@ -35,11 +35,9 @@ object AppModule {
     @Singleton
     fun provideSpotifyStyleDataManager(
         @ApplicationContext context: Context,
-        database: AppDatabase,
-        localFilesService: LocalFilesService
+        database: AppDatabase
     ): SpotifyStyleDataManager {
-        // Remove singleton pattern usage and create directly
-        return SpotifyStyleDataManager(context, database)
+        return SpotifyStyleDataManager.getInstance(context, database)
     }
 
     @Provides

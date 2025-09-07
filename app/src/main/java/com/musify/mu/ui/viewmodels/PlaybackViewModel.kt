@@ -114,7 +114,8 @@ class PlaybackViewModel @Inject constructor(
                         artist = mediaItem.mediaMetadata.artist?.toString() ?: "Unknown",
                         album = mediaItem.mediaMetadata.albumTitle?.toString() ?: "",
                         durationMs = 0L,
-                        artUri = mediaItem.mediaMetadata.artworkUri?.toString()
+                        artUri = mediaItem.mediaMetadata.artworkUri?.toString(),
+                        albumId = null
                     )
                 }
                 
