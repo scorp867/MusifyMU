@@ -42,13 +42,6 @@ fun SpotifyStyleArtwork(
     // Observe artwork from Spotify-style loader
     val artworkUri by SpotifyStyleArtworkLoader.getArtworkFlow(trackUri ?: "").collectAsState()
     
-    // Trigger artwork loading on first composition
-    LaunchedEffect(trackUri) {
-        if (enableOnDemand && !trackUri.isNullOrBlank()) {
-            SpotifyStyleArtworkLoader.loadArtwork(trackUri)
-        }
-    }
-    
     Box(
         modifier = finalModifier,
         contentAlignment = Alignment.Center
@@ -81,12 +74,6 @@ fun SpotifyStyleArtwork(
 
                     if (targetSizePx != null) {
                         builder.size(targetSizePx)
-                        builder.memoryCacheKey("${artworkUri}#${targetSizePx}")
-                        builder.diskCacheKey("${artworkUri}#${targetSizePx}")
-                    } else {
-                        builder.size(Size.ORIGINAL)
-                        builder.memoryCacheKey("${artworkUri}#orig")
-                        builder.diskCacheKey("${artworkUri}#orig")
                     }
 
                     builder.build()

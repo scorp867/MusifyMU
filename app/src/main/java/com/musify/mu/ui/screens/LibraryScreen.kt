@@ -208,7 +208,11 @@ fun LibraryScreen(
                         // Additional performance optimizations
                         userScrollEnabled = true
                     ) {
-                        itemsIndexed(visualTracks, key = { index, track -> "library_${index}_${track.mediaId}" }) { index, track ->
+                        itemsIndexed(
+                            items = visualTracks,
+                            key = { index, track -> "library_${index}_${track.mediaId}" },
+                            contentType = { _, _ -> "library_track" }
+                        ) { index, track ->
 
                             // Improved track item without aggressive swipe gestures
                             TrackItem(

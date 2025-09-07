@@ -127,7 +127,11 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(displayTracks.size, key = { idx -> "seeall_${type}_${displayTracks[idx].mediaId}" }) { idx ->
+                    items(
+                        count = displayTracks.size,
+                        key = { idx -> "seeall_${type}_${displayTracks[idx].mediaId}" },
+                        contentType = { _ -> "seeall_fav_track" }
+                    ) { idx ->
                         val track = displayTracks[idx]
                         ReorderableItem(reorderState, key = "seeall_${type}_${track.mediaId}") { isDragging ->
                             Card(
@@ -217,7 +221,11 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(displayTracks.size) { idx ->
+                items(
+                    count = displayTracks.size,
+                    key = { idx -> "seeall_${type}_${displayTracks[idx].mediaId}" },
+                    contentType = { _ -> "seeall_track" }
+                ) { idx ->
                     val track = displayTracks[idx]
                     com.musify.mu.ui.components.EnhancedSwipeableItem(
                         onSwipeRight = {

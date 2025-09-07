@@ -36,6 +36,7 @@ object SpotifyStyleArtworkLoader {
     
     private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val extractionSemaphore = java.util.concurrent.Semaphore(3, true)
     
     // In-memory LRU cache for artwork URIs
     private val memoryCache = LruCache<String, String>(MAX_MEMORY_ENTRIES)
@@ -119,8 +120,22 @@ object SpotifyStyleArtworkLoader {
      * Get cached artwork URI if available, null otherwise
      */
     fun getCachedArtworkUri(trackUri: String): String? {
+        // Check in-memory cache first
         val cached = memoryCache.get(trackUri)
-        return if (cached == CACHE_SENTINEL) null else cached
+        if (cached != null) return if (cached == CACHE_SENTINEL) null else cached
+
+        // Fall back to disk cache on miss so process restarts still show art
+        return try {
+            val file = getDiskCacheFile(trackUri)
+            if (file.exists()) {
+                val fileUri = "file://${file.absolutePath}"
+                // Warm memory cache and notify any existing flow listeners
+                cacheArtworkUri(trackUri, fileUri)
+                fileUri
+            } else null
+        } catch (_: Exception) {
+            null
+        }
     }
     
     /**
@@ -162,15 +177,20 @@ object SpotifyStyleArtworkLoader {
 
         return try {
             withContext(Dispatchers.IO) {
-                val result = extractAndCacheArtwork(trackUri)
-                if (result == null) {
-                    // Mark as recently failed to prevent immediate retries
-                    recentlyFailed[trackUri] = System.currentTimeMillis()
-                } else {
-                    // Remove from failed list if successful
-                    recentlyFailed.remove(trackUri)
+                extractionSemaphore.acquire()
+                try {
+                    val result = extractAndCacheArtwork(trackUri)
+                    if (result == null) {
+                        // Mark as recently failed to prevent immediate retries
+                        recentlyFailed[trackUri] = System.currentTimeMillis()
+                    } else {
+                        // Remove from failed list if successful
+                        recentlyFailed.remove(trackUri)
+                    }
+                    result
+                } finally {
+                    extractionSemaphore.release()
                 }
-                result
             }
         } finally {
             loadingUris.remove(trackUri)
@@ -344,56 +364,59 @@ object SpotifyStyleArtworkLoader {
     private suspend fun processAndSaveArtwork(trackUri: String, artworkBytes: ByteArray): String? = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Processing artwork bytes: ${artworkBytes.size} bytes for $trackUri")
-            
-            // Decode the bitmap
-            val originalBitmap = BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size)
-            if (originalBitmap == null) {
+
+            // Decode downsampled to avoid huge bitmaps
+            val bitmap = decodeDownsampled(artworkBytes, MAX_BITMAP_SIZE)
+            if (bitmap == null) {
                 Log.w(TAG, "Failed to decode artwork bytes for $trackUri")
                 return@withContext null
             }
-            
-            Log.d(TAG, "Decoded bitmap: ${originalBitmap.width}x${originalBitmap.height}")
-            
-            // Resize if necessary to prevent memory issues
-            val resizedBitmap = if (originalBitmap.width > MAX_BITMAP_SIZE || originalBitmap.height > MAX_BITMAP_SIZE) {
-                Log.d(TAG, "Resizing bitmap from ${originalBitmap.width}x${originalBitmap.height} to max $MAX_BITMAP_SIZE")
-                resizeBitmap(originalBitmap, MAX_BITMAP_SIZE)
-            } else {
-                originalBitmap
-            }
-            
+
             // Save to disk cache
             val cacheFile = getDiskCacheFile(trackUri)
             Log.d(TAG, "Saving artwork to: ${cacheFile.absolutePath}")
-            
-            // Ensure parent directory exists
+
             cacheFile.parentFile?.mkdirs()
-            
+
             var success = false
             cacheFile.outputStream().use { outputStream ->
-                success = resizedBitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
+                success = bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
                 outputStream.flush()
             }
-            
-            if (success && cacheFile.exists()) {
-                Log.d(TAG, "Successfully saved artwork: ${cacheFile.absolutePath} (${cacheFile.length()} bytes)")
-            } else {
+
+            if (!success || !cacheFile.exists()) {
                 Log.e(TAG, "Failed to save artwork: success=$success, exists=${cacheFile.exists()}")
+                bitmap.recycle()
                 return@withContext null
             }
-            
-            // Clean up bitmaps
-            if (resizedBitmap !== originalBitmap) {
-                originalBitmap.recycle()
-            }
-            resizedBitmap.recycle()
-            
+
             val fileUri = "file://${cacheFile.absolutePath}"
             Log.d(TAG, "Artwork processing complete: $fileUri")
-            
+
+            bitmap.recycle()
             fileUri
         } catch (e: Exception) {
             Log.e(TAG, "Error processing artwork for $trackUri", e)
+            null
+        }
+    }
+
+    private fun decodeDownsampled(bytes: ByteArray, maxEdge: Int): Bitmap? {
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            var sample = 1
+            val width = bounds.outWidth
+            val height = bounds.outHeight
+            if (width <= 0 || height <= 0) return null
+            while ((width / sample) > maxEdge || (height / sample) > maxEdge) sample *= 2
+            val opts = BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        } catch (e: Exception) {
+            Log.w(TAG, "decodeDownsampled failed: ${e.message}")
             null
         }
     }

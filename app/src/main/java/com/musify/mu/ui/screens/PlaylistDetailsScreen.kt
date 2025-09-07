@@ -161,7 +161,11 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                items(visualTracks.size, key = { idx -> "playlist_${playlistId}_${visualTracks[idx].mediaId}" }) { idx ->
+                items(
+                    count = visualTracks.size,
+                    key = { idx -> "playlist_${playlistId}_${visualTracks[idx].mediaId}" },
+                    contentType = { _ -> "playlist_track" }
+                ) { idx ->
                     val track = visualTracks[idx]
                     var showMenu by remember { mutableStateOf(false) }
 

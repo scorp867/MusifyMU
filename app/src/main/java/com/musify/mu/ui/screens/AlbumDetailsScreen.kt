@@ -139,7 +139,11 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
                     }
                 }
 
-                itemsIndexed(tracks, key = { _, t -> t.mediaId }) { index, t ->
+                itemsIndexed(
+                    items = tracks,
+                    key = { _, t -> t.mediaId },
+                    contentType = { _, _ -> "album_track" }
+                ) { index, t ->
                     val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
 
                     // Add queue operations for swipe gestures

@@ -109,15 +109,14 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         derivedStateOf { cachedTracks.sortedBy { it.title.lowercase() } }
     }
 
-    // Prefetch artwork for visible tracks to reduce loading delays
+    // Prefetch artwork for a small initial window to reduce jank
     LaunchedEffect(allTracks) {
         if (allTracks.isNotEmpty()) {
-            val visibleTrackUris = allTracks
-                .take(50)
-                .filter { it.artUri.isNullOrBlank() || it.artUri?.startsWith("content://media/external/audio/albumart") == true }
+            val initialUris = allTracks
+                .take(24)
                 .map { it.mediaId }
-            if (visibleTrackUris.isNotEmpty()) {
-                libraryViewModel.prefetchArtwork(visibleTrackUris)
+            if (initialUris.isNotEmpty()) {
+                libraryViewModel.prefetchArtwork(initialUris)
             }
         }
     }
@@ -465,7 +464,11 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 }
                 1 -> {
                     // SONGS section using new LocalFilesService - no paging needed
-                    items(allTracks.size, key = { idx -> "song_${allTracks[idx].mediaId}" }) { idx ->
+                    items(
+                        count = allTracks.size,
+                        key = { idx -> "song_${allTracks[idx].mediaId}" },
+                        contentType = { _ -> "song_row" }
+                    ) { idx ->
                         val t = allTracks[idx]
                         val isPlaying = com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId && com.musify.mu.playback.LocalIsPlaying.current
 

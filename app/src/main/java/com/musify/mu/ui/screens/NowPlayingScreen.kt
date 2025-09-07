@@ -1173,7 +1173,11 @@ fun NowPlayingScreen(navController: NavController) {
 
                     // Removed section headers; one unified header + sticky now playing row remain
                     // Use visual queue items with stable keys
-                    itemsIndexed(visualQueueItems, key = { _, item -> "queue_${item.uid}" }) { idx, qi ->
+                    itemsIndexed(
+                        items = visualQueueItems,
+                        key = { _, item -> "queue_${item.uid}" },
+                        contentType = { _, _ -> "queue_item" }
+                    ) { idx, qi ->
                         val vt = viewModel.getTrackByMediaId(qi.mediaItem.mediaId) ?: qi.mediaItem.toTrack()
                         ReorderableItem(reorderState, key = "queue_${qi.uid}") { isDragging ->
                             com.musify.mu.ui.components.EnhancedSwipeableItem(
