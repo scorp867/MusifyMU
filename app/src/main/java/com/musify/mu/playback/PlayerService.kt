@@ -166,6 +166,8 @@ class PlayerService : MediaLibraryService() {
 	private var hasValidMedia = false
 	private var currentMediaIdCache: String? = null
 	private var audioFocusManagerInitialized = false
+	private var queueInitialized = false
+	private var lastQueueItemCount = 0
 
 
 
@@ -176,9 +178,9 @@ class PlayerService : MediaLibraryService() {
 			return
 		}
 
-		// If we already have a properly initialized player and queue with matching session, return
-		if (exoPlayer === mediaLibrarySession?.player) {
-			android.util.Log.d("PlayerService", "Player already initialized and session matches")
+		// If components are already initialized, don't reinitialize
+		if (componentsInitialized) {
+			android.util.Log.d("PlayerService", "Player already initialized")
 			return
 		}
 
@@ -290,11 +292,11 @@ class PlayerService : MediaLibraryService() {
 				}
 			})
 
-		// Update the session with the injected player
-		if (mediaLibrarySession?.player !== exoPlayer) {
-			android.util.Log.d("PlayerService", "Updating media session player")
-			mediaLibrarySession?.player = exoPlayer
-		}
+		// Mark components as initialized
+		componentsInitialized = true
+		
+		// MediaSession will be created with this properly initialized player
+		android.util.Log.d("PlayerService", "Player initialization complete - ready for MediaSession creation")
 	}
 
 	@OptIn(UnstableApi::class)
@@ -349,9 +351,13 @@ class PlayerService : MediaLibraryService() {
 			android.util.Log.d("PlayerService", "Media cache was already released")
 		}
 
-		// Clear singleton instance
-		instance = null
-		android.util.Log.d("PlayerService", "Service instance cleared")
+	// Reset queue initialization state for fresh start
+	queueInitialized = false
+	lastQueueItemCount = 0
+	
+	// Clear singleton instance
+	instance = null
+	android.util.Log.d("PlayerService", "Service instance cleared")
 
 		super.onDestroy()
 	}
@@ -399,7 +405,6 @@ class PlayerService : MediaLibraryService() {
 				}
 			}
 			audioFocusManagerInitialized = true
-			componentsInitialized = true
 
 			// Register lifecycle observer for background state saving
 			ProcessLifecycleOwner.get().lifecycle.addObserver(lifecycleObserver)
@@ -633,18 +638,24 @@ class PlayerService : MediaLibraryService() {
 				return future
 			}
 
-			override fun onAddMediaItems(
-				mediaSession: MediaSession,
-				controller: MediaSession.ControllerInfo,
-				mediaItems: MutableList<MediaItem>
-			): ListenableFuture<MutableList<MediaItem>> {
-				// Ensure player is initialized when media items are added
-				ensurePlayerInitialized()
-				android.util.Log.d("PlayerService", "onAddMediaItems called with ${mediaItems.size} items")
-				cancelPendingStop()
-				// Cancel media button stop job since we now have media
-				mediaButtonStopJob?.cancel()
-				mediaButtonStopJob = null
+		override fun onAddMediaItems(
+			mediaSession: MediaSession,
+			controller: MediaSession.ControllerInfo,
+			mediaItems: MutableList<MediaItem>
+		): ListenableFuture<MutableList<MediaItem>> {
+			// Prevent repeated initialization with same items
+			if (queueInitialized && mediaItems.size == lastQueueItemCount && exoPlayer.mediaItemCount > 0) {
+				android.util.Log.d("PlayerService", "Queue already initialized with ${mediaItems.size} items, skipping redundant call")
+				return Futures.immediateFuture(mediaItems)
+			}
+			
+			// Ensure player is initialized when media items are added
+			ensurePlayerInitialized()
+			android.util.Log.d("PlayerService", "onAddMediaItems called with ${mediaItems.size} items")
+			cancelPendingStop()
+			// Cancel media button stop job since we now have media
+			mediaButtonStopJob?.cancel()
+			mediaButtonStopJob = null
 
 				val future = com.google.common.util.concurrent.SettableFuture.create<MutableList<MediaItem>>()
 				serviceScope.launch(Dispatchers.IO) {
@@ -666,12 +677,35 @@ class PlayerService : MediaLibraryService() {
 								}
 							}
 						}
-						// If nothing could be resolved, return original items to let player try URIs
-						if (resolved.isEmpty()) {
-							resolved.addAll(mediaItems)
+					// If nothing could be resolved, return original items to let player try URIs
+					if (resolved.isEmpty()) {
+						resolved.addAll(mediaItems)
+					}
+					hasValidMedia = resolved.isNotEmpty()
+					
+					// Mark queue as initialized to prevent redundant calls
+					if (resolved.isNotEmpty()) {
+						queueInitialized = true
+						lastQueueItemCount = resolved.size
+						
+						// CRITICAL FIX: Ensure player is prepared after media items are loaded
+						// This is essential for MediaController commands to work
+						serviceScope.launch(Dispatchers.Main) {
+							try {
+								if (exoPlayer.mediaItemCount > 0 && exoPlayer.playbackState == Player.STATE_IDLE) {
+									exoPlayer.prepare()
+									android.util.Log.d("PlayerService", "Auto-prepared player with ${resolved.size} items")
+									
+									// CRITICAL: Notify QueueManager that media items are ready
+									queueManager?.onMediaItemsLoaded()
+								}
+							} catch (e: Exception) {
+								android.util.Log.w("PlayerService", "Error auto-preparing player", e)
+							}
 						}
-						hasValidMedia = resolved.isNotEmpty()
-						future.set(resolved)
+					}
+					
+					future.set(resolved)
 					} catch (e: Exception) {
 						future.set(mutableListOf())
 					}
@@ -680,13 +714,21 @@ class PlayerService : MediaLibraryService() {
 			}
 		}
 
-		// Use manually initialized player
+		// CRITICAL FIX: Initialize player and queue components BEFORE creating MediaSession
+		ensurePlayerInitialized()
+
+		// Use properly initialized player to create MediaSession
 		mediaLibrarySession = MediaLibraryService.MediaLibrarySession.Builder(this, exoPlayer, callback)
 			.setId("MusifyMU_Session")
 			.setShowPlayButtonIfPlaybackIsSuppressed(false)
 			.setSessionActivity(createPlayerActivityIntent())
 			.setCustomLayout(ImmutableList.of(likeButton))
 			.build()
+		
+		android.util.Log.d("PlayerService", "MediaLibrarySession created successfully with player: ${mediaLibrarySession?.player != null}")
+		
+		// CRITICAL: Ensure the session is immediately available for MediaController connections
+		android.util.Log.d("PlayerService", "MediaSession ready for MediaController connections")
 
 		// Set custom MediaNotification provider (Media3 lifecycle retained)
 		setMediaNotificationProvider(MusifyNotificationProvider(this))
@@ -698,14 +740,12 @@ class PlayerService : MediaLibraryService() {
 			}
 		})
 
-					// Initialize player and queue components immediately
-			ensurePlayerInitialized()
-
 			// If we have valid media, the Media3 notification provider should handle notifications
 			// If not, keep the temporary notification until media is available or service is stopped
 	}
 
 	override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? {
+		android.util.Log.d("PlayerService", "MediaController requesting session - returning: ${mediaLibrarySession != null}")
 		return mediaLibrarySession
 	}
 
@@ -767,18 +807,26 @@ class PlayerService : MediaLibraryService() {
 				saveCompletePlaybackState()
 			}
 
-			// Release media session immediately
-			try {
-				mediaLibrarySession?.release()
-                mediaLibrarySession = null
-				android.util.Log.d("PlayerService", "Media session released")
-			} catch (e: Exception) {
-				android.util.Log.w("PlayerService", "Error releasing media session", e)
-			}
+		// Release media session immediately
+		try {
+			mediaLibrarySession?.release()
+			mediaLibrarySession = null
+			android.util.Log.d("PlayerService", "Media session released")
+		} catch (e: Exception) {
+			android.util.Log.w("PlayerService", "Error releasing media session", e)
+		}
 
-			// Stop service completely - no notifications should remain
-                stopSelf()
-			android.util.Log.d("PlayerService", "Service completely stopped - no notifications should remain")
+		// CRITICAL FIX: Release ExoPlayer immediately to prevent dead thread access
+		try {
+			exoPlayer.release()
+			android.util.Log.d("PlayerService", "ExoPlayer released in onTaskRemoved")
+		} catch (e: Exception) {
+			android.util.Log.w("PlayerService", "Error releasing ExoPlayer in onTaskRemoved", e)
+		}
+
+		// Stop service completely - no notifications should remain
+		stopSelf()
+		android.util.Log.d("PlayerService", "Service completely stopped - no notifications should remain")
 
 		} catch (e: Exception) {
 			android.util.Log.e("PlayerService", "Error during task removal cleanup", e)
@@ -789,6 +837,10 @@ class PlayerService : MediaLibraryService() {
 		pendingStopJob = null
 		mediaButtonStopJob?.cancel()
 		mediaButtonStopJob = null
+		
+		// Reset queue initialization state for fresh start
+		queueInitialized = false
+		lastQueueItemCount = 0
 	}
 
 	private fun saveCompletePlaybackState() {

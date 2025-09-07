@@ -89,6 +89,18 @@ class QueueManager(
     // Current item LiveData
     private val _currentItem = MutableLiveData<QueueItem?>()
     val currentItemLiveData: LiveData<QueueItem?> = _currentItem
+    
+    // Caching for visible queue calculations to reduce redundant computation
+    private var cachedVisibleQueue: List<QueueItem>? = null
+    private var lastVisibleQueueCalculation = 0L
+    private var lastCachedIndex = -1
+    
+    // Helper method to invalidate visible queue cache
+    private fun invalidateVisibleQueueCache() {
+        cachedVisibleQueue = null
+        lastVisibleQueueCalculation = 0L
+        lastCachedIndex = -1
+    }
 
     // Queue changes LiveData for drag and drop updates
     private val _queueChanges = MutableLiveData<QueueChangeEvent>()
@@ -796,10 +808,25 @@ class QueueManager(
     }
 
     fun getVisibleQueue(): List<QueueItem> {
+        val now = System.currentTimeMillis()
+        
+        // Return cached result if calculated recently and index hasn't changed
+        if (cachedVisibleQueue != null && 
+            now - lastVisibleQueueCalculation < 1000L && 
+            lastCachedIndex == currentIndex) {
+            return cachedVisibleQueue!!
+        }
+        
         // Build from authoritative player timeline
         val combined = getCombinedQueue()
         val start = (currentIndex + 1).coerceAtMost((combined.size))
         val visible = if (start < combined.size) combined.drop(start) else emptyList()
+        
+        // Cache the result
+        cachedVisibleQueue = visible
+        lastVisibleQueueCalculation = now
+        lastCachedIndex = currentIndex
+        
         android.util.Log.d(logTag, "getVisibleQueue currentIndex=$currentIndex total=${combined.size} visible=${visible.size}")
         return visible
     }
@@ -1033,6 +1060,9 @@ class QueueManager(
     }
 
     private fun updateUIState() {
+        // Invalidate visible queue cache since state has changed
+        invalidateVisibleQueueCache()
+        
         val state = QueueState(
             totalItems = getQueueSize(),
             currentIndex = currentIndex,
@@ -1057,7 +1087,11 @@ class QueueManager(
             onPlayerThread { player.currentMediaItemIndex }
         } catch (_: Exception) { -1 }
         if (playerIndex >= 0) {
-            currentIndex = playerIndex.coerceIn(0, (getQueueSize() - 1).coerceAtLeast(0))
+            val newIndex = playerIndex.coerceIn(0, (getQueueSize() - 1).coerceAtLeast(0))
+            if (newIndex != currentIndex) {
+                currentIndex = newIndex
+                invalidateVisibleQueueCache() // Invalidate cache when index changes
+            }
         }
         shuffleHistory.addFirst(mediaId)
         if (shuffleHistory.size > maxShuffleHistory) {
@@ -1070,6 +1104,29 @@ class QueueManager(
             try { trimPlayedBeforeCurrent() } catch (_: Exception) {}
         }
         android.util.Log.d(logTag, "onTrackChanged mediaId=$mediaId currentIndex=$currentIndex total=${getQueueSize()}")
+    }
+    
+    /**
+     * Called when media items are loaded into the player
+     * This ensures QueueManager is synchronized with the player state
+     */
+    fun onMediaItemsLoaded() {
+        android.util.Log.d(logTag, "Media items loaded - syncing QueueManager state")
+        try {
+            // Sync current index with player
+            val playerIndex = onPlayerThread { player.currentMediaItemIndex }
+            if (playerIndex >= 0) {
+                currentIndex = playerIndex.coerceIn(0, (getQueueSize() - 1).coerceAtLeast(0))
+            }
+            
+            // Update UI state to reflect loaded items
+            updateUIState()
+            invalidateVisibleQueueCache()
+            
+            android.util.Log.d(logTag, "QueueManager synced - currentIndex=$currentIndex, queueSize=${getQueueSize()}")
+        } catch (e: Exception) {
+            android.util.Log.w(logTag, "Error syncing QueueManager after media items loaded", e)
+        }
     }
 
     /**

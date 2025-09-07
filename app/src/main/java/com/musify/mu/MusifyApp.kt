@@ -27,6 +27,9 @@ class MusifyApp : Application(), ImageLoaderFactory {
         // Initialize Spotify-style artwork loader with application context
         SpotifyStyleArtworkLoader.initialize(this)
         
+        // Note: QueueManager will be set by MediaModule when it's created
+        // Trying to inject here is too early in the lifecycle
+        
         // Clear Coil's memory cache on app start to prevent flickering from stale cache
         newImageLoader().memoryCache?.clear()
 

@@ -54,6 +54,11 @@ class SpotifyStyleDataManager private constructor(
     
     private var isInitialized = false
     
+    // Throttling for prefetch requests to prevent spam
+    private var lastPrefetchTime = 0L
+    private var lastPrefetchUris = emptyList<String>()
+    private val prefetchCooldownMs = 3000L // 3 seconds
+    
     init {
         // Initialize artwork loader
         SpotifyStyleArtworkLoader.initialize(context)
@@ -295,6 +300,16 @@ class SpotifyStyleDataManager private constructor(
      * Prefetch artwork for a list of track URIs
      */
     suspend fun prefetchArtwork(trackUris: List<String>) {
+        val now = System.currentTimeMillis()
+        
+        // Throttle rapid prefetch requests with same URIs
+        if (now - lastPrefetchTime < prefetchCooldownMs && trackUris == lastPrefetchUris) {
+            return // Skip redundant prefetch request
+        }
+        
+        lastPrefetchTime = now
+        lastPrefetchUris = trackUris
+        
         Log.d(TAG, "Prefetching artwork for ${trackUris.size} tracks")
         val currentTracks = _tracks.value
         trackUris.forEach { uri ->

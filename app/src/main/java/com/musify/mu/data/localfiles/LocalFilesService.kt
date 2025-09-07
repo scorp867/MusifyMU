@@ -49,6 +49,7 @@ class LocalFilesService private constructor(
     private lateinit var mediaStoreReader: MediaStoreReader
     private lateinit var openedAudioFiles: OpenedAudioFiles
     private lateinit var permissionInteractor: LocalFilesPermissionInteractor
+    // Deprecated in favor of SpotifyStyleArtworkLoader; keep for API compatibility
     private lateinit var artworkLoader: LocalFileImageLoader
     
     // Configuration
@@ -346,7 +347,8 @@ class LocalFilesService private constructor(
      * Get artwork for a track
      */
     suspend fun getArtwork(trackUri: String): String? {
-        return artworkLoader.loadArtwork(trackUri)
+        // Delegate to centralized SpotifyStyleArtworkLoader to avoid duplication
+        return com.musify.mu.util.SpotifyStyleArtworkLoader.loadArtwork(trackUri)
     }
     
     /**
@@ -392,11 +394,11 @@ class LocalFileImageLoader private constructor(
     }
     
     suspend fun initialize() {
-        // Initialize artwork loading system
+        // No-op: artwork handled by SpotifyStyleArtworkLoader
     }
     
     suspend fun loadArtwork(trackUri: String): String? {
-        // TODO: Implement ID3/APIC artwork extraction
-        return null
+        // Delegate to SpotifyStyleArtworkLoader to avoid duplication
+        return com.musify.mu.util.SpotifyStyleArtworkLoader.loadArtwork(trackUri)
     }
 }

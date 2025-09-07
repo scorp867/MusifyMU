@@ -52,9 +52,12 @@ import com.musify.mu.ui.helpers.resolveTrack
 import com.musify.mu.ui.helpers.PlaybackRestorer
 import com.musify.mu.ui.helpers.MediaControllerListener
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    @Inject
+    lateinit var injectedRepo: LibraryRepository
     
     // Store Media3 controller independently to avoid shadowing Activity.mediaController (framework)
     companion object {
@@ -214,14 +217,14 @@ private fun AppContent(
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val stateStore = remember { PlaybackStateStore(context) }
-    val repo = remember { LibraryRepository.get(context) } // Keep for now, will be replaced with ViewModel later
-    val playbackRestorer = remember { PlaybackRestorer(context, repo, stateStore) }
+    val libraryViewModel: com.musify.mu.ui.viewmodels.LibraryViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    val playbackViewModel: com.musify.mu.ui.viewmodels.PlaybackViewModel = androidx.hilt.navigation.compose.hiltViewModel()
 
     // Initialize library data on app launch (after permissions are granted)
     LaunchedEffect(hasPermissions) {
         if (hasPermissions) {
             try {
-                repo.dataManager.ensureInitialized()
+                libraryViewModel.ensureDataManagerInitialized()
             } catch (_: Exception) { }
         }
     }
@@ -235,7 +238,7 @@ private fun AppContent(
     MediaControllerListener(
         controller = mediaController,
         onMediaItemTransition = { mediaItem, _ ->
-            currentTrack = resolveTrack(mediaItem, repo)
+            currentTrack = playbackViewModel.resolveTrack(mediaItem)
             hasPlayableQueue = (mediaController?.mediaItemCount ?: 0) > 0
             if (hasPlayableQueue) previewTrack = null
         },
@@ -253,7 +256,7 @@ private fun AppContent(
             mediaController?.let { controller ->
                     hasPlayableQueue = controller.mediaItemCount > 0
                     if (controller.currentMediaItem != null) {
-                    currentTrack = resolveTrack(controller.currentMediaItem, repo)
+                    currentTrack = playbackViewModel.resolveTrack(controller.currentMediaItem)
                 }
             }
         }
@@ -262,7 +265,7 @@ private fun AppContent(
     // Initialize UI state when controller connects
     LaunchedEffect(mediaController) {
         mediaController?.let { controller ->
-            currentTrack = resolveTrack(controller.currentMediaItem, repo)
+            currentTrack = playbackViewModel.resolveTrack(controller.currentMediaItem)
             isPlaying = controller.isPlaying
             hasPlayableQueue = controller.mediaItemCount > 0
             if (controller.mediaItemCount > 0) previewTrack = null
@@ -273,7 +276,7 @@ private fun AppContent(
     LaunchedEffect(hasPermissions, mediaController) {
         if (hasPermissions && (mediaController?.mediaItemCount ?: 0) == 0) {
             scope.launch {
-                val preview = playbackRestorer.restoreLastPlaybackState(mediaController)
+                val preview = playbackViewModel.getPreviewTrack()
                         if ((mediaController?.mediaItemCount ?: 0) == 0) {
                             previewTrack = preview
                             currentTrack = preview ?: currentTrack
@@ -281,7 +284,6 @@ private fun AppContent(
             }
         }
     }
-
 
     val onPlay: (List<Track>, Int) -> Unit = { tracks, index ->
         scope.launch {
@@ -300,10 +302,9 @@ private fun AppContent(
     // Helper: restore last queue from store and play
     val restoreLastQueueAndPlay: () -> Unit = {
         scope.launch {
-            playbackRestorer.restoreQueueAndPlay(mediaController, onPlay)
+            playbackViewModel.restoreQueueAndPlay(mediaController, onPlay)
         }
     }
-
 
     // Track the current destination to hide bottom elements on player screen
     val navBackStackEntry by navController.currentBackStackEntryAsState()

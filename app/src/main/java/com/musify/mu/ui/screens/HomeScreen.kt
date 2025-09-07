@@ -44,6 +44,7 @@ import com.musify.mu.data.db.entities.Track
 import com.musify.mu.data.repo.LibraryRepository
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.musify.mu.ui.viewmodels.HomeViewModel
+import com.musify.mu.ui.viewmodels.LibraryViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.musify.mu.ui.components.SpotifyStyleArtwork
 import com.musify.mu.ui.components.TrackArtwork
@@ -82,9 +83,9 @@ val LocalScrollState = compositionLocalOf<LazyListState?> { null }
 fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit) {
     val viewModel: HomeViewModel = hiltViewModel()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
     val haptic = LocalHapticFeedback.current
     val controller = LocalMediaController.current
+    val libraryViewModel: LibraryViewModel = hiltViewModel()
 
     val recentPlayed by viewModel.recentlyPlayed.collectAsState()
     val recentAdded by viewModel.recentlyAdded.collectAsState()
@@ -99,7 +100,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     var showSongEditor by remember { mutableStateOf(false) }
     var editingTrack by remember { mutableStateOf<Track?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val cachedTracks by repo.dataManager.tracks.collectAsStateWithLifecycle(initialValue = emptyList())
+    val cachedTracks by libraryViewModel.dataManagerTracks.collectAsStateWithLifecycle(initialValue = emptyList())
 
     val listState = rememberLazyListState()
 
@@ -116,7 +117,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 .filter { it.artUri.isNullOrBlank() || it.artUri?.startsWith("content://media/external/audio/albumart") == true }
                 .map { it.mediaId }
             if (visibleTrackUris.isNotEmpty()) {
-                repo.dataManager.prefetchArtwork(visibleTrackUris)
+                libraryViewModel.prefetchArtwork(visibleTrackUris)
             }
         }
     }
@@ -126,7 +127,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         scope.launch {
             withContext(Dispatchers.IO) {
                 try {
-                    val customPlaylistsData = repo.playlists()
+                    val customPlaylistsData = libraryViewModel.playlists()
 
                     withContext(Dispatchers.Main) {
                         customPlaylists = customPlaylistsData
@@ -143,7 +144,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
 
     // Listen for changes in cached tracks and refresh home screen data
     LaunchedEffect(Unit) {
-        repo.dataManager.tracks.collectLatest { tracks ->
+        libraryViewModel.dataManagerTracks.collectLatest { tracks ->
             android.util.Log.d("HomeScreen", "Cached tracks changed: ${tracks.size} tracks, refreshing home data")
             refreshData()
         }
@@ -199,7 +200,9 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         derivedStateOf { artistsAll }
     }
     val albumsAll by remember(cachedTracks) {
-        derivedStateOf { repo.dataManager.getUniqueAlbums() }
+        derivedStateOf { 
+            try { libraryViewModel.libraryRepository.dataManager.getUniqueAlbums() } catch (_: Exception) { emptyList() }
+        }
     }
     val albumsFiltered by remember(albumsAll) {
         derivedStateOf { albumsAll }
@@ -348,7 +351,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                                 onClear = {
                                                     scope.launch {
                                                         withContext(Dispatchers.IO) {
-                                                            repo.clearRecentlyPlayed()
+                                                            libraryViewModel.clearRecentlyPlayed()
                                                             withContext(Dispatchers.Main) {
                                                                 refreshTrigger++
                                                             }
@@ -370,7 +373,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                                 onClear = {
                                                     scope.launch {
                                                         withContext(Dispatchers.IO) {
-                                                            repo.clearRecentlyAdded()
+                                                            libraryViewModel.clearRecentlyAdded()
                                                             withContext(Dispatchers.Main) {
                                                                 refreshTrigger++
                                                             }
@@ -544,7 +547,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     // Tabs for Songs / Artists / Albums
                     var searchTab by remember { mutableStateOf(0) }
                     // Load search history
-                    val searchHistory = remember(refreshTrigger) { repo.getSearchHistory() }
+                    val searchHistory = remember(refreshTrigger) { libraryViewModel.getSearchHistory() }
                     TabRow(selectedTabIndex = searchTab) {
                         Tab(selected = searchTab == 0, onClick = { searchTab = 0 }, text = { Text("Songs") })
                         Tab(selected = searchTab == 1, onClick = { searchTab = 1 }, text = { Text("Artists") })
@@ -559,7 +562,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                     )
                     // Save to history when user picks a result
                     val commitQuery: (String) -> Unit = { q ->
-                        if (q.isNotBlank()) repo.addSearchHistory(q)
+                        if (q.isNotBlank()) libraryViewModel.addSearchHistory(q)
                     }
 
                     // When query is blank, only show search history (no recent results)
@@ -572,7 +575,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                             }
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = { repo.clearSearchHistory(); refreshTrigger++ }) { Text("Clear history") }
+                            TextButton(onClick = { libraryViewModel.clearSearchHistory(); refreshTrigger++ }) { Text("Clear history") }
                         }
                     }
 
@@ -747,7 +750,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
                 val uris = visibleTracks.map { it.mediaId }
                 if (uris.isNotEmpty()) {
-                    repo.dataManager.prefetchArtwork(uris)
+                    libraryViewModel.prefetchArtwork(uris)
                 }
                 // Simple artwork loading - no preloading needed
             }
@@ -765,7 +768,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                 scope.launch(Dispatchers.IO) {
                     try {
                         // Update track in database
-                        repo.updateTrackMetadata(updatedTrack)
+                        libraryViewModel.updateTrackMetadata(updatedTrack)
                         withContext(Dispatchers.Main) {
                             refreshTrigger++ // Trigger UI refresh
                         }
@@ -1093,7 +1096,7 @@ private fun CustomPlaylistsCarousel(
     onRefresh: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
+    val libraryViewModel: LibraryViewModel = hiltViewModel()
     val scope = rememberCoroutineScope()
 
     var showCreateDialog by remember { mutableStateOf(false) }
@@ -1104,7 +1107,7 @@ private fun CustomPlaylistsCarousel(
         onDismiss = { showCreateDialog = false },
         onCreatePlaylist = { name, imageUri ->
             scope.launch {
-                repo.createPlaylist(name, imageUri)
+                libraryViewModel.createPlaylist(name, imageUri)
                 showCreateDialog = false
                 onRefresh()
             }
@@ -1131,12 +1134,12 @@ private fun PlaylistCard(
     onClick: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
+    val libraryViewModel: LibraryViewModel = hiltViewModel()
     var trackCount by remember { mutableStateOf(0) }
     var firstTrackArt by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(playlist.id) {
-        val tracks = repo.playlistTracks(playlist.id)
+        val tracks = libraryViewModel.playlistTracks(playlist.id)
         trackCount = tracks.size
         firstTrackArt = tracks.firstOrNull()?.artUri
     }

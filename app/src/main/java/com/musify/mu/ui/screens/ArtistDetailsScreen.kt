@@ -41,11 +41,10 @@ import kotlinx.coroutines.launch
 fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (List<Track>, Int) -> Unit) {
     val viewModel: LibraryViewModel = hiltViewModel()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
 
     LaunchedEffect(artist) {
-        val all = repo.getAllTracks()
+        val all = viewModel.getAllTracksSnapshot()
         tracks = all.filter { it.artist.equals(artist, ignoreCase = true) || it.artist.contains(artist, ignoreCase = true) }
     }
 
@@ -75,7 +74,7 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                         }
                         val mediaUris = visibleTracks.mapNotNull { it.mediaId }
                         if (mediaUris.isNotEmpty()) {
-                            repo.dataManager.prefetchArtwork(mediaUris)
+                            viewModel.prefetchArtwork(mediaUris)
                         }
                     }
             }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import android.provider.MediaStore
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
@@ -42,8 +43,7 @@ object SpotifyStyleArtworkLoader {
     // Dedicated LruCache for now playing screen - instant switching
     private val nowPlayingCache = LruCache<String, String>(50) // Cache last 50 now playing artworks
     
-    // Negative cache to avoid re-attempting failed extractions
-    private val failedExtractions = ConcurrentHashMap.newKeySet<String>()
+    // Negative-cache marker kept only in memoryCache via CACHE_SENTINEL; no hard block set
 
     // Currently loading URIs to prevent duplicate work
     private val loadingUris = ConcurrentHashMap.newKeySet<String>()
@@ -53,6 +53,10 @@ object SpotifyStyleArtworkLoader {
     
     // Flow per URI for reactive updates
     private val uriFlows = ConcurrentHashMap<String, MutableStateFlow<String?>>()
+    
+    // Failure retry delay mechanism to prevent excessive failed attempts
+    private val recentlyFailed = ConcurrentHashMap<String, Long>()
+    private const val FAILURE_RETRY_DELAY_MS = 30_000L // 30 seconds
     
     // Disk cache directory
     private val diskCacheDir: File by lazy {
@@ -126,16 +130,10 @@ object SpotifyStyleArtworkLoader {
     suspend fun loadArtwork(trackUri: String, hasEmbeddedArtwork: Boolean? = null): String? {
         if (trackUri.isBlank()) return null
 
-        // Optimization: If we know the track doesn't have embedded artwork, don't attempt extraction
-        if (hasEmbeddedArtwork == false) {
-            Log.v(TAG, "Skipping artwork extraction for $trackUri - no embedded artwork")
-            cacheNoArtwork(trackUri)
-            return null
-        }
-
-        // Check if we've already failed to extract artwork for this URI
-        if (failedExtractions.contains(trackUri)) {
-            return null
+        // Check if we recently failed on this track to avoid excessive retries
+        val lastFailureTime = recentlyFailed[trackUri]
+        if (lastFailureTime != null && System.currentTimeMillis() - lastFailureTime < FAILURE_RETRY_DELAY_MS) {
+            return null // Don't retry too soon after failure
         }
 
         // Check memory cache first
@@ -164,7 +162,15 @@ object SpotifyStyleArtworkLoader {
 
         return try {
             withContext(Dispatchers.IO) {
-                extractAndCacheArtwork(trackUri)
+                val result = extractAndCacheArtwork(trackUri)
+                if (result == null) {
+                    // Mark as recently failed to prevent immediate retries
+                    recentlyFailed[trackUri] = System.currentTimeMillis()
+                } else {
+                    // Remove from failed list if successful
+                    recentlyFailed.remove(trackUri)
+                }
+                result
             }
         } finally {
             loadingUris.remove(trackUri)
@@ -266,15 +272,24 @@ object SpotifyStyleArtworkLoader {
                 }
             } else {
                 Log.d(TAG, "No embedded artwork found for: $trackUri")
+                // Fallback: try album art via MediaStore Albums
+                val albumArtBytes = tryFetchAlbumArtBytes(trackUri)
+                if (albumArtBytes != null && albumArtBytes.isNotEmpty()) {
+                    val fallbackUri = processAndSaveArtwork(trackUri, albumArtBytes)
+                    if (fallbackUri != null) {
+                        cacheArtworkUri(trackUri, fallbackUri)
+                        return fallbackUri
+                    }
+                }
             }
             
-            // Mark as failed if no artwork found
-            markAsFailed(trackUri)
+            // Mark as no artwork found
+            cacheNoArtwork(trackUri)
             null
             
         } catch (e: Exception) {
             Log.w(TAG, "Error extracting artwork from $trackUri", e)
-            markAsFailed(trackUri)
+            cacheNoArtwork(trackUri)
             null
         } finally {
             try {
@@ -282,6 +297,44 @@ object SpotifyStyleArtworkLoader {
             } catch (e: Exception) {
                 Log.w(TAG, "Error releasing MediaMetadataRetriever", e)
             }
+        }
+    }
+
+    /**
+     * Try to fetch album artwork bytes from MediaStore using the track's albumId
+     */
+    private fun tryFetchAlbumArtBytes(trackUri: String): ByteArray? {
+        return try {
+            if (!trackUri.startsWith("content://")) return null
+            val uri = Uri.parse(trackUri)
+            val cr = appContext.contentResolver
+            val cursor = cr.query(uri, arrayOf(MediaStore.Audio.Media.ALBUM_ID), null, null, null)
+            val albumId = cursor?.use { c -> if (c.moveToFirst()) c.getLong(0) else null } ?: return null
+
+            // Common album art content Uri pattern
+            val albumArtUri = Uri.parse("content://media/external/audio/albumart").let { base ->
+                android.content.ContentUris.withAppendedId(base, albumId)
+            }
+            val artworkBytes = cr.openInputStream(albumArtUri)?.use { input ->
+                input.readBytes()
+            }
+            
+            if (artworkBytes != null && artworkBytes.isNotEmpty()) {
+                Log.d(TAG, "Found album art via MediaStore for $trackUri (${artworkBytes.size} bytes)")
+                return artworkBytes
+            }
+            
+            // Reduce log verbosity - only log detailed failure reasons occasionally
+            val shouldLogDetailed = (trackUri.hashCode() % 10 == 0) // Log 10% of failures in detail
+            if (shouldLogDetailed) {
+                Log.v(TAG, "Album art fallback failed for $trackUri: No album art found")
+            }
+            null
+            
+        } catch (e: Exception) {
+            // Only log exceptions, not normal "not found" cases
+            Log.v(TAG, "Album art fallback failed for $trackUri: ${e.message}")
+            null
         }
     }
     
@@ -383,11 +436,8 @@ object SpotifyStyleArtworkLoader {
      */
     private fun cacheNoArtwork(trackUri: String) {
         memoryCache.put(trackUri, CACHE_SENTINEL)
-        failedExtractions.add(trackUri)
-        
         // Update flow with null
         uriFlows[trackUri]?.value = null
-        
         Log.v(TAG, "Cached no artwork for: $trackUri")
     }
     
@@ -395,7 +445,6 @@ object SpotifyStyleArtworkLoader {
      * Mark a URI as failed to avoid repeated attempts
      */
     private fun markAsFailed(trackUri: String) {
-        failedExtractions.add(trackUri)
         cacheArtworkUri(trackUri, null)
     }
     
@@ -422,11 +471,8 @@ object SpotifyStyleArtworkLoader {
                 }
 
                 batch.forEach { trackUri ->
-                    if (!failedExtractions.contains(trackUri) && getCachedArtworkUri(trackUri) == null) {
-                        // Launch each artwork load as a separate coroutine for better parallelism
-                        scope.launch {
-                            loadArtwork(trackUri)
-                        }
+                    if (getCachedArtworkUri(trackUri) == null) {
+                        scope.launch { loadArtwork(trackUri) }
                     }
                 }
             }
@@ -524,9 +570,9 @@ object SpotifyStyleArtworkLoader {
     fun clearCaches() {
         memoryCache.evictAll()
         nowPlayingCache.evictAll()
-        failedExtractions.clear()
         uriFlows.clear()
         contentCache.clear()
+        recentlyFailed.clear() // Clear failure retry tracking
 
         // Clear disk cache
         scope.launch {
@@ -550,7 +596,7 @@ object SpotifyStyleArtworkLoader {
         return ArtworkCacheStats(
             memoryCacheSize = memoryCache.size(),
             memoryCacheMaxSize = memoryCache.maxSize(),
-            failedExtractions = failedExtractions.size,
+            failedExtractions = recentlyFailed.size,
             diskCacheFiles = diskCacheDir.listFiles()?.filter { it.extension == "jpg" }?.size ?: 0
         )
     }

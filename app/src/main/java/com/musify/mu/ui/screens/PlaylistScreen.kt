@@ -20,14 +20,12 @@ import com.musify.mu.ui.viewmodels.LibraryViewModel
 @Composable
 fun PlaylistScreen(navController: NavController) {
     val viewModel: LibraryViewModel = hiltViewModel()
-    val context = LocalContext.current
-    val repo = remember { LibraryRepository.get(context) }
     var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
     var showDialog by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        playlists = repo.playlists()
+        playlists = viewModel.playlists()
     }
 
     Scaffold(
@@ -75,8 +73,8 @@ fun PlaylistScreen(navController: NavController) {
                     TextButton(onClick = {
                         coroutineScope.launch {
                             if (name.isNotBlank()) {
-                                repo.createPlaylist(name)
-                                playlists = repo.playlists()
+                                viewModel.createPlaylist(name)
+                                playlists = viewModel.playlists()
                             }
                             showDialog = false
                         }
