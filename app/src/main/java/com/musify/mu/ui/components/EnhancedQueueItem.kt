@@ -224,8 +224,7 @@ fun EnhancedQueueTrackItem(
                     trackUri = track.mediaId,
                     contentDescription = track.title,
                     modifier = Modifier.fillMaxSize(),
-                    shape = RoundedCornerShape(8.dp),
-                    targetSizePx = 128
+                    shape = RoundedCornerShape(8.dp)
                 )
 
                 // Play next indicator

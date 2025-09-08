@@ -1,15 +1,6 @@
 package com.musify.mu.ui.components
-
-import androidx.compose.foundation.basicMarquee
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -23,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
@@ -45,26 +35,16 @@ fun CompactTrackRow(
     modifier: Modifier = Modifier,
     trailingContent: (@Composable () -> Unit)? = null,
     showIndicator: Boolean = isPlaying,
-    useGlass: Boolean = true,
+    useGlass: Boolean = false,
     extraArtOverlay: (@Composable BoxScope.() -> Unit)? = null
 ) {
     val haptic = LocalHapticFeedback.current
-    val pressed by remember { MutableInteractionSource() }.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.98f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "scale"
-    )
     val shape = RoundedCornerShape(14.dp)
     val containerColor = if (useGlass) MaterialTheme.colorScheme.surface.copy(alpha = 0.35f) else Color.Transparent
     val borderStroke = if (useGlass) BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)) else null
     Surface(
         modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer { scaleX = scale; scaleY = scale },
+            .fillMaxWidth(),
         color = containerColor,
         shape = shape,
         tonalElevation = 0.dp,
@@ -103,7 +83,7 @@ fun CompactTrackRow(
                     contentDescription = contentDescription,
                     modifier = Modifier.fillMaxSize(),
                     shape = RoundedCornerShape(8.dp),
-                    targetSizePx = 128
+                    enableOnDemand = true
                 )
                 if (showIndicator) {
                     PlayingIndicator(
@@ -124,8 +104,7 @@ fun CompactTrackRow(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    modifier = Modifier.basicMarquee()
+                    maxLines = 1
                 )
                 Text(
                     text = subtitle,

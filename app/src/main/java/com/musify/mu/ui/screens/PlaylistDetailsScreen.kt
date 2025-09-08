@@ -137,20 +137,15 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            // Prefetch artwork for visible items in playlist
+            // Prefetch after scrolling stops: load from first to last visible track
             LaunchedEffect(reorderState.listState, visualTracks) {
-                snapshotFlow { reorderState.listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                snapshotFlow { reorderState.listState.isScrollInProgress }
                     .distinctUntilChanged()
-                    .collect { visible ->
-                        if (visible.isEmpty() || visualTracks.isEmpty()) return@collect
-                        val min = (visible.minOrNull() ?: 0) - 2
-                        val max = (visible.maxOrNull() ?: 0) + 8
-                        val start = min.coerceAtLeast(0)
-                        val end = max.coerceAtMost(visualTracks.lastIndex)
-                        if (start <= end) {
-                            val ids = visualTracks.subList(start, end + 1).map { it.mediaId }
-                            viewModel.prefetchArtwork(ids)
-                        }
+                    .collect { isScrolling ->
+                        if (isScrolling || visualTracks.isEmpty()) return@collect
+                        val lastVisible = reorderState.listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
+                        val end = lastVisible.coerceAtMost(visualTracks.lastIndex)
+                        if (end >= 0) viewModel.prefetchArtwork(visualTracks.subList(0, end + 1).map { it.mediaId })
                     }
             }
             LazyColumn(

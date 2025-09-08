@@ -87,14 +87,9 @@ class MediaStoreReader private constructor(
      */
     suspend fun runQuery(openedAudioFiles: OpenedAudioFiles? = null, skipArtworkExtraction: Boolean = true): QueryResult = withContext(Dispatchers.IO) {
         try {
-            Log.d(TAG, "Starting Spotify-style MediaStore query")
-            
             val selection = buildSelection()
             val selectionArgs = buildSelectionArgs()
             val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
-            
-            Log.d(TAG, "Query selection: $selection")
-            Log.d(TAG, "Query args: ${selectionArgs?.joinToString() ?: "none"}")
             
             val localFiles = mutableListOf<LocalFile>()
             
@@ -114,7 +109,6 @@ class MediaStoreReader private constructor(
                 scanTimestamp = System.currentTimeMillis()
             )
             
-            Log.d(TAG, "Query completed with ${result.totalCount} files")
             result
             
         } catch (e: Exception) {
@@ -138,7 +132,6 @@ class MediaStoreReader private constructor(
             selectionArgs,
             sortOrder
         )?.use { cursor ->
-            Log.d(TAG, "MediaStore query returned ${cursor.count} rows")
             
             val columnIndices = getColumnIndices(cursor)
             
@@ -155,7 +148,7 @@ class MediaStoreReader private constructor(
         localFiles
     }
     
-    private fun processMediaStoreRow(cursor: Cursor, indices: ColumnIndices, skipArtworkExtraction: Boolean = true): LocalFile? {
+    private suspend fun processMediaStoreRow(cursor: Cursor, indices: ColumnIndices, skipArtworkExtraction: Boolean = true): LocalFile? {
         try {
             val id = cursor.getLong(indices.id)
             val contentUri = ContentUris.withAppendedId(
@@ -171,7 +164,6 @@ class MediaStoreReader private constructor(
             
             // Skip artwork checking during initial scan for better performance
             val hasEmbeddedArt = if (skipArtworkExtraction) {
-                Log.v(TAG, "Skipping artwork check for fast scan: $contentUri")
                 false
             } else {
                 checkForEmbeddedArtwork(contentUri)
@@ -256,21 +248,16 @@ class MediaStoreReader private constructor(
             // Check for embedded artwork (ID3/APIC) - Spotify's approach
             val hasEmbeddedArt = if (skipArtworkExtraction) {
                 // Skip artwork extraction for fast initial scan
-                Log.v(TAG, "Skipping artwork extraction for fast scan: $uri")
                 false
             } else {
                 try {
                     val artworkBytes = retriever.embeddedPicture
                     artworkBytes != null && artworkBytes.isNotEmpty()
                 } catch (e: Exception) {
-                    Log.v(TAG, "No embedded artwork found for $uri: ${e.message}")
                     false
                 }
             }
 
-            if (hasEmbeddedArt && !skipArtworkExtraction) {
-                Log.d(TAG, "Found embedded artwork for: $uri")
-            }
             
             LocalFileMetadata(
                 title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE),
@@ -382,7 +369,6 @@ class MediaStoreReader private constructor(
         contentObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
                 val handle = uri?.toString() ?: "unknown"
-                Log.d(TAG, "MediaStore changed: $handle")
                 
                 scope.launch {
                     // Debounce rapid changes
@@ -398,7 +384,6 @@ class MediaStoreReader private constructor(
             contentObserver!!
         )
         
-        Log.d(TAG, "Started listening for MediaStore changes")
     }
     
     /**
@@ -408,36 +393,27 @@ class MediaStoreReader private constructor(
         contentObserver?.let {
             contentResolver.unregisterContentObserver(it)
             contentObserver = null
-            Log.d(TAG, "Stopped listening for MediaStore changes")
         }
     }
     
     fun cleanup() {
         stopListening()
         observedQueries.clear()
-        Log.d(TAG, "MediaStoreReader cleaned up")
     }
     
     /**
      * Check if a URI has embedded artwork during initial scan
      * This is the optimization the user requested - only check artwork for tracks that have it
      */
-    private fun checkForEmbeddedArtwork(uri: Uri): Boolean {
+    private suspend fun checkForEmbeddedArtwork(uri: Uri): Boolean = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
-        return try {
+        return@withContext try {
             retriever.setDataSource(context, uri)
             val artworkBytes = retriever.embeddedPicture
             val hasArt = artworkBytes != null && artworkBytes.isNotEmpty()
             
-            if (hasArt) {
-                Log.v(TAG, "✓ Embedded artwork found for: $uri")
-            } else {
-                Log.v(TAG, "✗ No embedded artwork for: $uri")
-            }
-            
             hasArt
         } catch (e: Exception) {
-            Log.v(TAG, "✗ Artwork check failed for: $uri - ${e.message}")
             false
         } finally {
             try {

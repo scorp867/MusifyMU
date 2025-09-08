@@ -57,6 +57,7 @@ class SpotifyStyleDataManager private constructor(
     // Throttling for prefetch requests to prevent spam
     private var lastPrefetchTime = 0L
     private var lastPrefetchUris = emptyList<String>()
+    private var lastPrefetchSet: Set<String> = emptySet()
     private val prefetchCooldownMs = 3000L // 3 seconds
     
     init {
@@ -105,7 +106,6 @@ class SpotifyStyleDataManager private constructor(
                     scope.launch {
                         try {
                             db.dao().upsertTracks(tracks)
-                            Log.d(TAG, "Cached ${tracks.size} tracks to database")
                         } catch (e: Exception) {
                             Log.e(TAG, "Error caching tracks to database", e)
                         }
@@ -120,18 +120,15 @@ class SpotifyStyleDataManager private constructor(
      */
     suspend fun initializeOnAppLaunch() {
         if (isInitialized) {
-            Log.d(TAG, "Already initialized")
             return
         }
         
         try {
-            Log.d(TAG, "Initializing Spotify-style data manager...")
             
             // Initialize the LocalFilesService
             localFilesService.initialize()
             
             isInitialized = true
-            Log.d(TAG, "Data manager initialized successfully")
             
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing data manager", e)
@@ -244,7 +241,6 @@ class SpotifyStyleDataManager private constructor(
         scope.launch {
             try {
                 db.dao().deleteAllTracks()
-                Log.d(TAG, "Cleared database cache")
             } catch (e: Exception) {
                 Log.e(TAG, "Error clearing database cache", e)
             }
@@ -301,23 +297,42 @@ class SpotifyStyleDataManager private constructor(
      */
     suspend fun prefetchArtwork(trackUris: List<String>) {
         val now = System.currentTimeMillis()
-        
-        // Throttle rapid prefetch requests with same URIs
-        if (now - lastPrefetchTime < prefetchCooldownMs && trackUris == lastPrefetchUris) {
+
+        val incomingSet = trackUris.filter { it.isNotBlank() }.toSet()
+
+        // Throttle rapid prefetch requests with same URIs (set-based)
+        if (now - lastPrefetchTime < prefetchCooldownMs && incomingSet == lastPrefetchSet) {
             return // Skip redundant prefetch request
         }
-        
+
+        // Compute delta of uncached URIs compared to last seen set
+        val uncached = incomingSet.filter { uri ->
+            SpotifyStyleArtworkLoader.getCachedArtworkUri(uri) == null
+        }.toSet()
+
         lastPrefetchTime = now
         lastPrefetchUris = trackUris
-        
-        Log.d(TAG, "Prefetching artwork for ${trackUris.size} tracks")
+        lastPrefetchSet = incomingSet
+
+        if (uncached.isEmpty()) return
+
         val currentTracks = _tracks.value
-        trackUris.forEach { uri ->
-            scope.launch {
-                // Get hasEmbeddedArtwork flag for optimization
-                val track = currentTracks.find { it.mediaId == uri }
-                val hasEmbeddedArt = track?.hasEmbeddedArtwork
-                SpotifyStyleArtworkLoader.loadArtwork(uri, hasEmbeddedArt)
+        
+        // Process in optimized batches to avoid overwhelming the system
+        uncached.chunked(5).forEach { batch ->
+            scope.launch(Dispatchers.IO) {
+                batch.forEach { uri ->
+                    try {
+                        // Get hasEmbeddedArtwork flag for optimization
+                        val track = currentTracks.find { it.mediaId == uri }
+                        val hasEmbeddedArt = track?.hasEmbeddedArtwork
+                        SpotifyStyleArtworkLoader.loadArtwork(uri, hasEmbeddedArt)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error prefetching artwork for $uri", e)
+                    }
+                }
+                // Add slight delay between batches to prevent resource contention
+                kotlinx.coroutines.delay(100)
             }
         }
     }
@@ -335,7 +350,6 @@ class SpotifyStyleDataManager private constructor(
     fun cleanup() {
         localFilesService.cleanup()
         SpotifyStyleArtworkLoader.clearCaches()
-        Log.d(TAG, "SpotifyStyleDataManager cleaned up")
     }
 }
 

@@ -63,19 +63,17 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
 
             val listState = rememberLazyListState()
 
-            // Prefetch artwork for visible tracks
+            // Prefetch after scrolling stops: load from first track to last visible track
             LaunchedEffect(listState, tracks) {
-                snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                snapshotFlow { listState.isScrollInProgress }
                     .distinctUntilChanged()
-                    .collectLatest { visibleIndices ->
-                        val visibleTracks = visibleIndices.mapNotNull { index ->
-                            // Account for header item
-                            tracks.getOrNull(index - 1)
-                        }
-                        val mediaUris = visibleTracks.mapNotNull { it.mediaId }
-                        if (mediaUris.isNotEmpty()) {
-                            viewModel.prefetchArtwork(mediaUris)
-                        }
+                    .collectLatest { isScrolling ->
+                        if (isScrolling) return@collectLatest
+                        val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collectLatest
+                        val trackLast = (lastVisible - 1).coerceAtMost(tracks.lastIndex)
+                        if (trackLast < 0) return@collectLatest
+                        val ids = tracks.subList(0, trackLast + 1).map { it.mediaId }
+                        if (ids.isNotEmpty()) viewModel.prefetchArtwork(ids)
                     }
             }
 
@@ -173,7 +171,7 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
                             mediaUri = t.mediaId,
                             contentDescription = t.title,
                             isPlaying = isPlaying,
-                            useGlass = true,
+                            useGlass = false,
                             showIndicator = (com.musify.mu.playback.LocalPlaybackMediaId.current == t.mediaId),
                             onClick = { onPlay(tracks, index) }
                         )

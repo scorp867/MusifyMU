@@ -7,6 +7,9 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import android.util.LruCache
+import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,12 +34,14 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object SpotifyStyleArtworkLoader {
     private const val TAG = "SpotifyArtworkLoader"
-    private const val MAX_MEMORY_ENTRIES = 100
-    private const val MAX_BITMAP_SIZE = 512 // Maximum edge size in pixels
+    private const val MAX_MEMORY_ENTRIES = Int.MAX_VALUE
     
     private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val extractionSemaphore = java.util.concurrent.Semaphore(3, true)
+    
+    // Shared Coil image loader for optimized artwork loading
+    private var artworkImageLoader: ImageLoader? = null
     
     // In-memory LRU cache for artwork URIs
     private val memoryCache = LruCache<String, String>(MAX_MEMORY_ENTRIES)
@@ -74,6 +79,24 @@ object SpotifyStyleArtworkLoader {
     fun initialize(context: Context) {
         appContext = context.applicationContext
         
+        // Initialize shared Coil image loader
+        artworkImageLoader = ImageLoader.Builder(appContext)
+            .memoryCache {
+                MemoryCache.Builder(appContext)
+                    .maxSizePercent(0.50)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(appContext.cacheDir.resolve("artwork_cache"))
+                    .maxSizeBytes(1024 * 1024 * 100) // 100MB
+                    .build()
+            }
+            .crossfade(true)
+            .respectCacheHeaders(false) // Ignore HTTP cache headers for local files
+            .allowHardware(true) // Allow hardware bitmaps for better performance
+            .build()
+        
         // Initialize disk cache directory immediately and verify it works
         try {
             val cacheDir = File(appContext.cacheDir, "spotify_artwork_cache")
@@ -107,13 +130,19 @@ object SpotifyStyleArtworkLoader {
     }
     
     /**
+     * Get the shared Coil image loader
+     */
+    fun getImageLoader(): ImageLoader? = artworkImageLoader
+    
+    /**
      * Get a flow that emits artwork URI updates for a given track URI
      */
     fun getArtworkFlow(trackUri: String): StateFlow<String?> {
-        return uriFlows.getOrPut(trackUri) {
+        val flow = uriFlows.getOrPut(trackUri) {
             val cached = getCachedArtworkUri(trackUri)
             MutableStateFlow(cached)
-        }.asStateFlow()
+        }
+        return flow.asStateFlow()
     }
     
     /**
@@ -122,7 +151,9 @@ object SpotifyStyleArtworkLoader {
     fun getCachedArtworkUri(trackUri: String): String? {
         // Check in-memory cache first
         val cached = memoryCache.get(trackUri)
-        if (cached != null) return if (cached == CACHE_SENTINEL) null else cached
+        if (cached != null) {
+            return if (cached == CACHE_SENTINEL) null else cached
+        }
 
         // Fall back to disk cache on miss so process restarts still show art
         return try {
@@ -132,10 +163,20 @@ object SpotifyStyleArtworkLoader {
                 // Warm memory cache and notify any existing flow listeners
                 cacheArtworkUri(trackUri, fileUri)
                 fileUri
-            } else null
-        } catch (_: Exception) {
+            } else {
+                null
+            }
+        } catch (e: Exception) {
             null
         }
+    }
+
+    /**
+     * Returns true if we have permanently marked this track as having no artwork.
+     * When true, no further extraction attempts should be made.
+     */
+    fun isNoArtwork(trackUri: String): Boolean {
+        return memoryCache.get(trackUri) == CACHE_SENTINEL
     }
     
     /**
@@ -144,6 +185,11 @@ object SpotifyStyleArtworkLoader {
      */
     suspend fun loadArtwork(trackUri: String, hasEmbeddedArtwork: Boolean? = null): String? {
         if (trackUri.isBlank()) return null
+
+        // Do not retry if previously marked as having no artwork
+        if (isNoArtwork(trackUri)) {
+            return null
+        }
 
         // Check if we recently failed on this track to avoid excessive retries
         val lastFailureTime = recentlyFailed[trackUri]
@@ -181,8 +227,8 @@ object SpotifyStyleArtworkLoader {
                 try {
                     val result = extractAndCacheArtwork(trackUri)
                     if (result == null) {
-                        // Mark as recently failed to prevent immediate retries
-                        recentlyFailed[trackUri] = System.currentTimeMillis()
+                        // Permanently mark as no-artwork to disable retries
+                        cacheNoArtwork(trackUri)
                     } else {
                         // Remove from failed list if successful
                         recentlyFailed.remove(trackUri)
@@ -365,35 +411,21 @@ object SpotifyStyleArtworkLoader {
         try {
             Log.d(TAG, "Processing artwork bytes: ${artworkBytes.size} bytes for $trackUri")
 
-            // Decode downsampled to avoid huge bitmaps
-            val bitmap = decodeDownsampled(artworkBytes, MAX_BITMAP_SIZE)
-            if (bitmap == null) {
-                Log.w(TAG, "Failed to decode artwork bytes for $trackUri")
-                return@withContext null
-            }
-
-            // Save to disk cache
+            // Save raw bytes directly - let Coil handle decoding and optimization
             val cacheFile = getDiskCacheFile(trackUri)
             Log.d(TAG, "Saving artwork to: ${cacheFile.absolutePath}")
 
             cacheFile.parentFile?.mkdirs()
+            cacheFile.writeBytes(artworkBytes)
 
-            var success = false
-            cacheFile.outputStream().use { outputStream ->
-                success = bitmap.compress(Bitmap.CompressFormat.JPEG, 85, outputStream)
-                outputStream.flush()
-            }
-
-            if (!success || !cacheFile.exists()) {
-                Log.e(TAG, "Failed to save artwork: success=$success, exists=${cacheFile.exists()}")
-                bitmap.recycle()
+            if (!cacheFile.exists()) {
+                Log.e(TAG, "Failed to save artwork: file does not exist")
                 return@withContext null
             }
 
             val fileUri = "file://${cacheFile.absolutePath}"
             Log.d(TAG, "Artwork processing complete: $fileUri")
 
-            bitmap.recycle()
             fileUri
         } catch (e: Exception) {
             Log.e(TAG, "Error processing artwork for $trackUri", e)
@@ -401,43 +433,6 @@ object SpotifyStyleArtworkLoader {
         }
     }
 
-    private fun decodeDownsampled(bytes: ByteArray, maxEdge: Int): Bitmap? {
-        return try {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            var sample = 1
-            val width = bounds.outWidth
-            val height = bounds.outHeight
-            if (width <= 0 || height <= 0) return null
-            while ((width / sample) > maxEdge || (height / sample) > maxEdge) sample *= 2
-            val opts = BitmapFactory.Options().apply {
-                inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.RGB_565
-            }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-        } catch (e: Exception) {
-            Log.w(TAG, "decodeDownsampled failed: ${e.message}")
-            null
-        }
-    }
-    
-    /**
-     * Resize bitmap to fit within max dimensions while maintaining aspect ratio
-     */
-    private fun resizeBitmap(bitmap: Bitmap, maxSize: Int): Bitmap {
-        val width = bitmap.width
-        val height = bitmap.height
-        
-        if (width <= maxSize && height <= maxSize) {
-            return bitmap
-        }
-        
-        val ratio = kotlin.math.min(maxSize.toFloat() / width, maxSize.toFloat() / height)
-        val newWidth = (width * ratio).toInt()
-        val newHeight = (height * ratio).toInt()
-        
-        return Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-    }
     
     /**
      * Cache artwork URI in memory and notify observers
@@ -450,7 +445,10 @@ object SpotifyStyleArtworkLoader {
         
         // Only notify if value actually changed
         if (previousValue != cacheValue) {
-            uriFlows[trackUri]?.value = artworkUri
+            val flow = uriFlows[trackUri]
+            if (flow != null) {
+                flow.value = artworkUri
+            }
         }
     }
     
@@ -494,7 +492,7 @@ object SpotifyStyleArtworkLoader {
                 }
 
                 batch.forEach { trackUri ->
-                    if (getCachedArtworkUri(trackUri) == null) {
+                    if (getCachedArtworkUri(trackUri) == null && !isNoArtwork(trackUri)) {
                         scope.launch { loadArtwork(trackUri) }
                     }
                 }

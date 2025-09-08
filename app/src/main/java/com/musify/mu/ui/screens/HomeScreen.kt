@@ -130,7 +130,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
 
                     withContext(Dispatchers.Main) {
                         customPlaylists = customPlaylistsData
-                        android.util.Log.d("HomeScreen", "Playlists loaded: ${customPlaylists.size}")
                         // stop showing shimmer after first refresh
                         isLoading = false
                     }
@@ -144,7 +143,6 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     // Listen for changes in cached tracks and refresh home screen data
     LaunchedEffect(Unit) {
         libraryViewModel.dataManagerTracks.collectLatest { tracks ->
-            android.util.Log.d("HomeScreen", "Cached tracks changed: ${tracks.size} tracks, refreshing home data")
             refreshData()
         }
     }
@@ -609,8 +607,7 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
                                                     trackUri = t.mediaId,
                                                     contentDescription = t.title,
                                                     modifier = Modifier.size(40.dp),
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    targetSizePx = 128
+                                                    shape = RoundedCornerShape(6.dp)
                                                 )
                                             },
                                             modifier = Modifier.clickable {
@@ -746,17 +743,19 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
         }
     }
 
-    // Prefetch embedded art for visible recent lists (row-based prefetch for the main column)
+    // Prefetch after scrolling stops for the main column: load from top to last visible
     LaunchedEffect(listState, recentAdded, recentPlayed, favorites) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+        snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
-            .collectLatest { _ ->
-                val visibleTracks = (recentAdded + recentPlayed + favorites).take(60)
-                val uris = visibleTracks.map { it.mediaId }
-                if (uris.isNotEmpty()) {
-                    libraryViewModel.prefetchArtwork(uris)
+            .collectLatest { isScrolling ->
+                if (isScrolling) return@collectLatest
+                val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collectLatest
+                val all = (recentAdded + recentPlayed + favorites)
+                val end = lastVisible.coerceAtMost(all.lastIndex)
+                if (end >= 0) {
+                    val uris = all.subList(0, end + 1).map { it.mediaId }
+                    if (uris.isNotEmpty()) libraryViewModel.prefetchArtwork(uris)
                 }
-                // Simple artwork loading - no preloading needed
             }
     }
 

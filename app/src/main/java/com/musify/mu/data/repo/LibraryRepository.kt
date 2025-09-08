@@ -9,6 +9,9 @@ import com.musify.mu.data.db.entities.*
 import com.musify.mu.data.media.SpotifyStyleDataManager
 import com.musify.mu.data.media.LoadingState
 import kotlinx.coroutines.flow.Flow
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +50,43 @@ class LibraryRepository @Inject constructor(
                 emptyList()
             }
         }
+    }
+
+    // Paged tracks from Room (for very large libraries / fast flings)
+    fun pagedTracks(
+        pageSize: Int = 100,
+        prefetchDistance: Int = 50,
+        initialLoadSize: Int = 200,
+        enablePlaceholders: Boolean = false
+    ): Flow<PagingData<Track>> {
+        return Pager(
+            config = PagingConfig(
+                pageSize = pageSize,
+                prefetchDistance = prefetchDistance,
+                initialLoadSize = initialLoadSize,
+                enablePlaceholders = enablePlaceholders
+            ),
+            pagingSourceFactory = { db.dao().pagingAllTracks() }
+        ).flow
+    }
+
+    fun pagedSearch(
+        query: String,
+        pageSize: Int = 100,
+        prefetchDistance: Int = 50,
+        initialLoadSize: Int = 200,
+        enablePlaceholders: Boolean = false
+    ): Flow<PagingData<Track>> {
+        val q = "%${query}%"
+        return Pager(
+            config = PagingConfig(
+                pageSize = pageSize,
+                prefetchDistance = prefetchDistance,
+                initialLoadSize = initialLoadSize,
+                enablePlaceholders = enablePlaceholders
+            ),
+            pagingSourceFactory = { db.dao().pagingSearchTracks(q) }
+        ).flow
     }
 
 

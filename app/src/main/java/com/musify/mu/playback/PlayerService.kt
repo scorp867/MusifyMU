@@ -103,7 +103,6 @@ class PlayerService : MediaLibraryService() {
         override fun onStop(owner: LifecycleOwner) {
             // App is going to background - save state
             if (componentsInitialized && instance === this@PlayerService) {
-                android.util.Log.d("PlayerService", "App going to background - saving state")
                 saveCompletePlaybackState()
             }
         }
@@ -181,11 +180,9 @@ class PlayerService : MediaLibraryService() {
 
 		// If components are already initialized, don't reinitialize
 		if (componentsInitialized) {
-			android.util.Log.d("PlayerService", "Player already initialized")
 			return
 		}
 
-		android.util.Log.d("PlayerService", "Initializing player and queue")
 
 		// Attach listeners to the injected player
 		exoPlayer.addListener(object : Player.Listener {
@@ -195,15 +192,12 @@ class PlayerService : MediaLibraryService() {
 						if (isPlaying) {
 							audioFocusManager.request()
 							// When playback starts, Media3 should replace our temporary notification
-							android.util.Log.d("PlayerService", "Playback started - Media3 notification should be active")
 						} else {
 							audioFocusManager.abandon()
 							// Let Media3 handle notification state - don't interfere
-							android.util.Log.d("PlayerService", "Playback paused - Media3 manages notification state")
 						}
 					} else if (!isPlaying) {
 						// If not playing and no valid media, we might need to stop the service
-						android.util.Log.d("PlayerService", "No valid media and not playing - service may need cleanup")
 					}
 					if (isPlaying) {
 						cancelPendingStop()

@@ -17,8 +17,15 @@ interface AppDao {
     @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
     suspend fun getAllTracks(): List<Track>
 
+    // Paging sources
+    @Query("SELECT * FROM track ORDER BY title COLLATE NOCASE")
+    fun pagingAllTracks(): androidx.paging.PagingSource<Int, Track>
+
     @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
     suspend fun searchTracks(q: String): List<Track>
+
+    @Query("SELECT * FROM track WHERE title LIKE :q OR artist LIKE :q OR album LIKE :q ORDER BY title COLLATE NOCASE")
+    fun pagingSearchTracks(q: String): androidx.paging.PagingSource<Int, Track>
 
     @Query("SELECT * FROM track WHERE mediaId = :mediaId")
     suspend fun getTrack(mediaId: String): Track?

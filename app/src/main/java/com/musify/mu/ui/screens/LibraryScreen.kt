@@ -9,7 +9,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -48,6 +47,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.LoadState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import com.musify.mu.playback.LocalMediaController
@@ -79,25 +80,20 @@ fun LibraryScreen(
     val controller = LocalMediaController.current
     val queueOperationsManager = rememberQueueOperations()
 
-    val allTracks by viewModel.allTracks.collectAsState()
-    val isLoading by remember { derivedStateOf { viewModel.loadingState.value is LoadingState.Idle || viewModel.loadingState.value is LoadingState.Loading } }
+    val allTracks by remember { derivedStateOf { viewModel.allTracks } }
     var searchQuery by remember { mutableStateOf("") }
     var visualSearchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
+
+    // Simplified loading state
+    val isLoading by viewModel.loadingState.collectAsState()
+    val isLoadingTracks = isLoading is LoadingState.Loading
 
     // Visual state for add-to-queue operations
     var queueOperationsState by remember { mutableStateOf<Map<String, QueueOperation>>(emptyMap()) }
     var isProcessingQueueOps by remember { mutableStateOf(false) }
 
     // Debounced search with visual-only immediate feedback
-    val tracks = if (searchQuery.isBlank()) allTracks else viewModel.searchTracks(searchQuery)
-
-    // Visual tracks for immediate search feedback
-    val visualTracks = if (visualSearchQuery.isBlank()) allTracks else allTracks.filter { t ->
-        t.title.contains(visualSearchQuery, ignoreCase = true) ||
-                t.artist.contains(visualSearchQuery, ignoreCase = true) ||
-                t.album.contains(visualSearchQuery, ignoreCase = true)
-    }
 
     // Debounced search to prevent excessive filtering
     LaunchedEffect(visualSearchQuery) {
@@ -116,45 +112,26 @@ fun LibraryScreen(
 
     // Observe background loading progress and get data from cache
     LaunchedEffect(hasPermissions) {
-        android.util.Log.d("LibraryScreen", "LaunchedEffect triggered - hasPermissions: $hasPermissions")
         if (hasPermissions) {
             // Ensure data manager is initialized
             coroutineScope.launch {
                 try {
-                    android.util.Log.d("LibraryScreen", "Ensuring data manager is initialized...")
                     viewModel.ensureDataManagerInitialized()
-                    android.util.Log.d("LibraryScreen", "Data manager ready")
                 } catch (e: Exception) {
                     android.util.Log.e("LibraryScreen", "Failed to initialize data manager", e)
                 }
             }
-
-            // Observe the cached tracks flow for real-time updates (this is the single source of truth)
-            viewModel.dataManagerTracks.collect { tracks ->
-                android.util.Log.d("LibraryScreen", "Cache updated: ${tracks.size} tracks")
-                // allTracks and isLoading are already managed by ViewModel state
-            }
         } else {
-            android.util.Log.d("LibraryScreen", "No permissions granted, clearing tracks")
-            // allTracks and isLoading are already managed by ViewModel state
         }
     }
 
-    // Debug logging for tracks state
-    LaunchedEffect(allTracks) {
-        android.util.Log.d("LibraryScreen", "allTracks changed: ${allTracks.size} tracks")
-        android.util.Log.d("LibraryScreen", "tracks computed: ${tracks.size} tracks")
-        android.util.Log.d("LibraryScreen", "visualTracks computed: ${visualTracks.size} tracks")
-        android.util.Log.d("LibraryScreen", "isLoading: $isLoading")
-
-        // Log sample track details for debugging
-        if (allTracks.isNotEmpty()) {
-            val sampleTrack = allTracks.first()
-            android.util.Log.d("LibraryScreen", "Sample track - Title: ${sampleTrack.title}, Artist: ${sampleTrack.artist}, Album: ${sampleTrack.album}, AlbumID: ${sampleTrack.albumId}")
-        }
+    // Viewport-aware prefetching
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
+            .collect { visibleItems ->
+                viewModel.onVisibleItemsChanged(visibleItems.map { it.index })
+            }
     }
-
-    // No artwork prefetching needed - all artwork is extracted at app startup
 
     // Background gradient
     val backgroundGradient = Brush.verticalGradient(
@@ -187,39 +164,36 @@ fun LibraryScreen(
             !hasPermissions -> {
                 PermissionDeniedState()
             }
-            isLoading -> {
+            isLoadingTracks -> {
                 LoadingLibrary()
             }
-            tracks.isEmpty() -> {
+            (!isLoadingTracks && allTracks.isEmpty()) -> {
                 EmptyLibrary()
             }
             else -> {
                 // Track list with alphabetical scroll bar
                 Box(modifier = Modifier.fillMaxSize()) {
 
-
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(start = 16.dp, end = 44.dp, top = 8.dp, bottom = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        // Performance optimizations for smooth scrolling
-                        flingBehavior = rememberSnapFlingBehavior(listState),
-                        // Additional performance optimizations
+                        // Allow free flinging for smoother fast scrolls
                         userScrollEnabled = true
                     ) {
-                        itemsIndexed(
-                            items = visualTracks,
-                            key = { index, track -> "library_${index}_${track.mediaId}" },
-                            contentType = { _, _ -> "library_track" }
-                        ) { index, track ->
-
+                        items(
+                            items = allTracks,
+                            key = { track -> track.mediaId },
+                            contentType = { _ -> "library_track" }
+                        ) { track ->
                             // Improved track item without aggressive swipe gestures
                             TrackItem(
                                 track = track,
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onPlay(visualTracks, index)
+                                    val idxInList = allTracks.indexOfFirst { it.mediaId == track.mediaId }.let { if (it >= 0) it else 0 }
+                                    onPlay(allTracks, idxInList)
                                 },
                                 queueOperation = queueOperationsState[track.mediaId],
                                 onAddToQueue = { addToEnd ->
@@ -264,13 +238,12 @@ fun LibraryScreen(
                         }
                     }
 
-                    // Alphabetical scroll bar
-                    // Precompute first-letter index map for O(1) jumps with better performance
-                    val indexMap by remember(visualTracks) {
+                    // Alphabetical scroll bar (based on current tracks)
+                    val indexMap by remember(allTracks) {
                         derivedStateOf {
                             val map = mutableMapOf<String, Int>()
-                            visualTracks.forEachIndexed { i, t ->
-                                val l = getFirstLetter(t.title)
+                            allTracks.forEachIndexed { i, track ->
+                                val l = getFirstLetter(track.title)
                                 if (map[l] == null) map[l] = i
                             }
                             map
@@ -282,9 +255,7 @@ fun LibraryScreen(
                         onLetterSelected = { letter ->
                             val targetIndex = indexMap[letter] ?: -1
                             if (targetIndex >= 0) {
-                                // Use immediate scrolling for instant response
                                 coroutineScope.launch {
-                                    // Use scrollToItem for instant jump without animation
                                     listState.scrollToItem(
                                         index = targetIndex,
                                         scrollOffset = 0
@@ -293,25 +264,11 @@ fun LibraryScreen(
                             }
                         },
                         modifier = Modifier.align(Alignment.CenterEnd),
-                        isVisible = visualTracks.size > 10 // Show for even smaller lists
+                        isVisible = allTracks.size > 10
                     )
                 }
             }
         }
-    }
-    // Prefetch artwork for items around the viewport
-    LaunchedEffect(listState, visualTracks) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo.toList() }
-            .distinctUntilChanged()
-            .collectLatest { visibleItems: List<LazyListItemInfo> ->
-                if (visibleItems.isEmpty()) return@collectLatest
-                val start = (visibleItems.minOf { it.index } - 5).coerceAtLeast(0)
-                val end = (visibleItems.maxOf { it.index } + 5).coerceAtMost(visualTracks.lastIndex)
-                if (start <= end && visualTracks.isNotEmpty()) {
-                    val prefetchUris: List<String> = visualTracks.subList(start, end + 1).map { it.mediaId }
-                    viewModel.prefetchArtwork(prefetchUris)
-                }
-            }
     }
 }
 
@@ -465,8 +422,7 @@ private fun TrackItem(
                         trackUri = track.mediaId,
                         contentDescription = track.title,
                         modifier = Modifier.fillMaxSize(),
-                        shape = RoundedCornerShape(8.dp),
-                        targetSizePx = 128
+                        shape = RoundedCornerShape(8.dp)
                     )
                 }
 

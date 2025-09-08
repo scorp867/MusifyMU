@@ -1,5 +1,6 @@
 package com.musify.mu.ui.viewmodels
 
+import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.musify.mu.data.repo.LibraryRepository
@@ -7,28 +8,48 @@ import com.musify.mu.data.media.LoadingState
 import com.musify.mu.data.db.entities.Track
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
+import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
-    public val libraryRepository: LibraryRepository
+    val libraryRepository: LibraryRepository
 ) : ViewModel() {
 
     val loadingState: StateFlow<LoadingState> = libraryRepository.loadingState
-    private val _allTracks = MutableStateFlow<List<Track>>(emptyList())
-    val allTracks: StateFlow<List<Track>> = _allTracks.asStateFlow()
-    
-    // Throttling for artwork prefetching to prevent excessive calls
-    private var lastPrefetchTime = 0L
-    private val prefetchThrottleMs = 5000L // 5 seconds
-    private var lastPrefetchedUris = emptyList<String>()
+    private val _allTracks = mutableStateListOf<Track>()
+    val allTracks: List<Track> get() = _allTracks
+
+    // Conflated/debounced artwork prefetch requests to reduce jank during fast scrolls
+    private val prefetchRequests = MutableSharedFlow<List<String>>(replay = 0, extraBufferCapacity = 64)
+    // Track already-prefetched IDs to avoid duplicate work/logs across small scroll changes
+    private val seenPrefetchedIds: MutableSet<String> = mutableSetOf()
 
     init {
         viewModelScope.launch {
             libraryRepository.dataManager.tracks.collect { tracks ->
-                _allTracks.value = tracks
+                _allTracks.clear()
+                _allTracks.addAll(tracks)
+                
+                // Prefetch artwork for first 20 items
+                libraryRepository.dataManager.prefetchArtwork(tracks.take(20).map { it.mediaId })
             }
+        }
+
+        // Debounce/conflate prefetch requests; only act after the scroll settles briefly
+        viewModelScope.launch {
+            prefetchRequests
+                .map { list -> list.filter { it.isNotBlank() }.toSet() }
+                .debounce(350)
+                .distinctUntilChanged()
+                .map { it.toList() }
+                .collect { uris ->
+                    try {
+                        libraryRepository.dataManager.prefetchArtwork(uris)
+                    } catch (_: Exception) { }
+                }
         }
     }
 
@@ -66,26 +87,37 @@ class LibraryViewModel @Inject constructor(
 
     val dataManagerTracks = libraryRepository.dataManager.tracks
 
+    // Paging flows for large lists and search - removed for now to use direct data manager
+    // val pagedTracks: Flow<PagingData<Track>> = libraryRepository
+    //     .pagedTracks(pageSize = 100, prefetchDistance = 50, initialLoadSize = 200)
+    //     .cachedIn(viewModelScope)
+
+    // fun pagedSearch(query: String): Flow<PagingData<Track>> = libraryRepository
+    //     .pagedSearch(query = query, pageSize = 100, prefetchDistance = 50, initialLoadSize = 200)
+    //     .cachedIn(viewModelScope)
+
     fun prefetchArtwork(uris: List<String>) {
-        val now = System.currentTimeMillis()
-        
-        // Throttle rapid calls and avoid duplicate prefetching
-        if (now - lastPrefetchTime < prefetchThrottleMs || uris == lastPrefetchedUris) {
-            return
+        // Filter to only new, not-yet-prefetched IDs
+        val newIds: List<String> = synchronized(seenPrefetchedIds) {
+            val filtered = uris.filter { it.isNotBlank() && !seenPrefetchedIds.contains(it) }.distinct()
+            if (filtered.isNotEmpty()) {
+                seenPrefetchedIds.addAll(filtered)
+            }
+            filtered
         }
-        
-        lastPrefetchTime = now
-        lastPrefetchedUris = uris
-        
-        viewModelScope.launch {
-            try {
-                libraryRepository.dataManager.prefetchArtwork(uris)
-            } catch (_: Exception) { }
+        if (newIds.isEmpty()) return
+        prefetchRequests.tryEmit(newIds)
+    }
+
+    fun onVisibleItemsChanged(visibleItems: List<Int>) {
+        val uris = visibleItems.take(10).mapNotNull { index ->
+            allTracks.getOrNull(index)?.mediaId
         }
+        prefetchArtwork(uris)
     }
 
     // Convenience snapshot for filtering without new DB calls
-    fun getAllTracksSnapshot(): List<Track> = _allTracks.value
+    fun getAllTracksSnapshot(): List<Track> = _allTracks
 
     // Playlist APIs
     suspend fun playlists(): List<com.musify.mu.data.db.entities.Playlist> = libraryRepository.playlists()

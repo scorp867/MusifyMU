@@ -103,20 +103,15 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
             val density = LocalDensity.current
 
             Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-                // Prefetch artwork for visible items in favorites list
+                // Prefetch after scrolling stops in favorites list
                 LaunchedEffect(reorderState!!.listState, tracks) {
-                    snapshotFlow { reorderState!!.listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                    snapshotFlow { reorderState!!.listState.isScrollInProgress }
                         .distinctUntilChanged()
-                        .collect { visible ->
-                            if (visible.isEmpty() || tracks.isEmpty()) return@collect
-                            val min = (visible.minOrNull() ?: 0) - 2
-                            val max = (visible.maxOrNull() ?: 0) + 8
-                            val start = min.coerceAtLeast(0)
-                            val end = max.coerceAtMost(tracks.lastIndex)
-                            if (start <= end) {
-                                val ids = tracks.subList(start, end + 1).map { it.mediaId }
-                                viewModel.prefetchArtwork(ids)
-                            }
+                        .collect { isScrolling ->
+                            if (isScrolling || tracks.isEmpty()) return@collect
+                            val lastVisible = reorderState!!.listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
+                            val end = lastVisible.coerceAtMost(tracks.lastIndex)
+                            if (end >= 0) viewModel.prefetchArtwork(tracks.subList(0, end + 1).map { it.mediaId })
                         }
                 }
                 LazyColumn(
@@ -197,20 +192,15 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
             val queueOps = rememberQueueOperations()
             val queueOpsScope = rememberCoroutineScope()
             val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-            // Prefetch artwork for visible items
+            // Prefetch after scrolling stops: load from first track to last visible track
             LaunchedEffect(listState, tracks) {
-                snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                snapshotFlow { listState.isScrollInProgress }
                     .distinctUntilChanged()
-                    .collect { visible ->
-                        if (visible.isEmpty() || tracks.isEmpty()) return@collect
-                        val min = (visible.minOrNull() ?: 0) - 2
-                        val max = (visible.maxOrNull() ?: 0) + 8
-                        val start = min.coerceAtLeast(0)
-                        val end = max.coerceAtMost(tracks.lastIndex)
-                        if (start <= end) {
-                            val ids = tracks.subList(start, end + 1).map { it.mediaId }
-                            viewModel.prefetchArtwork(ids)
-                        }
+                    .collect { isScrolling ->
+                        if (isScrolling || tracks.isEmpty()) return@collect
+                        val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
+                        val end = lastVisible.coerceAtMost(tracks.lastIndex)
+                        if (end >= 0) viewModel.prefetchArtwork(tracks.subList(0, end + 1).map { it.mediaId })
                     }
             }
             LazyColumn(

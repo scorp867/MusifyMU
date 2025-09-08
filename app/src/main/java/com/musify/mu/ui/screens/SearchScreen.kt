@@ -298,8 +298,7 @@ private fun SearchResultItem(
                     .size(56.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.1f)),
-                shape = RoundedCornerShape(8.dp),
-                targetSizePx = 128
+                shape = RoundedCornerShape(8.dp)
             )
 
             Spacer(modifier = Modifier.width(12.dp))

@@ -1077,23 +1077,18 @@ fun NowPlayingScreen(navController: NavController) {
                     }
                 )
 
-                // Prefetch artwork for visible queue items
+                // Prefetch after scrolling stops: load from first to last visible queue item (excluding headers)
                 LaunchedEffect(reorderState.listState, visualQueueItems) {
-                    snapshotFlow { reorderState.listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                    snapshotFlow { reorderState.listState.isScrollInProgress }
                         .distinctUntilChanged()
-                        .collect { visible ->
-                            if (visible.isEmpty() || visualQueueItems.isEmpty()) return@collect
-                            val headerRows = headerOffset
-                            val indices = visible.map { it - headerRows }.filter { it in visualQueueItems.indices }
-                            if (indices.isNotEmpty()) {
-                                val start = (indices.minOrNull() ?: 0) - 2
-                                val end = (indices.maxOrNull() ?: 0) + 8
-                                val s = start.coerceAtLeast(0)
-                                val e = end.coerceAtMost(visualQueueItems.lastIndex)
-                                if (s <= e) {
-                                    val ids = visualQueueItems.subList(s, e + 1).map { it.mediaItem.mediaId }
-                                    viewModel.prefetchArtwork(ids)
-                                }
+                        .collect { isScrolling ->
+                            if (isScrolling || visualQueueItems.isEmpty()) return@collect
+                            val lastVisible = reorderState.listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
+                            val contentLast = lastVisible - headerOffset
+                            val end = contentLast.coerceAtMost(visualQueueItems.lastIndex)
+                            if (end >= 0) {
+                                val ids = visualQueueItems.subList(0, end + 1).map { it.mediaItem.mediaId }
+                                viewModel.prefetchArtwork(ids)
                             }
                         }
                 }

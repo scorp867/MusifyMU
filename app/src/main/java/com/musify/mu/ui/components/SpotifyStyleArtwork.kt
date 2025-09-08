@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.CachePolicy
@@ -22,6 +23,7 @@ import coil.size.Size
 import coil.size.Scale
 import com.musify.mu.util.SpotifyStyleArtworkLoader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Spotify-style artwork component that uses on-demand ID3/APIC extraction
@@ -34,13 +36,31 @@ fun SpotifyStyleArtwork(
     modifier: Modifier = Modifier,
     shape: Shape? = null,
     enableOnDemand: Boolean = true,
-    targetSizePx: Int? = null
+    size: Size = Size.ORIGINAL
 ) {
     val context = LocalContext.current
     val finalModifier = if (shape != null) modifier.clip(shape) else modifier
     
     // Observe artwork from Spotify-style loader
     val artworkUri by SpotifyStyleArtworkLoader.getArtworkFlow(trackUri ?: "").collectAsState()
+    
+    // Trigger on-demand extraction when the composable becomes active and no cache is present
+    LaunchedEffect(trackUri, enableOnDemand) {
+        val id = trackUri
+        if (enableOnDemand && !id.isNullOrBlank()) {
+            val cached = SpotifyStyleArtworkLoader.getCachedArtworkUri(id)
+            if (cached == null) {
+                try {
+                    // Fire and forget; loader dedups parallel loads
+                    withContext(Dispatchers.IO) {
+                        com.musify.mu.util.SpotifyStyleArtworkLoader.loadArtwork(id)
+                    }
+                } catch (e: Exception) { 
+                    // Silently handle extraction failures
+                }
+            }
+        }
+    }
     
     Box(
         modifier = finalModifier,
@@ -61,23 +81,13 @@ fun SpotifyStyleArtwork(
         )
         
         if (artworkUri != null) {
-            // Display the extracted artwork
+            // Display the extracted artwork using shared image loader
             AsyncImage(
-                model = run {
-                    val builder = ImageRequest.Builder(context)
-                        .data(artworkUri)
-                        .dispatcher(Dispatchers.IO)
-                        .memoryCachePolicy(CachePolicy.ENABLED)
-                        .diskCachePolicy(CachePolicy.ENABLED)
-                        .crossfade(false) // Disable to prevent flickering
-                        .scale(Scale.FILL)
-
-                    if (targetSizePx != null) {
-                        builder.size(targetSizePx)
-                    }
-
-                    builder.build()
-                },
+                model = ImageRequest.Builder(context)
+                    .data(artworkUri)
+                    .size(size) // Use specified size for better memory management
+                    .build(),
+                imageLoader = SpotifyStyleArtworkLoader.getImageLoader() ?: ImageLoader(context),
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
@@ -123,15 +133,15 @@ fun TrackArtwork(
     contentDescription: String? = null,
     modifier: Modifier = Modifier,
     shape: Shape? = null,
-    targetSizePx: Int? = null
+    enableOnDemand: Boolean = true
 ) {
     SpotifyStyleArtwork(
         trackUri = trackUri,
         contentDescription = contentDescription ?: "Track artwork",
         modifier = modifier,
         shape = shape,
-        enableOnDemand = true,
-        targetSizePx = targetSizePx
+        enableOnDemand = enableOnDemand,
+        size = Size(128, 128) // Compact size for track rows to reduce memory usage
     )
 }
 
@@ -150,7 +160,7 @@ fun CompactArtwork(
         modifier = modifier,
         shape = shape,
         enableOnDemand = true,
-        targetSizePx = 128
+        size = Size(64, 64) // Very compact size for mini player
     )
 }
 
@@ -168,8 +178,7 @@ fun LargeArtwork(
         contentDescription = "Full-screen artwork",
         modifier = modifier,
         shape = shape,
-        enableOnDemand = true,
-        targetSizePx = null
+        enableOnDemand = true
     )
 }
 

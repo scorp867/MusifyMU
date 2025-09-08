@@ -106,6 +106,9 @@ dependencies {
 
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
+    // Profile Installer to improve runtime performance via ART baseline profiles
+    implementation("androidx.profileinstaller:profileinstaller:1.3.1")
+
     // Unit tests
     testImplementation("junit:junit:4.13.2")
 

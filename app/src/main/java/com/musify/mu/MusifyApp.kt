@@ -12,7 +12,7 @@ import kotlinx.coroutines.launch
 import com.musify.mu.data.media.SpotifyStyleDataManager
 import com.musify.mu.data.db.AppDatabase
 import com.musify.mu.data.db.DatabaseProvider
-import com.musify.mu.util.CoilImageLoaderConfig
+import com.musify.mu.util.CoilConfigModule
 import com.musify.mu.util.SpotifyStyleArtworkLoader
 import com.musify.mu.util.isLowMemoryDevice
 
@@ -57,12 +57,12 @@ class MusifyApp : Application(), ImageLoaderFactory {
      * Create optimized Coil ImageLoader for artwork caching
      */
     override fun newImageLoader(): ImageLoader {
-        return if (isLowMemoryDevice()) {
+        return if (isLowMemoryDevice(this)) {
             android.util.Log.d("MusifyApp", "Using low-memory ImageLoader configuration")
-            CoilImageLoaderConfig.createLowMemoryImageLoader(this)
+            CoilConfigModule.provideImageLoader(this)
         } else {
             android.util.Log.d("MusifyApp", "Using optimized ImageLoader configuration")
-            CoilImageLoaderConfig.createOptimizedImageLoader(this)
+            CoilConfigModule.provideImageLoader(this)
         }
     }
 }
