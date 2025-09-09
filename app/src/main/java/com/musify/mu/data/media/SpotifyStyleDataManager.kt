@@ -54,11 +54,6 @@ class SpotifyStyleDataManager private constructor(
     
     private var isInitialized = false
     
-    // Throttling for prefetch requests to prevent spam
-    private var lastPrefetchTime = 0L
-    private var lastPrefetchUris = emptyList<String>()
-    private var lastPrefetchSet: Set<String> = emptySet()
-    private val prefetchCooldownMs = 3000L // 3 seconds
     
     init {
         // Initialize artwork loader
@@ -96,10 +91,6 @@ class SpotifyStyleDataManager private constructor(
                 
                 _tracks.value = tracks
                 
-                // Prefetch artwork for visible tracks only after scan completion
-                if (tracks.isNotEmpty() && scanState is ScanState.Completed) {
-                    prefetchArtworkForTracks(tracks.take(20)) // Prefetch first 20 tracks
-                }
                 
                 // Cache to database for offline access
                 if (tracks.isNotEmpty() && scanState is ScanState.Completed) {
@@ -255,15 +246,6 @@ class SpotifyStyleDataManager private constructor(
         return SpotifyStyleArtworkLoader.loadArtwork(trackUri, hasEmbeddedArt)
     }
     
-    /**
-     * Prefetch artwork for a list of tracks (internal use)
-     */
-    private fun prefetchArtworkForTracks(tracks: List<Track>) {
-        val trackUris = tracks.map { it.mediaId }
-        scope.launch {
-            prefetchArtwork(trackUris)
-        }
-    }
     
     /**
      * Map LocalFilesService scan state to our loading state
@@ -292,50 +274,6 @@ class SpotifyStyleDataManager private constructor(
         )
     }
     
-    /**
-     * Prefetch artwork for a list of track URIs
-     */
-    suspend fun prefetchArtwork(trackUris: List<String>) {
-        val now = System.currentTimeMillis()
-
-        val incomingSet = trackUris.filter { it.isNotBlank() }.toSet()
-
-        // Throttle rapid prefetch requests with same URIs (set-based)
-        if (now - lastPrefetchTime < prefetchCooldownMs && incomingSet == lastPrefetchSet) {
-            return // Skip redundant prefetch request
-        }
-
-        // Compute delta of uncached URIs compared to last seen set
-        val uncached = incomingSet.filter { uri ->
-            SpotifyStyleArtworkLoader.getCachedArtworkUri(uri) == null
-        }.toSet()
-
-        lastPrefetchTime = now
-        lastPrefetchUris = trackUris
-        lastPrefetchSet = incomingSet
-
-        if (uncached.isEmpty()) return
-
-        val currentTracks = _tracks.value
-        
-        // Process in optimized batches to avoid overwhelming the system
-        uncached.chunked(5).forEach { batch ->
-            scope.launch(Dispatchers.IO) {
-                batch.forEach { uri ->
-                    try {
-                        // Get hasEmbeddedArtwork flag for optimization
-                        val track = currentTracks.find { it.mediaId == uri }
-                        val hasEmbeddedArt = track?.hasEmbeddedArtwork
-                        SpotifyStyleArtworkLoader.loadArtwork(uri, hasEmbeddedArt)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error prefetching artwork for $uri", e)
-                    }
-                }
-                // Add slight delay between batches to prevent resource contention
-                kotlinx.coroutines.delay(100)
-            }
-        }
-    }
     
     /**
      * Get whether a track has embedded artwork

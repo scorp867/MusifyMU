@@ -35,7 +35,6 @@ import com.musify.mu.playback.LocalIsPlaying
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
@@ -67,30 +66,6 @@ fun ArtistDetailsScreen(navController: NavController, artist: String, onPlay: (L
 
             val listState = rememberLazyListState()
 
-            // Prefetch after scrolling stops: load from first track to last visible track
-            LaunchedEffect(listState, tracks) {
-                snapshotFlow { listState.isScrollInProgress }
-                    .distinctUntilChanged()
-                    .debounce(100) // Add debounce to prevent excessive calls
-                    .collectLatest { isScrolling ->
-                        if (isScrolling) return@collectLatest
-                        
-                        // Move heavy operations to background thread
-                        withContext(Dispatchers.Default) {
-                            val layoutInfo = listState.layoutInfo
-                            val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
-                            val trackLast = (lastVisible - 1).coerceAtMost(tracks.lastIndex)
-                            if (trackLast < 0) return@withContext
-                            val ids = tracks.subList(0, trackLast + 1).map { it.mediaId }
-                            
-                            if (ids.isNotEmpty()) {
-                                withContext(Dispatchers.Main) {
-                                    viewModel.prefetchArtwork(ids)
-                                }
-                            }
-                        }
-                    }
-            }
 
             LazyColumn(
                 state = listState,

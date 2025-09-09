@@ -28,7 +28,6 @@ import kotlinx.coroutines.launch
 import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.util.toMediaItem
@@ -114,29 +113,6 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
             val density = LocalDensity.current
 
             Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-                // Prefetch after scrolling stops in favorites list
-                LaunchedEffect(reorderState!!.listState, tracks) {
-                    snapshotFlow { reorderState!!.listState.isScrollInProgress }
-                        .distinctUntilChanged()
-                        .debounce(100) // Add debounce to prevent excessive calls
-                        .collect { isScrolling ->
-                            if (isScrolling || tracks.isEmpty()) return@collect
-                            
-                            // Move heavy operations to background thread
-                            withContext(Dispatchers.Default) {
-                                val layoutInfo = reorderState!!.listState.layoutInfo
-                                val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
-                                val end = lastVisible.coerceAtMost(tracks.lastIndex)
-                                
-                                if (end >= 0) {
-                                    val ids = tracks.subList(0, end + 1).map { it.mediaId }
-                                    withContext(Dispatchers.Main) {
-                                        viewModel.prefetchArtwork(ids)
-                                    }
-                                }
-                            }
-                        }
-                }
                 LazyColumn(
                     state = reorderState!!.listState,
                     modifier = Modifier
@@ -215,29 +191,6 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
             val queueOps = rememberQueueOperations()
             val queueOpsScope = rememberCoroutineScope()
             val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-            // Prefetch after scrolling stops: load from first track to last visible track
-            LaunchedEffect(listState, tracks) {
-                snapshotFlow { listState.isScrollInProgress }
-                    .distinctUntilChanged()
-                    .debounce(100) // Add debounce to prevent excessive calls
-                    .collect { isScrolling ->
-                        if (isScrolling || tracks.isEmpty()) return@collect
-                        
-                        // Move heavy operations to background thread
-                        withContext(Dispatchers.Default) {
-                            val layoutInfo = listState.layoutInfo
-                            val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
-                            val end = lastVisible.coerceAtMost(tracks.lastIndex)
-                            
-                            if (end >= 0) {
-                                val ids = tracks.subList(0, end + 1).map { it.mediaId }
-                                withContext(Dispatchers.Main) {
-                                    viewModel.prefetchArtwork(ids)
-                                }
-                            }
-                        }
-                    }
-            }
             LazyColumn(
                 modifier = Modifier
                     .padding(padding)

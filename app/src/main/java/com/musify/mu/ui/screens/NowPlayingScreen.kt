@@ -84,7 +84,6 @@ import java.io.FileOutputStream
 import android.os.Environment
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.core.content.FileProvider
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class,
@@ -1252,30 +1251,6 @@ fun NowPlayingScreen(navController: NavController) {
                     }
                 )
 
-                // Prefetch after scrolling stops: load from first to last visible queue item (excluding headers)
-                LaunchedEffect(queueListState, visualQueueItems) {
-                    snapshotFlow { queueListState.isScrollInProgress }
-                        .distinctUntilChanged()
-                        .debounce(100) // Add debounce to prevent excessive calls
-                        .collect { isScrolling ->
-                            if (isScrolling || visualQueueItems.isEmpty()) return@collect
-                            
-                            // Cache the expensive operations and move heavy work to background thread
-                            withContext(Dispatchers.Default) {
-                                val layoutInfo = queueListState.layoutInfo
-                                val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
-                                val contentLast = lastVisible - headerOffset
-                                val end = contentLast.coerceAtMost(visualQueueItems.lastIndex)
-                                
-                                if (end >= 0) {
-                                    val ids = visualQueueItems.subList(0, end + 1).map { it.mediaItem.mediaId }
-                                    withContext(Dispatchers.Main) {
-                                        viewModel.prefetchArtwork(ids)
-                                    }
-                                }
-                            }
-                        }
-                }
 
                 LazyColumn(
                     state = queueListState,

@@ -125,13 +125,6 @@ fun LibraryScreen(
         }
     }
 
-    // Viewport-aware prefetching
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo.visibleItemsInfo }
-            .collect { visibleItems ->
-                viewModel.onVisibleItemsChanged(visibleItems.map { it.index })
-            }
-    }
 
     // Background gradient
     val backgroundGradient = Brush.verticalGradient(

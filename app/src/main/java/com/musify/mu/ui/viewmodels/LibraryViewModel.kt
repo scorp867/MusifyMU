@@ -22,34 +22,12 @@ class LibraryViewModel @Inject constructor(
     private val _allTracks = mutableStateListOf<Track>()
     val allTracks: List<Track> get() = _allTracks
 
-    // Conflated/debounced artwork prefetch requests to reduce jank during fast scrolls
-    private val prefetchRequests = MutableSharedFlow<List<String>>(replay = 0, extraBufferCapacity = 64)
-    // Track already-prefetched IDs to avoid duplicate work/logs across small scroll changes
-    private val seenPrefetchedIds: MutableSet<String> = mutableSetOf()
-
     init {
         viewModelScope.launch {
             libraryRepository.dataManager.tracks.collect { tracks ->
                 _allTracks.clear()
                 _allTracks.addAll(tracks)
-                
-                // Prefetch artwork for first 20 items
-                libraryRepository.dataManager.prefetchArtwork(tracks.take(20).map { it.mediaId })
             }
-        }
-
-        // Debounce/conflate prefetch requests; only act after the scroll settles briefly
-        viewModelScope.launch {
-            prefetchRequests
-                .map { list -> list.filter { it.isNotBlank() }.toSet() }
-                .debounce(500) // Increased from 350ms to reduce prefetch frequency
-                .distinctUntilChanged()
-                .map { it.toList() }
-                .collect { uris ->
-                    try {
-                        libraryRepository.dataManager.prefetchArtwork(uris)
-                    } catch (_: Exception) { }
-                }
         }
     }
 
@@ -96,25 +74,6 @@ class LibraryViewModel @Inject constructor(
     //     .pagedSearch(query = query, pageSize = 100, prefetchDistance = 50, initialLoadSize = 200)
     //     .cachedIn(viewModelScope)
 
-    fun prefetchArtwork(uris: List<String>) {
-        // Filter to only new, not-yet-prefetched IDs
-        val newIds: List<String> = synchronized(seenPrefetchedIds) {
-            val filtered = uris.filter { it.isNotBlank() && !seenPrefetchedIds.contains(it) }.distinct()
-            if (filtered.isNotEmpty()) {
-                seenPrefetchedIds.addAll(filtered)
-            }
-            filtered
-        }
-        if (newIds.isEmpty()) return
-        prefetchRequests.tryEmit(newIds)
-    }
-
-    fun onVisibleItemsChanged(visibleItems: List<Int>) {
-        val uris = visibleItems.take(10).mapNotNull { index ->
-            allTracks.getOrNull(index)?.mediaId
-        }
-        prefetchArtwork(uris)
-    }
 
     // Convenience snapshot for filtering without new DB calls
     fun getAllTracksSnapshot(): List<Track> = _allTracks

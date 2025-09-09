@@ -30,7 +30,6 @@ import com.musify.mu.ui.components.TrackPickerSheet
 import org.burnoutcrew.reorderable.*
 import org.burnoutcrew.reorderable.ItemPosition
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 import android.content.ContentUris
 import android.provider.MediaStore
@@ -145,29 +144,6 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            // Prefetch after scrolling stops: load from first to last visible track
-            LaunchedEffect(reorderState.listState, visualTracks) {
-                snapshotFlow { reorderState.listState.isScrollInProgress }
-                    .distinctUntilChanged()
-                    .debounce(100) // Add debounce to prevent excessive calls
-                    .collect { isScrolling ->
-                        if (isScrolling || visualTracks.isEmpty()) return@collect
-                        
-                        // Move heavy operations to background thread
-                        withContext(Dispatchers.Default) {
-                            val layoutInfo = reorderState.listState.layoutInfo
-                            val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
-                            val end = lastVisible.coerceAtMost(visualTracks.lastIndex)
-                            
-                            if (end >= 0) {
-                                val ids = visualTracks.subList(0, end + 1).map { it.mediaId }
-                                withContext(Dispatchers.Main) {
-                                    viewModel.prefetchArtwork(ids)
-                                }
-                            }
-                        }
-                    }
-            }
             LazyColumn(
                 state = reorderState.listState,
                 modifier = Modifier

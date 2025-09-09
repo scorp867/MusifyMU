@@ -18,6 +18,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import android.provider.MediaStore
 import java.security.MessageDigest
@@ -38,7 +42,7 @@ object SpotifyStyleArtworkLoader {
     
     private lateinit var appContext: Context
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val extractionSemaphore = java.util.concurrent.Semaphore(3, true)
+    private val extractionSemaphore = java.util.concurrent.Semaphore(2, true) // Reduced from 3 to 2 for better resource management
     
     // Shared Coil image loader for optimized artwork loading
     private var artworkImageLoader: ImageLoader? = null
@@ -51,9 +55,12 @@ object SpotifyStyleArtworkLoader {
     
     // Negative-cache marker kept only in memoryCache via CACHE_SENTINEL; no hard block set
 
-    // Currently loading URIs to prevent duplicate work
-    private val loadingUris = ConcurrentHashMap.newKeySet<String>()
-
+    // Request deduplication - prevents multiple concurrent requests for same track
+    private val activeRequests = ConcurrentHashMap<String, Deferred<String?>>()
+    
+    // Cache synchronization mutex to prevent race conditions
+    private val cacheMutex = Mutex()
+    
     // Content-based cache to prevent duplicate extraction for same files
     private val contentCache = ConcurrentHashMap<String, String>()
     
@@ -182,6 +189,7 @@ object SpotifyStyleArtworkLoader {
     /**
      * Load artwork for a track URI on-demand
      * This is the main entry point that follows Spotify's ID3/APIC extraction pattern
+     * Uses request deduplication to prevent multiple concurrent requests for same track
      */
     suspend fun loadArtwork(trackUri: String, hasEmbeddedArtwork: Boolean? = null): String? {
         if (trackUri.isBlank()) return null
@@ -197,8 +205,8 @@ object SpotifyStyleArtworkLoader {
             return null // Don't retry too soon after failure
         }
 
-        // Check memory cache first
-        val cached = getCachedArtworkUri(trackUri)
+        // Check memory cache first (with proper synchronization)
+        val cached = cacheMutex.withLock { getCachedArtworkUri(trackUri) }
         if (cached != null) {
             return cached
         }
@@ -209,37 +217,51 @@ object SpotifyStyleArtworkLoader {
             val contentCached = contentCache[contentKey]
             if (contentCached != null) {
                 Log.d(TAG, "Found content-based cached artwork for $trackUri")
-                cacheArtworkUri(trackUri, contentCached)
+                cacheMutex.withLock { cacheArtworkUri(trackUri, contentCached) }
                 return contentCached
             }
         }
 
-        // Prevent duplicate loading
-        if (loadingUris.contains(trackUri)) {
-            return null
+        // Request deduplication - if already loading, wait for existing request
+        val existingRequest = activeRequests[trackUri]
+        if (existingRequest != null) {
+            Log.d(TAG, "Deduplicating request for $trackUri - waiting for existing request")
+            return existingRequest.await()
         }
 
-        loadingUris.add(trackUri)
-
-        return try {
+        // Start new request with proper concurrency control
+        val request = scope.async {
             withContext(Dispatchers.IO) {
+                Log.d(TAG, "Acquiring semaphore for artwork extraction: $trackUri (available permits: ${extractionSemaphore.availablePermits()})")
                 extractionSemaphore.acquire()
                 try {
+                    Log.d(TAG, "Starting artwork extraction for: $trackUri")
                     val result = extractAndCacheArtwork(trackUri)
                     if (result == null) {
                         // Permanently mark as no-artwork to disable retries
-                        cacheNoArtwork(trackUri)
+                        cacheMutex.withLock { cacheNoArtwork(trackUri) }
+                        Log.d(TAG, "No artwork found for: $trackUri")
                     } else {
                         // Remove from failed list if successful
                         recentlyFailed.remove(trackUri)
+                        Log.d(TAG, "Successfully extracted artwork for: $trackUri")
                     }
                     result
                 } finally {
                     extractionSemaphore.release()
+                    Log.d(TAG, "Released semaphore for: $trackUri (available permits: ${extractionSemaphore.availablePermits()})")
                 }
             }
+        }
+
+        // Store the request for deduplication
+        activeRequests[trackUri] = request
+
+        return try {
+            request.await()
         } finally {
-            loadingUris.remove(trackUri)
+            // Clean up the request when done
+            activeRequests.remove(trackUri)
         }
     }
     
@@ -477,28 +499,6 @@ object SpotifyStyleArtworkLoader {
         return File(diskCacheDir, "$hash.jpg")
     }
     
-    /**
-     * Prefetch artwork for multiple tracks with optimized batching
-     */
-    fun prefetchArtwork(trackUris: List<String>) {
-        if (!::appContext.isInitialized) return
-
-        // Process in optimized batches to avoid overwhelming the system
-        trackUris.distinct().take(100).chunked(10).forEachIndexed { batchIndex, batch ->
-            scope.launch {
-                // Stagger batch processing to prevent resource contention
-                if (batchIndex > 0) {
-                    kotlinx.coroutines.delay(100L * batchIndex)
-                }
-
-                batch.forEach { trackUri ->
-                    if (getCachedArtworkUri(trackUri) == null && !isNoArtwork(trackUri)) {
-                        scope.launch { loadArtwork(trackUri) }
-                    }
-                }
-            }
-        }
-    }
     
     /**
      * Store artwork bytes directly (e.g., from ExoPlayer metadata)
@@ -559,31 +559,6 @@ object SpotifyStyleArtworkLoader {
         return artworkUri
     }
 
-    /**
-     * Preload artwork for queue tracks (for smooth transitions)
-     */
-    fun preloadQueueArtwork(trackUris: List<String>) {
-        if (!::appContext.isInitialized) return
-
-        // Prioritize first few tracks in queue
-        val priorityTracks = trackUris.take(10)
-        val remainingTracks = trackUris.drop(10).take(20)
-
-        // Load priority tracks immediately
-        priorityTracks.forEach { trackUri ->
-            scope.launch {
-                getNowPlayingArtwork(trackUri)
-            }
-        }
-
-        // Load remaining tracks with slight delay
-        if (remainingTracks.isNotEmpty()) {
-            scope.launch {
-                kotlinx.coroutines.delay(500) // Allow priority tracks to load first
-                prefetchArtwork(remainingTracks)
-            }
-        }
-    }
 
     /**
      * Clear all caches
