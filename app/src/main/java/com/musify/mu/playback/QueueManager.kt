@@ -785,7 +785,8 @@ class QueueManager(
                         mediaItem = mediaItem,
                         position = index,
                         source = QueueSource.USER_ADDED,
-                        context = currentContext
+                        context = currentContext,
+                        uid = "${mediaItem.mediaId}_${mediaItem.mediaMetadata.title}_${index}" // Stable uid for new items
                     )
                 when (qi.source) {
                     QueueSource.PLAY_NEXT -> priorityList.add(qi)
@@ -910,13 +911,14 @@ class QueueManager(
                         // Keep reference identity to support === mapping
                         result.add(match)
                     } else {
-                        // Fallback: synthesize a minimal QueueItem preserving metadata
+                        // Fallback: synthesize a minimal QueueItem preserving metadata with stable uid
                         result.add(
                             QueueItem(
                                 mediaItem = mi,
                                 position = index,
                                 source = QueueSource.USER_ADDED,
-                                context = currentContext
+                                context = currentContext,
+                                uid = "${mi.mediaId}_${mi.mediaMetadata.title}_${index}" // Stable uid for synthetic items
                             )
                         )
                     }

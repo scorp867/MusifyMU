@@ -69,6 +69,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -81,6 +82,7 @@ import android.webkit.MimeTypeMap
 import java.io.File
 import java.io.FileOutputStream
 import android.os.Environment
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.withContext
 
@@ -1017,6 +1019,11 @@ fun NowPlayingScreen(navController: NavController) {
                 // Enhanced reorderable state with improved drag logic
                 var visualQueueItems by remember { mutableStateOf(queueItems) }
                 var isDragging by remember { mutableStateOf(false) }
+                var draggingUid by remember { mutableStateOf<String?>(null) }
+                var dragFromVisibleIndex by remember { mutableStateOf<Int?>(null) }
+                var autoscrollJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+                var lastVisualUpdateTime by remember { mutableStateOf(0L) }
+                var latestAbsIndex by remember { mutableStateOf(0) }
 
                 // Sync visual queue with real queue data
                 LaunchedEffect(queueItems) {
@@ -1025,7 +1032,13 @@ fun NowPlayingScreen(navController: NavController) {
                     }
                 }
 
-                val headerOffset = remember(t, qState.currentIndex) { 1 + if (t != null) 1 else 0 }
+                // Calculate header offset based on actual LazyList structure
+                // Context header (always present) + Sticky header (if current track exists)
+                val headerOffset = remember(t, qState.currentIndex) { 
+                    val contextHeaderCount = 1 // "Playing from {source}" header
+                    val stickyHeaderCount = if (t != null) 1 else 0 // Now playing sticky header
+                    contextHeaderCount + stickyHeaderCount
+                }
 
                 // React to queue changes to update visuals in real-time
                 LaunchedEffect(queueChanges) {
@@ -1037,40 +1050,182 @@ fun NowPlayingScreen(navController: NavController) {
                     }
                 }
 
+                // Use an explicit LazyListState so we can control autoscroll without self-reference issues
+                val queueListState = rememberLazyListState()
+
                 val reorderState = rememberReorderableLazyListState(
+                    listState = queueListState,
                     onMove = { from, to ->
-                        // Adjust indices to account for non-reorderable header rows above the list
-                        val fromVis = from.index - headerOffset
-                        val toVis = to.index - headerOffset
-                        if (fromVis in visualQueueItems.indices && toVis in 0..visualQueueItems.size) {
-                            val mutable = visualQueueItems.toMutableList()
-                            val moved = mutable.removeAt(fromVis)
-                            val insertTo = toVis.coerceIn(0, mutable.size)
-                            mutable.add(insertTo, moved)
-                            visualQueueItems = mutable
+                        val contentStart = headerOffset
+                        val contentEndExclusive = headerOffset + visualQueueItems.size
+
+                        val fromAbs = from.index
+                        val toAbs = to.index
+                        latestAbsIndex = toAbs // Update shared state for autoscroll
+
+                        val fromVis = fromAbs - contentStart
+                        // if drag started from header/outside visible content, ignore the move
+                        if (fromVis !in visualQueueItems.indices) {
                             isDragging = true
+                            return@rememberReorderableLazyListState
                         }
-                    },
-                    onDragEnd = { from, to ->
-                        val fromIdx = from - headerOffset
-                        val toIdx = to - headerOffset
-                        if (fromIdx != toIdx && fromIdx >= 0 && toIdx >= 0 && fromIdx < visualQueueItems.size && toIdx <= visualQueueItems.size - 1) {
-                            coroutineScope.launch {
-                                try {
-                                    val fromCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(fromIdx)
-                                    val toCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(toIdx)
-                                    if (fromCombinedIdx >= 0 && toCombinedIdx >= 0) {
-                                        queueOps.moveItem(fromCombinedIdx, toCombinedIdx)
-                                    }
-                                    visualQueueItems = queueOps.getVisibleQueue()
-                                } catch (e: Exception) {
-                                    android.util.Log.e("QueueScreenDBG", "NP: Error during drag operation", e)
-                                    visualQueueItems = queueOps.getVisibleQueue()
-                                } finally {
-                                    isDragging = false
+
+                        // capture initial drag info once
+                        if (dragFromVisibleIndex == null) {
+                            dragFromVisibleIndex = fromVis
+                            draggingUid = visualQueueItems.getOrNull(fromVis)?.uid
+                        }
+
+                        // autoscroll hot zones with continuous scrolling
+                        // Enable autoscroll when dragging above sticky header OR near the sticky header
+                        val topHotZoneAbs = contentStart + 2 // Start autoscroll when item is 2 positions from sticky header
+                        val bottomHotZoneAbs = contentEndExclusive - 2 // Start autoscroll when item is 2 positions from bottom
+
+                        // Debug logging
+                        android.util.Log.d("DragDebug", "toAbs=$toAbs, contentStart=$contentStart, topHotZoneAbs=$topHotZoneAbs, bottomHotZoneAbs=$bottomHotZoneAbs")
+
+                        // Cancel any existing autoscroll job
+                        autoscrollJob?.cancel()
+
+                        // Enable autoscroll when dragging above sticky header OR near the sticky header
+                        if (toAbs <= topHotZoneAbs) {
+                            android.util.Log.d("DragDebug", "Triggering UPWARD autoscroll (above or near sticky header)")
+                            autoscrollJob = coroutineScope.launch {
+                                while (isDragging) {
+                                    try { 
+                                        // Re-read current position from shared state
+                                        val currentAbs = latestAbsIndex
+                                        if (currentAbs > topHotZoneAbs) break // Exit if no longer in hot zone
+                                        
+                                        queueListState.scrollBy(-32f) // Smaller increments for smoother movement
+                                        kotlinx.coroutines.delay(20) // Higher frequency for smoother perception
+                                    } catch (_: Throwable) { break }
                                 }
                             }
+                        } else if (toAbs >= bottomHotZoneAbs && toAbs < contentEndExclusive) {
+                            // Only trigger downward autoscroll if we're actually dragging downward
+                            // Check if the current position is below the original drag position
+                            val originalDragPos = dragFromVisibleIndex?.let { it + contentStart } ?: fromAbs
+                            if (toAbs > originalDragPos) {
+                                android.util.Log.d("DragDebug", "Triggering DOWNWARD autoscroll (dragging downward)")
+                                autoscrollJob = coroutineScope.launch {
+                                    while (isDragging) {
+                                        try { 
+                                            // Re-read current position from shared state
+                                            val currentAbs = latestAbsIndex
+                                            if (currentAbs < bottomHotZoneAbs || currentAbs >= contentEndExclusive) break // Exit if no longer in hot zone
+                                            
+                                            queueListState.scrollBy(32f) // Smaller increments for smoother movement
+                                            kotlinx.coroutines.delay(20) // Higher frequency for smoother perception
+                                        } catch (_: Throwable) { break }
+                                    }
+                                }
+                            } else {
+                                android.util.Log.d("DragDebug", "No downward autoscroll - not actually dragging downward (toAbs=$toAbs, originalDragPos=$originalDragPos)")
+                            }
                         } else {
+                            android.util.Log.d("DragDebug", "No autoscroll triggered - toAbs=$toAbs not in autoscroll zones")
+                        }
+
+                        // Always perform visual reordering within the content segment, regardless of direction
+                        // Use a "ghost insert row" approach for items dragged above the first visible content item
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastVisualUpdateTime > 20) { // Reduced throttle to 20ms for smoother updates
+                            val targetVisualIndex = when {
+                                toAbs < contentStart -> 0 // Above header zone - target first position
+                                toAbs >= contentEndExclusive -> visualQueueItems.lastIndex.coerceAtLeast(0) // Below content - target last position
+                                else -> (toAbs - contentStart).coerceIn(0, visualQueueItems.lastIndex) // Within content area
+                            }
+
+                            // Only reorder if the target position is different from current position
+                            val currentIndexOfDragging = draggingUid?.let { uid ->
+                                visualQueueItems.indexOfFirst { it.uid == uid }
+                            } ?: -1
+
+                            if (currentIndexOfDragging >= 0 && currentIndexOfDragging != targetVisualIndex) {
+                                val mutable = visualQueueItems.toMutableList()
+                                val moved = mutable.removeAt(currentIndexOfDragging)
+                                val insertTo = targetVisualIndex.coerceIn(0, mutable.size)
+                                mutable.add(insertTo, moved)
+                                visualQueueItems = mutable
+                                lastVisualUpdateTime = currentTime
+                                android.util.Log.d("DragDebug", "Visual reordering: moved item from $currentIndexOfDragging to position $insertTo")
+                            }
+                        }
+                        isDragging = true
+                    },
+                    onDragEnd = { from, to ->
+                        val contentStart = headerOffset
+                        val contentEndExclusive = headerOffset + visualQueueItems.size
+
+                        val fromAbs = from
+                        val toAbs = to
+                        val fallbackFromVis = (fromAbs - contentStart)
+                        val clampedToVis = (toAbs.coerceIn(contentStart, contentEndExclusive)) - contentStart
+
+                        // Determine final visual position by finding current index of dragged item
+                        val finalIdxFromVisual = draggingUid?.let { uid ->
+                            visualQueueItems.indexOfFirst { it.uid == uid }
+                        }?.takeIf { it >= 0 } ?: run {
+                            // Fallback: compute from pointer position
+                            when {
+                                toAbs <= contentStart -> 0
+                                toAbs >= (contentEndExclusive - 1) -> (visualQueueItems.size - 1).coerceAtLeast(0)
+                                else -> clampedToVis
+                            }
+                        }
+                        
+                        val fromIdx = (dragFromVisibleIndex ?: fallbackFromVis)
+                        
+                        // Debug logging for onDragEnd
+                        android.util.Log.d("DragDebug", "onDragEnd: toAbs=$toAbs, contentStart=$contentStart, contentEndExclusive=$contentEndExclusive")
+                        android.util.Log.d("DragDebug", "onDragEnd: clampedToVis=$clampedToVis, draggingUid=$draggingUid, finalIdxFromVisual=$finalIdxFromVisual")
+
+                        val clearTracking: () -> Unit = {
+                            draggingUid = null
+                            dragFromVisibleIndex = null
+                            autoscrollJob?.cancel()
+                            autoscrollJob = null
+                        }
+
+                        try {
+                            if (fromIdx >= 0 && fromIdx < visualQueueItems.size &&
+                                finalIdxFromVisual >= 0 && finalIdxFromVisual < visualQueueItems.size &&
+                                fromIdx != finalIdxFromVisual) {
+                                coroutineScope.launch {
+                                    try {
+                                        // Use the existing mapping functions which are designed for this purpose
+                                        val fromCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(fromIdx)
+                                        val toCombinedIdx = queueOps.getVisibleToCombinedIndexMapping(finalIdxFromVisual)
+                                        
+                                        // Debug logging for move operation
+                                        android.util.Log.d("DragDebug", "Move operation: fromIdx=$fromIdx, finalIdxFromVisual=$finalIdxFromVisual")
+                                        android.util.Log.d("DragDebug", "Combined indices: fromCombinedIdx=$fromCombinedIdx, toCombinedIdx=$toCombinedIdx")
+                                        
+                                        if (fromCombinedIdx >= 0 && toCombinedIdx >= 0 && fromCombinedIdx != toCombinedIdx) {
+                                            queueOps.moveItem(fromCombinedIdx, toCombinedIdx)
+                                        } else {
+                                            android.util.Log.w("DragDebug", "Invalid move operation: fromCombinedIdx=$fromCombinedIdx, toCombinedIdx=$toCombinedIdx")
+                                        }
+                                        visualQueueItems = queueOps.getVisibleQueue()
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("QueueScreenDBG", "NP: Error during drag operation", e)
+                                        visualQueueItems = queueOps.getVisibleQueue()
+                                    } finally {
+                                        clearTracking()
+                                        isDragging = false
+                                    }
+                                }
+                            } else {
+                                android.util.Log.d("DragDebug", "No move operation: fromIdx=$fromIdx, finalIdxFromVisual=$finalIdxFromVisual, visualQueueItems.size=${visualQueueItems.size}")
+                                clearTracking()
+                                isDragging = false
+                                visualQueueItems = queueItems.toList()
+                            }
+                        } catch (e: Exception) {
+                            // Emergency cleanup in case of any unexpected errors
+                            android.util.Log.e("QueueScreenDBG", "NP: Critical error during drag end", e)
+                            clearTracking()
                             isDragging = false
                             visualQueueItems = queueItems.toList()
                         }
@@ -1078,12 +1233,12 @@ fun NowPlayingScreen(navController: NavController) {
                 )
 
                 // Prefetch after scrolling stops: load from first to last visible queue item (excluding headers)
-                LaunchedEffect(reorderState.listState, visualQueueItems) {
-                    snapshotFlow { reorderState.listState.isScrollInProgress }
+                LaunchedEffect(queueListState, visualQueueItems) {
+                    snapshotFlow { queueListState.isScrollInProgress }
                         .distinctUntilChanged()
                         .collect { isScrolling ->
                             if (isScrolling || visualQueueItems.isEmpty()) return@collect
-                            val lastVisible = reorderState.listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
+                            val lastVisible = queueListState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
                             val contentLast = lastVisible - headerOffset
                             val end = contentLast.coerceAtMost(visualQueueItems.lastIndex)
                             if (end >= 0) {
@@ -1094,7 +1249,7 @@ fun NowPlayingScreen(navController: NavController) {
                 }
 
                 LazyColumn(
-                    state = reorderState.listState,
+                    state = queueListState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .reorderable(reorderState),

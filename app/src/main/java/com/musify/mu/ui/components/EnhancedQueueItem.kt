@@ -75,7 +75,7 @@ fun EnhancedQueueTrackItem(
     )
 
     val rotation by animateFloatAsState(
-        targetValue = if (isDragging) 1.5f else 0f, // Reduced rotation for performance
+        targetValue = if (isDragging) 0.5f else 0f, // Further reduced rotation for better performance
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
@@ -106,9 +106,9 @@ fun EnhancedQueueTrackItem(
         label = "borderColor"
     )
 
-    // Pulsing animation for currently playing
+    // Pulsing animation for currently playing - disabled during drag for stability
     val pulseScale by animateFloatAsState(
-        targetValue = if (isCurrentlyPlaying) 1.02f else 1f,
+        targetValue = if (isCurrentlyPlaying && !isDragging) 1.02f else 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(2000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -127,14 +127,14 @@ fun EnhancedQueueTrackItem(
                 // Hardware acceleration for smooth rendering
                 if (config.enableHardwareAcceleration) {
                     compositingStrategy = if (isDragging) {
-                        CompositingStrategy.Offscreen // Offscreen rendering during drag
+                        CompositingStrategy.Auto // Use Auto instead of Offscreen to avoid overdraw
                     } else {
                         CompositingStrategy.Auto
                     }
                 }
 
-                // Optimize alpha during drag for better performance
-                alpha = if (isDragging) 0.95f else 1f
+                // Keep alpha at 1f during drag to avoid blur and overdraw
+                alpha = 1f
             }
             .clickable {
                 if (config.enableHapticFeedback) {

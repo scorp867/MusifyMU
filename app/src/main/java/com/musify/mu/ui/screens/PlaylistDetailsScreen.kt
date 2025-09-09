@@ -86,10 +86,17 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
     val reorderState = rememberReorderableLazyListState(
         onMove = { from, to ->
             // Update ONLY visual state for smooth UI feedback
-            visualTracks = visualTracks.toMutableList().apply {
-                add(to.index, removeAt(from.index))
+            // Ensure indices are within bounds to prevent crashes
+            val fromIdx = from.index
+            val toIdx = to.index
+            if (fromIdx in visualTracks.indices && toIdx in 0..visualTracks.size) {
+                visualTracks = visualTracks.toMutableList().apply {
+                    val moved = removeAt(fromIdx)
+                    val insertTo = toIdx.coerceIn(0, size)
+                    add(insertTo, moved)
+                }
+                isDragging = true
             }
-            isDragging = true
         },
         onDragEnd = { from, to ->
             val fromIdx = from

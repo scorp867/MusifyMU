@@ -75,8 +75,17 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
 
     val reorderState = if (type == "favorites") rememberReorderableLazyListState(
         onMove = { from, to ->
-            val mutableTracks = displayTracks.toMutableList().apply { add(to.index, removeAt(from.index)) }
-            tracks = mutableTracks
+            // Ensure indices are within bounds to prevent crashes
+            val fromIdx = from.index
+            val toIdx = to.index
+            if (fromIdx in displayTracks.indices && toIdx in 0..displayTracks.size) {
+                val mutableTracks = displayTracks.toMutableList().apply { 
+                    val moved = removeAt(fromIdx)
+                    val insertTo = toIdx.coerceIn(0, size)
+                    add(insertTo, moved)
+                }
+                tracks = mutableTracks
+            }
         },
         onDragEnd = { _, _ ->
             // Persist once after drop

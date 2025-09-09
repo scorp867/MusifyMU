@@ -258,6 +258,20 @@ class EnhancedQueueOperations(private val queueManager: QueueManager?) {
         return queueManager?.getVisibleToCombinedIndexMapping(visibleIndex) ?: -1
     }
 
+    /**
+     * Get combined queue index by uid for safer drag operations
+     */
+    fun getUidToCombinedIndex(uid: String): Int {
+        return queueManager?.getQueueSnapshot()?.indexOfFirst { it.uid == uid } ?: -1
+    }
+
+    /**
+     * Get combined queue index by media ID for safer drag operations
+     */
+    fun getMediaIdToCombinedIndex(id: String): Int {
+        return queueManager?.getQueueSnapshot()?.indexOfFirst { it.id == id } ?: -1
+    }
+
     fun onTrackChanged(mediaId: String) {
         queueManager?.onTrackChanged(mediaId)
     }

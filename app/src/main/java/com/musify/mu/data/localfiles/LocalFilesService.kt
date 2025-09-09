@@ -6,6 +6,8 @@ import com.musify.mu.data.localfiles.mediastore.MediaStoreReader
 import com.musify.mu.data.localfiles.mediastore.OpenedAudioFiles
 import com.musify.mu.data.localfiles.permissions.LocalFilesPermissionInteractor
 import com.musify.mu.data.localfiles.proto.*
+import com.musify.mu.data.db.DatabaseProvider
+import com.musify.mu.data.db.entities.Track
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runBlocking
 
 /**
  * Main local files service that coordinates MediaStore scanning, permission handling,
@@ -51,6 +54,9 @@ class LocalFilesService private constructor(
     private lateinit var permissionInteractor: LocalFilesPermissionInteractor
     // Deprecated in favor of SpotifyStyleArtworkLoader; keep for API compatibility
     private lateinit var artworkLoader: LocalFileImageLoader
+    
+    // Database for cache checking
+    private val database = DatabaseProvider.get(context)
     
     // Configuration
     private val options = MediaStoreReaderOptions(
@@ -103,7 +109,14 @@ class LocalFilesService private constructor(
             
             // Check permissions and start initial scan if available
             if (permissionInteractor.canScanLocalFiles()) {
-                performInitialScan()
+                // Try to load from cache first, then decide whether to scan
+                if (loadFromCacheIfAvailable()) {
+                    Log.d(TAG, "Loaded tracks from cache, skipping initial scan")
+                    _scanState.value = ScanState.Completed(_tracks.value.size)
+                } else {
+                    Log.d(TAG, "No valid cache found, performing initial scan")
+                    performInitialScan()
+                }
                 startListening()
             } else {
                 Log.w(TAG, "Cannot scan local files - missing permissions")
@@ -117,6 +130,95 @@ class LocalFilesService private constructor(
             Log.e(TAG, "Error initializing LocalFilesService", e)
             _scanState.value = ScanState.Error("Initialization failed: ${e.message}")
         }
+    }
+    
+    /**
+     * Try to load tracks from database cache if available
+     * Returns true if cache was loaded successfully, false if cache should be refreshed
+     */
+    private suspend fun loadFromCacheIfAvailable(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val cachedTracks = database.dao().getAllTracks()
+            
+            // Check if we have a reasonable amount of cached data
+            if (cachedTracks.isEmpty() || cachedTracks.size < 10) {
+                Log.d(TAG, "Cache is empty or too small (${cachedTracks.size} tracks), will rescan")
+                return@withContext false
+            }
+            
+            // Convert cached tracks to LocalTrack format
+            val localTracks = cachedTracks.map { track: Track ->
+                LocalTrack(
+                    id = track.mediaId,
+                    title = track.title,
+                    artist = track.artist,
+                    album = track.album,
+                    duration = track.durationMs,
+                    albumId = track.albumId,
+                    dateAdded = track.dateAddedSec * 1000L, // Convert back to milliseconds
+                    genre = track.genre,
+                    year = track.year,
+                    trackNumber = track.track,
+                    albumArtist = track.albumArtist,
+                    hasEmbeddedArtwork = track.hasEmbeddedArtwork
+                )
+            }
+            
+            // Update in-memory index with cached data
+            _tracks.value = localTracks
+            
+            // Build albums and artists from cached tracks
+            buildAlbumsAndArtistsFromTracks(localTracks)
+            
+            Log.d(TAG, "Successfully loaded ${localTracks.size} tracks from cache")
+            return@withContext true
+            
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load from cache, will rescan", e)
+            return@withContext false
+        }
+    }
+    
+    /**
+     * Build albums and artists from a list of tracks (used for cache loading)
+     */
+    private fun buildAlbumsAndArtistsFromTracks(tracks: List<LocalTrack>) {
+        val sortedTracks = tracks.sortedWith(
+            compareByDescending<LocalTrack> { it.dateAdded }
+                .thenBy { it.artist.lowercase() }
+                .thenBy { it.album.lowercase() }
+                .thenBy { it.trackNumber ?: 0 }
+        )
+        
+        val albums = sortedTracks
+            .filter { it.albumId != null }
+            .groupBy { it.albumId }
+            .map { (albumId, albumTracks) ->
+                val firstTrack = albumTracks.first()
+                LocalAlbum(
+                    id = albumId!!,
+                    name = firstTrack.album,
+                    artist = firstTrack.albumArtist ?: firstTrack.artist,
+                    trackCount = albumTracks.size,
+                    year = albumTracks.mapNotNull { it.year }.minOrNull()
+                )
+            }
+            .sortedBy { it.name.lowercase() }
+        
+        val artists = sortedTracks
+            .groupBy { it.artist }
+            .map { (artistName, artistTracks) ->
+                LocalArtist(
+                    name = artistName,
+                    albumCount = artistTracks.mapNotNull { it.albumId }.distinct().size,
+                    trackCount = artistTracks.size
+                )
+            }
+            .sortedBy { it.name.lowercase() }
+        
+        // Update flows
+        _albums.value = albums
+        _artists.value = artists
     }
     
     /**
