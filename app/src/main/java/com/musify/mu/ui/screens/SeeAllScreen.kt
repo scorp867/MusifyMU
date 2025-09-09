@@ -27,7 +27,9 @@ import com.musify.mu.ui.viewmodels.LibraryViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.material.SwipeToDismiss
 import androidx.compose.material.rememberDismissState
-
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.withContext
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.util.toMediaItem
 import androidx.compose.material.SwipeToDismiss
@@ -116,11 +118,23 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
                 LaunchedEffect(reorderState!!.listState, tracks) {
                     snapshotFlow { reorderState!!.listState.isScrollInProgress }
                         .distinctUntilChanged()
+                        .debounce(100) // Add debounce to prevent excessive calls
                         .collect { isScrolling ->
                             if (isScrolling || tracks.isEmpty()) return@collect
-                            val lastVisible = reorderState!!.listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
-                            val end = lastVisible.coerceAtMost(tracks.lastIndex)
-                            if (end >= 0) viewModel.prefetchArtwork(tracks.subList(0, end + 1).map { it.mediaId })
+                            
+                            // Move heavy operations to background thread
+                            withContext(Dispatchers.Default) {
+                                val layoutInfo = reorderState!!.listState.layoutInfo
+                                val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
+                                val end = lastVisible.coerceAtMost(tracks.lastIndex)
+                                
+                                if (end >= 0) {
+                                    val ids = tracks.subList(0, end + 1).map { it.mediaId }
+                                    withContext(Dispatchers.Main) {
+                                        viewModel.prefetchArtwork(ids)
+                                    }
+                                }
+                            }
                         }
                 }
                 LazyColumn(
@@ -205,11 +219,23 @@ fun SeeAllScreen(navController: NavController, type: String, onPlay: (List<Track
             LaunchedEffect(listState, tracks) {
                 snapshotFlow { listState.isScrollInProgress }
                     .distinctUntilChanged()
+                    .debounce(100) // Add debounce to prevent excessive calls
                     .collect { isScrolling ->
                         if (isScrolling || tracks.isEmpty()) return@collect
-                        val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
-                        val end = lastVisible.coerceAtMost(tracks.lastIndex)
-                        if (end >= 0) viewModel.prefetchArtwork(tracks.subList(0, end + 1).map { it.mediaId })
+                        
+                        // Move heavy operations to background thread
+                        withContext(Dispatchers.Default) {
+                            val layoutInfo = listState.layoutInfo
+                            val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
+                            val end = lastVisible.coerceAtMost(tracks.lastIndex)
+                            
+                            if (end >= 0) {
+                                val ids = tracks.subList(0, end + 1).map { it.mediaId }
+                                withContext(Dispatchers.Main) {
+                                    viewModel.prefetchArtwork(ids)
+                                }
+                            }
+                        }
                     }
             }
             LazyColumn(

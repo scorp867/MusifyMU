@@ -31,7 +31,10 @@ import com.musify.mu.ui.viewmodels.LibraryViewModel
 import com.musify.mu.playback.QueueContextHelper
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.util.toMediaItem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -70,13 +73,24 @@ fun AlbumDetailsScreen(navController: NavController, album: String, artist: Stri
             LaunchedEffect(listState, tracks) {
                 snapshotFlow { listState.isScrollInProgress }
                     .distinctUntilChanged()
+                    .debounce(100) // Add debounce to prevent excessive calls
                     .collectLatest { isScrolling ->
                         if (isScrolling) return@collectLatest
-                        val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collectLatest
-                        val trackLast = (lastVisible - 1).coerceAtMost(tracks.lastIndex)
-                        if (trackLast < 0) return@collectLatest
-                        val ids = tracks.subList(0, trackLast + 1).map { it.mediaId }
-                        if (ids.isNotEmpty()) viewModel.prefetchArtwork(ids)
+                        
+                        // Move heavy operations to background thread
+                        withContext(Dispatchers.Default) {
+                            val layoutInfo = listState.layoutInfo
+                            val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
+                            val trackLast = (lastVisible - 1).coerceAtMost(tracks.lastIndex)
+                            if (trackLast < 0) return@withContext
+                            val ids = tracks.subList(0, trackLast + 1).map { it.mediaId }
+                            
+                            if (ids.isNotEmpty()) {
+                                withContext(Dispatchers.Main) {
+                                    viewModel.prefetchArtwork(ids)
+                                }
+                            }
+                        }
                     }
             }
 

@@ -29,10 +29,11 @@ import kotlinx.coroutines.launch
 import com.musify.mu.ui.components.TrackPickerSheet
 import org.burnoutcrew.reorderable.*
 import org.burnoutcrew.reorderable.ItemPosition
-
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.withContext
 import android.content.ContentUris
 import android.provider.MediaStore
-
 import androidx.compose.material.ExperimentalMaterialApi
 import com.musify.mu.playback.rememberQueueOperations
 import com.musify.mu.playback.QueueContextHelper
@@ -148,11 +149,23 @@ fun PlaylistDetailsScreen(navController: NavController, playlistId: Long, onPlay
             LaunchedEffect(reorderState.listState, visualTracks) {
                 snapshotFlow { reorderState.listState.isScrollInProgress }
                     .distinctUntilChanged()
+                    .debounce(100) // Add debounce to prevent excessive calls
                     .collect { isScrolling ->
                         if (isScrolling || visualTracks.isEmpty()) return@collect
-                        val lastVisible = reorderState.listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collect
-                        val end = lastVisible.coerceAtMost(visualTracks.lastIndex)
-                        if (end >= 0) viewModel.prefetchArtwork(visualTracks.subList(0, end + 1).map { it.mediaId })
+                        
+                        // Move heavy operations to background thread
+                        withContext(Dispatchers.Default) {
+                            val layoutInfo = reorderState.listState.layoutInfo
+                            val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
+                            val end = lastVisible.coerceAtMost(visualTracks.lastIndex)
+                            
+                            if (end >= 0) {
+                                val ids = visualTracks.subList(0, end + 1).map { it.mediaId }
+                                withContext(Dispatchers.Main) {
+                                    viewModel.prefetchArtwork(ids)
+                                }
+                            }
+                        }
                     }
             }
             LazyColumn(

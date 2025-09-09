@@ -72,6 +72,7 @@ import com.musify.mu.playback.rememberQueueOperations
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.debounce
 import androidx.compose.runtime.derivedStateOf
 import com.musify.mu.ui.helpers.MediaControllerListener
 
@@ -747,14 +748,25 @@ fun HomeScreen(navController: NavController, onPlay: (List<Track>, Int) -> Unit)
     LaunchedEffect(listState, recentAdded, recentPlayed, favorites) {
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
+            .debounce(100) // Add debounce to prevent excessive calls
             .collectLatest { isScrolling ->
                 if (isScrolling) return@collectLatest
-                val lastVisible = listState.layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@collectLatest
-                val all = (recentAdded + recentPlayed + favorites)
-                val end = lastVisible.coerceAtMost(all.lastIndex)
-                if (end >= 0) {
-                    val uris = all.subList(0, end + 1).map { it.mediaId }
-                    if (uris.isNotEmpty()) libraryViewModel.prefetchArtwork(uris)
+                
+                // Move heavy operations to background thread
+                withContext(Dispatchers.Default) {
+                    val layoutInfo = listState.layoutInfo
+                    val lastVisible = layoutInfo.visibleItemsInfo.maxOfOrNull { it.index } ?: return@withContext
+                    val all = (recentAdded + recentPlayed + favorites)
+                    val end = lastVisible.coerceAtMost(all.lastIndex)
+                    
+                    if (end >= 0) {
+                        val uris = all.subList(0, end + 1).map { it.mediaId }
+                        if (uris.isNotEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                libraryViewModel.prefetchArtwork(uris)
+                            }
+                        }
+                    }
                 }
             }
     }

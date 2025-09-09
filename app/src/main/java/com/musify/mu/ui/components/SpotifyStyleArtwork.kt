@@ -82,13 +82,18 @@ fun SpotifyStyleArtwork(
         )
         
         if (artworkUri != null) {
-            // Display the extracted artwork using shared image loader
-            AsyncImage(
-                model = ImageRequest.Builder(context)
+            // Display the extracted artwork using shared image loader with stable keys
+            val imageLoader = remember { SpotifyStyleArtworkLoader.getImageLoader() ?: ImageLoader(context) }
+            val imageRequest = remember(artworkUri, size) {
+                ImageRequest.Builder(context)
                     .data(artworkUri)
                     .size(size) // Use specified size for better memory management
-                    .build(),
-                imageLoader = SpotifyStyleArtworkLoader.getImageLoader() ?: ImageLoader(context),
+                    .build()
+            }
+            
+            AsyncImage(
+                model = imageRequest,
+                imageLoader = imageLoader,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop

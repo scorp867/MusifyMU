@@ -42,7 +42,7 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch {
             prefetchRequests
                 .map { list -> list.filter { it.isNotBlank() }.toSet() }
-                .debounce(350)
+                .debounce(500) // Increased from 350ms to reduce prefetch frequency
                 .distinctUntilChanged()
                 .map { it.toList() }
                 .collect { uris ->
