@@ -48,16 +48,17 @@ fun SpotifyStyleArtwork(
     LaunchedEffect(trackUri, enableOnDemand) {
         val id = trackUri
         if (enableOnDemand && !id.isNullOrBlank()) {
-            val cached = SpotifyStyleArtworkLoader.getCachedArtworkUri(id)
-            if (cached == null) {
-                try {
-                    // Fire and forget; loader dedups parallel loads
-                    withContext(Dispatchers.IO) {
+            try {
+                // Move ALL cache operations to background thread to prevent main thread blocking
+                withContext(Dispatchers.IO) {
+                    val cached = SpotifyStyleArtworkLoader.getCachedArtworkUri(id)
+                    if (cached == null) {
+                        // Fire and forget; loader dedups parallel loads
                         com.musify.mu.util.SpotifyStyleArtworkLoader.loadArtwork(id)
                     }
-                } catch (e: Exception) { 
-                    // Silently handle extraction failures
                 }
+            } catch (e: Exception) { 
+                // Silently handle extraction failures
             }
         }
     }
