@@ -1094,14 +1094,22 @@ fun NowPlayingScreen(navController: NavController) {
                         if (toAbs <= topHotZoneAbs) {
                             android.util.Log.d("DragDebug", "Triggering UPWARD autoscroll (above first visible content item)")
                             autoscrollJob = coroutineScope.launch {
+                                var scrollSpeed = 16f // Start with slower speed
+                                var acceleration = 1.2f // Exponential acceleration factor
+                                var maxSpeed = 120f // Maximum scroll speed
+                                
                                 while (isDragging) {
                                     try { 
                                         // Re-read current position from shared state
                                         val currentAbs = latestAbsIndex
                                         if (currentAbs > topHotZoneAbs) break // Exit if no longer in hot zone
                                         
-                                        queueListState.scrollBy(-32f) // Smaller increments for smoother movement
-                                        kotlinx.coroutines.delay(20) // Higher frequency for smoother perception
+                                        queueListState.scrollBy(-scrollSpeed)
+                                        
+                                        // Exponential acceleration - increase speed over time
+                                        scrollSpeed = (scrollSpeed * acceleration).coerceAtMost(maxSpeed)
+                                        
+                                        kotlinx.coroutines.delay(16) // 60fps for smooth exponential curve
                                     } catch (_: Throwable) { break }
                                 }
                             }
@@ -1112,14 +1120,22 @@ fun NowPlayingScreen(navController: NavController) {
                             if (toAbs > originalDragPos) {
                                 android.util.Log.d("DragDebug", "Triggering DOWNWARD autoscroll (dragging downward)")
                                 autoscrollJob = coroutineScope.launch {
+                                    var scrollSpeed = 16f // Start with slower speed
+                                    var acceleration = 1.2f // Exponential acceleration factor
+                                    var maxSpeed = 120f // Maximum scroll speed
+                                    
                                     while (isDragging) {
                                         try { 
                                             // Re-read current position from shared state
                                             val currentAbs = latestAbsIndex
                                             if (currentAbs < bottomHotZoneAbs || currentAbs >= contentEndExclusive) break // Exit if no longer in hot zone
                                             
-                                            queueListState.scrollBy(32f) // Smaller increments for smoother movement
-                                            kotlinx.coroutines.delay(20) // Higher frequency for smoother perception
+                                            queueListState.scrollBy(scrollSpeed)
+                                            
+                                            // Exponential acceleration - increase speed over time
+                                            scrollSpeed = (scrollSpeed * acceleration).coerceAtMost(maxSpeed)
+                                            
+                                            kotlinx.coroutines.delay(16) // 60fps for smooth exponential curve
                                         } catch (_: Throwable) { break }
                                     }
                                 }
