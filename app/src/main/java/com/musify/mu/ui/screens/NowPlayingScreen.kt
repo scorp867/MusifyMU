@@ -1076,20 +1076,23 @@ fun NowPlayingScreen(navController: NavController) {
                             draggingUid = visualQueueItems.getOrNull(fromVis)?.uid
                         }
 
-                        // autoscroll hot zones with continuous scrolling
-                        // Enable autoscroll when dragging above sticky header OR near the sticky header
-                        val topHotZoneAbs = contentStart + 2 // Start autoscroll when item is 2 positions from sticky header
+                        // autoscroll hot zones based on actual visible content, not header position
+                        // Get the first visible content item position from the LazyList state
+                        val firstVisibleContentIndex = queueListState.layoutInfo.visibleItemsInfo
+                            .firstOrNull { it.index >= contentStart }?.index ?: contentStart
+                        
+                        val topHotZoneAbs = firstVisibleContentIndex + 1 // Start autoscroll when item is 1 position above first visible content
                         val bottomHotZoneAbs = contentEndExclusive - 2 // Start autoscroll when item is 2 positions from bottom
 
                         // Debug logging
-                        android.util.Log.d("DragDebug", "toAbs=$toAbs, contentStart=$contentStart, topHotZoneAbs=$topHotZoneAbs, bottomHotZoneAbs=$bottomHotZoneAbs")
+                        android.util.Log.d("DragDebug", "toAbs=$toAbs, contentStart=$contentStart, firstVisibleContentIndex=$firstVisibleContentIndex, topHotZoneAbs=$topHotZoneAbs, bottomHotZoneAbs=$bottomHotZoneAbs")
 
                         // Cancel any existing autoscroll job
                         autoscrollJob?.cancel()
 
-                        // Enable autoscroll when dragging above sticky header OR near the sticky header
+                        // Enable autoscroll when dragging above the first visible content item
                         if (toAbs <= topHotZoneAbs) {
-                            android.util.Log.d("DragDebug", "Triggering UPWARD autoscroll (above or near sticky header)")
+                            android.util.Log.d("DragDebug", "Triggering UPWARD autoscroll (above first visible content item)")
                             autoscrollJob = coroutineScope.launch {
                                 while (isDragging) {
                                     try { 
