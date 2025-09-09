@@ -220,20 +220,38 @@ fun NowPlayingScreen(navController: NavController) {
     LaunchedEffect(currentTrack?.mediaId, currentTrack?.artUri) {
         currentTrack?.let { track ->
             coroutineScope.launch(Dispatchers.IO) {
-                try { android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}")
+                try { 
+                    android.util.Log.d("NowPlayingScreen", "Extracting colors for track: ${track.title}, artUri: ${track.artUri}")
 
-                    val palette = com.musify.mu.util.extractPalette(
-                        context.contentResolver,
-                        track.artUri
-                    )
+                    // First try to get artwork URI from the track
+                    var artworkUri = track.artUri
+                    
+                    // If no artwork URI, try to get it from SpotifyStyleArtworkLoader
+                    if (artworkUri.isNullOrBlank()) {
+                        artworkUri = com.musify.mu.util.SpotifyStyleArtworkLoader.getCachedArtworkUri(track.mediaId)
+                        android.util.Log.d("NowPlayingScreen", "Retrieved artwork URI from loader: $artworkUri")
+                    }
 
-                    val dominant = palette?.getDominantColor(0xFF6236FF.toInt()) ?: 0xFF6236FF.toInt()
-                    val vibrant = palette?.getVibrantColor(0xFF38B6FF.toInt()) ?: 0xFF38B6FF.toInt()
+                    if (!artworkUri.isNullOrBlank()) {
+                        val palette = com.musify.mu.util.extractPalette(
+                            context.contentResolver,
+                            artworkUri
+                        )
 
-                    withContext(Dispatchers.Main) {
-                        dominantColor = Color(dominant)
-                        vibrantColor = Color(vibrant)
-                        android.util.Log.d("NowPlayingScreen", "Applied new colors for ${track.title}")
+                        val dominant = palette?.getDominantColor(0xFF6236FF.toInt()) ?: 0xFF6236FF.toInt()
+                        val vibrant = palette?.getVibrantColor(0xFF38B6FF.toInt()) ?: 0xFF38B6FF.toInt()
+
+                        withContext(Dispatchers.Main) {
+                            dominantColor = Color(dominant)
+                            vibrantColor = Color(vibrant)
+                            android.util.Log.d("NowPlayingScreen", "Applied new colors for ${track.title}: dominant=$dominant, vibrant=$vibrant")
+                        }
+                    } else {
+                        android.util.Log.d("NowPlayingScreen", "No artwork URI available for ${track.title}, using default colors")
+                        withContext(Dispatchers.Main) {
+                            dominantColor = Color(0xFF6236FF)
+                            vibrantColor = Color(0xFF38B6FF)
+                        }
                     }
                 } catch (e: Exception) {
                     android.util.Log.w("NowPlayingScreen", "Failed to extract colors for ${track.title}", e)

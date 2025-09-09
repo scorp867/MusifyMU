@@ -86,7 +86,20 @@ fun resolveTrack(
             repoTrack
         } else {
             android.util.Log.d("MediaControllerHelper", "Track not found in repository, using MediaItem: ${item.mediaId}")
-            item.toTrack()
+            val track = item.toTrack()
+            // If MediaItem doesn't have artwork URI, try to get it from SpotifyStyleArtworkLoader
+            if (track.artUri.isNullOrBlank()) {
+                val cachedArtUri = com.musify.mu.util.SpotifyStyleArtworkLoader.getCachedArtworkUri(item.mediaId)
+                if (cachedArtUri != null) {
+                    android.util.Log.d("MediaControllerHelper", "Found cached artwork URI for ${item.mediaId}: $cachedArtUri")
+                    track.copy(artUri = cachedArtUri)
+                } else {
+                    android.util.Log.d("MediaControllerHelper", "No cached artwork found for ${item.mediaId}")
+                    track
+                }
+            } else {
+                track
+            }
         }
     }
 }
