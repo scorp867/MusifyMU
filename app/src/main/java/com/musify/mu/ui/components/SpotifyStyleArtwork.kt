@@ -67,19 +67,21 @@ fun SpotifyStyleArtwork(
         modifier = finalModifier,
         contentAlignment = Alignment.Center
     ) {
-        // Background placeholder
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f),
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.04f)
+        if (artworkUri == null) {
+            // Background placeholder only when no art
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f),
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.04f)
+                            )
                         )
                     )
-                )
-        )
+            )
+        }
         
         if (artworkUri != null) {
             // Display the extracted artwork using shared image loader with stable keys

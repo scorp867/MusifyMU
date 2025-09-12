@@ -13,11 +13,11 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 
-suspend fun extractPalette(contentResolver: ContentResolver, artworkUri: String?): Palette? =
+suspend fun extractPalette(contentResolver: ContentResolver, artUri: String?): Palette? =
     withContext(Dispatchers.IO) {
-        if (artworkUri == null) return@withContext null
+        if (artUri == null) return@withContext null
         runCatching {
-            contentResolver.openInputStream(Uri.parse(artworkUri)).use { input ->
+            contentResolver.openInputStream(Uri.parse(artUri)).use { input ->
                 if (input != null) {
                     val bitmap = BitmapFactory.decodeStream(input)
                     Palette.from(bitmap).clearFilters().generate()

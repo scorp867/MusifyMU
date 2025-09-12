@@ -26,6 +26,7 @@ import java.io.File
 import android.provider.MediaStore
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import java.io.FileOutputStream
 
 /**
  * Spotify-style artwork loader that extracts embedded album art on-demand
@@ -140,6 +141,10 @@ object SpotifyStyleArtworkLoader {
      * Get the shared Coil image loader
      */
     fun getImageLoader(): ImageLoader? = artworkImageLoader
+    
+    fun setImageLoader(loader: ImageLoader) {
+        artworkImageLoader = loader
+    }
     
     /**
      * Get a flow that emits artwork URI updates for a given track URI
@@ -433,12 +438,25 @@ object SpotifyStyleArtworkLoader {
         try {
             Log.d(TAG, "Processing artwork bytes: ${artworkBytes.size} bytes for $trackUri")
 
-            // Save raw bytes directly - let Coil handle decoding and optimization
+            val options = BitmapFactory.Options()
+            options.inJustDecodeBounds = true
+            BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size, options)
+
+            val maxDim = 512
+            options.inSampleSize = calculateInSampleSize(options, maxDim, maxDim)
+            options.inJustDecodeBounds = false
+            options.inPreferredConfig = Bitmap.Config.RGB_565
+
+            val bitmap = BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size, options)
+
             val cacheFile = getDiskCacheFile(trackUri)
-            Log.d(TAG, "Saving artwork to: ${cacheFile.absolutePath}")
+            Log.d(TAG, "Saving compressed artwork to: ${cacheFile.absolutePath}")
 
             cacheFile.parentFile?.mkdirs()
-            cacheFile.writeBytes(artworkBytes)
+            FileOutputStream(cacheFile).use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
+            }
+            bitmap.recycle()
 
             if (!cacheFile.exists()) {
                 Log.e(TAG, "Failed to save artwork: file does not exist")
@@ -455,6 +473,20 @@ object SpotifyStyleArtworkLoader {
         }
     }
 
+    private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+        val height = options.outHeight
+        val width = options.outWidth
+        var inSampleSize = 1
+
+        if (height > reqHeight || width > reqWidth) {
+            val halfHeight = height / 2
+            val halfWidth = width / 2
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+        return inSampleSize
+    }
     
     /**
      * Cache artwork URI in memory and notify observers

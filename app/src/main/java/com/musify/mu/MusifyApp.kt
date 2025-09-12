@@ -32,6 +32,7 @@ class MusifyApp : Application(), ImageLoaderFactory {
         
         // Clear Coil's memory cache on app start to prevent flickering from stale cache
         newImageLoader().memoryCache?.clear()
+        SpotifyStyleArtworkLoader.setImageLoader(newImageLoader())
 
         // Note: Data manager will be initialized by LibraryScreen when permissions are granted
         // This avoids conflicts and ensures proper initialization timing
