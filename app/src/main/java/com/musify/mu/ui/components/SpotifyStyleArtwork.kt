@@ -69,18 +69,18 @@ fun SpotifyStyleArtwork(
     ) {
         if (artworkUri == null) {
             // Background placeholder only when no art
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f),
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.04f)
-                            )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.08f),
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.04f)
                         )
                     )
-            )
+                )
+        )
         }
         
         if (artworkUri != null) {

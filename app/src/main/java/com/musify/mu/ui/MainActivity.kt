@@ -53,6 +53,7 @@ import com.musify.mu.ui.helpers.PlaybackRestorer
 import com.musify.mu.ui.helpers.MediaControllerListener
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import android.content.Context
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -141,7 +142,7 @@ class MainActivity : ComponentActivity() {
             }
 
             // Check permissions immediately when the composable is created
-            LaunchedEffect(Unit) {
+            LaunchedEffect("permissions_check") {
                 android.util.Log.d("MainActivity", "LaunchedEffect started - checking permissions")
                 val requiredPermissions = PermissionManager.getRequiredMediaPermissions()
                 val allPermissions = PermissionManager.getAllPermissions()

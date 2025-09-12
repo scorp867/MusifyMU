@@ -84,6 +84,15 @@ object PermissionManager {
             ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED
         }
     }
+
+    fun showRationale(activity: Activity, permission: String): Boolean {
+        return ActivityCompat.shouldShowRequestPermissionRationale(activity, permission)
+    }
+
+    fun handlePermissionDenial(context: Context, deniedPermissions: List<String>) {
+        // Show a dialog or toast explaining why permissions are needed
+        // For example, using Snackbar or AlertDialog
+    }
 }
 
 /**

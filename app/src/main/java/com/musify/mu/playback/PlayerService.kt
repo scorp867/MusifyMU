@@ -54,6 +54,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 
 // Temporary workaround - define extension function here
 fun Track.toMediaItem(): MediaItem {
@@ -78,35 +79,35 @@ fun Track.toMediaItem(): MediaItem {
 @AndroidEntryPoint
 class PlayerService : MediaLibraryService() {
 
-    @Inject
-    lateinit var exoPlayer: ExoPlayer
+	@Inject
+	lateinit var exoPlayer: ExoPlayer
 
-    @Inject
-    lateinit var libraryRepository: LibraryRepository
+	@Inject
+	lateinit var libraryRepository: LibraryRepository
 
-    @Inject
-    lateinit var playbackStateStore: PlaybackStateStore
+	@Inject
+	lateinit var playbackStateStore: PlaybackStateStore
 
-    @Inject
-    lateinit var queueStateStore: QueueStateStore
+	@Inject
+	lateinit var queueStateStore: QueueStateStore
 
-    @Inject
-    lateinit var lyricsStateStore: LyricsStateStore
+	@Inject
+	lateinit var lyricsStateStore: LyricsStateStore
 
-    @Inject
-    lateinit var audioFocusManager: AudioFocusManager
+	@Inject
+	lateinit var audioFocusManager: AudioFocusManager
 
-    @Inject
-    lateinit var queueManager: QueueManager
+	@Inject
+	lateinit var queueManager: QueueManager
 
-    private val lifecycleObserver = object : DefaultLifecycleObserver {
-        override fun onStop(owner: LifecycleOwner) {
-            // App is going to background - save state
-            if (componentsInitialized && instance === this@PlayerService) {
-                saveCompletePlaybackState()
-            }
-        }
-    }
+	private val lifecycleObserver = object : DefaultLifecycleObserver {
+		override fun onStop(owner: LifecycleOwner) {
+			// App is going to background - save state
+			if (componentsInitialized && instance === this@PlayerService) {
+				saveCompletePlaybackState()
+			}
+		}
+	}
 
 	companion object {
 		// Singleton instance to prevent multiple service instances
@@ -170,7 +171,6 @@ class PlayerService : MediaLibraryService() {
 	private var lastQueueItemCount = 0
 
 
-
 	private fun ensurePlayerInitialized() {
 		// Check if this is the correct service instance
 		if (instance !== this) {
@@ -186,110 +186,110 @@ class PlayerService : MediaLibraryService() {
 
 		// Attach listeners to the injected player
 		exoPlayer.addListener(object : Player.Listener {
-				override fun onIsPlayingChanged(isPlaying: Boolean) {
-					if (hasValidMedia) {
-						// Media3 will manage the notification lifecycle via provider
-						if (isPlaying) {
-							audioFocusManager.request()
-							// When playback starts, Media3 should replace our temporary notification
-						} else {
-							audioFocusManager.abandon()
-							// Let Media3 handle notification state - don't interfere
-						}
-					} else if (!isPlaying) {
-						// If not playing and no valid media, we might need to stop the service
-					}
+			override fun onIsPlayingChanged(isPlaying: Boolean) {
+				if (hasValidMedia) {
+					// Media3 will manage the notification lifecycle via provider
 					if (isPlaying) {
-						cancelPendingStop()
-						// Cancel media button stop job since playback started
-						mediaButtonStopJob?.cancel()
-						mediaButtonStopJob = null
+						audioFocusManager.request()
+						// When playback starts, Media3 should replace our temporary notification
+					} else {
+						audioFocusManager.abandon()
+						// Let Media3 handle notification state - don't interfere
 					}
+				} else if (!isPlaying) {
+					// If not playing and no valid media, we might need to stop the service
 				}
+				if (isPlaying) {
+					cancelPendingStop()
+					// Cancel media button stop job since playback started
+					mediaButtonStopJob?.cancel()
+					mediaButtonStopJob = null
+				}
+			}
 
-				override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-					mediaItem?.let { item ->
-						// Remove consumed transient items (Play Next or User Queue) on any advance (auto or manual)
-						val finishedMediaId = currentMediaIdCache
-						if (finishedMediaId != null) {
-							serviceScope.launch(Dispatchers.Main) {
-								try {
-									// First try play-next head consume (preserves multi-play-next semantics)
-									val removedPlayNext = queue.consumePlayNextHeadIfMatches(finishedMediaId)
-									if (removedPlayNext) {
-										queueStateStore.decrementOnAdvance()
-									} else {
-										// If not play-next, remove the first matching USER_QUEUE item for this id
-										// This ensures User Queue items are consumed after play
-										val removedUser = queue.removeFirstUserQueueByMediaId(finishedMediaId)
-										if (removedUser) {
-											// No count to adjust for user queue
-										}
+			override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+				mediaItem?.let { item ->
+					// Remove consumed transient items (Play Next or User Queue) on any advance (auto or manual)
+					val finishedMediaId = currentMediaIdCache
+					if (finishedMediaId != null) {
+						serviceScope.launch(Dispatchers.Main) {
+							try {
+								// First try play-next head consume (preserves multi-play-next semantics)
+								val removedPlayNext = queue.consumePlayNextHeadIfMatches(finishedMediaId)
+								if (removedPlayNext) {
+									queueStateStore.decrementOnAdvance()
+								} else {
+									// If not play-next, remove the first matching USER_QUEUE item for this id
+									// This ensures User Queue items are consumed after play
+									val removedUser = queue.removeFirstUserQueueByMediaId(finishedMediaId)
+									if (removedUser) {
+										// No count to adjust for user queue
 									}
-								} catch (_: Exception) { }
-							}
-						}
-						// Update current cached id to new current
-						currentMediaIdCache = item.mediaId
-						queue.onTrackChanged(item.mediaId)
-						// Media3 provider will refresh the notification automatically
-						// If the playlist was externally changed, resync; otherwise keep our sources intact
-						if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
-							serviceScope.launch(Dispatchers.Main) {
-								try { queue.syncFromPlayer(player) } catch (_: Exception) { }
-							}
-						}
-						serviceScope.launch(Dispatchers.IO) {
-							// Record track as played
-							repo.recordPlayed(item.mediaId)
-							queueStateStore.decrementOnAdvance()
-
-							// Load lyrics only if it's a different track
-							if (lastLoadedLyricsId != item.mediaId) {
-								lastLoadedLyricsId = item.mediaId
-								android.util.Log.d("PlayerService", "onMediaItemTransition: Loading lyrics for ${item.mediaId}")
-								try {
-									lyricsStateStore.loadLyrics(item.mediaId)
-								} catch (e: Exception) {
-									android.util.Log.e("PlayerService", "Failed to load lyrics on transition", e)
 								}
-							} else {
-								android.util.Log.d("PlayerService", "Skipping lyrics load - already loaded for ${item.mediaId}")
+							} catch (_: Exception) { }
+						}
+					}
+					// Update current cached id to new current
+					currentMediaIdCache = item.mediaId
+					queue.onTrackChanged(item.mediaId)
+					// Media3 provider will refresh the notification automatically
+					// If the playlist was externally changed, resync; otherwise keep our sources intact
+					if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) {
+						serviceScope.launch(Dispatchers.Main) {
+							try { queue.syncFromPlayer(player) } catch (_: Exception) { }
+						}
+					}
+					serviceScope.launch(Dispatchers.IO) {
+						// Record track as played
+						repo.recordPlayed(item.mediaId)
+						queueStateStore.decrementOnAdvance()
+
+						// Load lyrics only if it's a different track
+						if (lastLoadedLyricsId != item.mediaId) {
+							lastLoadedLyricsId = item.mediaId
+							android.util.Log.d("PlayerService", "onMediaItemTransition: Loading lyrics for ${item.mediaId}")
+							try {
+								lyricsStateStore.loadLyrics(item.mediaId)
+							} catch (e: Exception) {
+								android.util.Log.e("PlayerService", "Failed to load lyrics on transition", e)
 							}
+						} else {
+							android.util.Log.d("PlayerService", "Skipping lyrics load - already loaded for ${item.mediaId}")
 						}
 					}
 				}
+			}
 
-				override fun onMediaMetadataChanged(metadata: MediaMetadata) {
-					super.onMediaMetadataChanged(metadata)
+			override fun onMediaMetadataChanged(metadata: MediaMetadata) {
+				super.onMediaMetadataChanged(metadata)
 
-					// Capture artwork bytes unavailable to MediaMetadataRetriever
-					val bytes = metadata.artworkData
-					val mediaId = player.currentMediaItem?.mediaId
-					if (bytes != null && mediaId != null) {
+				// Capture artwork bytes unavailable to MediaMetadataRetriever
+				val bytes = metadata.artworkData
+				val mediaId = player.currentMediaItem?.mediaId
+				if (bytes != null && mediaId != null) {
+					serviceScope.launch(Dispatchers.IO) {
+						val cached = com.musify.mu.util.SpotifyStyleArtworkLoader.storeArtworkBytes(mediaId, bytes)
+						if (cached != null) {
+							try { repo.updateTrackArt(mediaId, cached) } catch (_: Exception) {}
+							// Artwork is already cached by storeArtworkBytes
+						}
+					}
+				} else if (mediaId != null && metadata.artworkUri != null) {
+					// Use Media3 artworkUri if present (e.g., notification extracted)
+					try {
+						val uriStr = metadata.artworkUri.toString()
 						serviceScope.launch(Dispatchers.IO) {
-							val cached = com.musify.mu.util.SpotifyStyleArtworkLoader.storeArtworkBytes(mediaId, bytes)
-							if (cached != null) {
-								try { repo.updateTrackArt(mediaId, cached) } catch (_: Exception) {}
-								// Artwork is already cached by storeArtworkBytes
-							}
+							try { repo.updateTrackArt(mediaId, uriStr) } catch (_: Exception) {}
+							// URI is already cached by SpotifyStyleArtworkLoader
 						}
-					} else if (mediaId != null && metadata.artworkUri != null) {
-						// Use Media3 artworkUri if present (e.g., notification extracted)
-						try {
-							val uriStr = metadata.artworkUri.toString()
-							serviceScope.launch(Dispatchers.IO) {
-								try { repo.updateTrackArt(mediaId, uriStr) } catch (_: Exception) {}
-								// URI is already cached by SpotifyStyleArtworkLoader
-							}
-						} catch (_: Exception) {}
-					}
+					} catch (_: Exception) {}
 				}
-			})
+			}
+		})
 
 		// Mark components as initialized
 		componentsInitialized = true
-		
+
 		// MediaSession will be created with this properly initialized player
 		android.util.Log.d("PlayerService", "Player initialization complete - ready for MediaSession creation")
 	}
@@ -335,18 +335,18 @@ class PlayerService : MediaLibraryService() {
 			android.util.Log.d("PlayerService", "Media cache was already released")
 		}
 
-	// Reset queue initialization state for fresh start
-	queueInitialized = false
-	lastQueueItemCount = 0
-	
-	// Clear QueueManager provider instance to avoid holding onto old player
-	try {
-		QueueManagerProvider.clearInstance()
-	} catch (_: Exception) { }
-	
-	// Clear singleton instance
-	instance = null
-	android.util.Log.d("PlayerService", "Service instance cleared")
+		// Reset queue initialization state for fresh start
+		queueInitialized = false
+		lastQueueItemCount = 0
+
+		// Clear QueueManager provider instance to avoid holding onto old player
+		try {
+			QueueManagerProvider.clearInstance()
+		} catch (_: Exception) { }
+
+		// Clear singleton instance
+		instance = null
+		android.util.Log.d("PlayerService", "Service instance cleared")
 
 		super.onDestroy()
 	}
@@ -413,9 +413,9 @@ class PlayerService : MediaLibraryService() {
 
 		val callback = object : MediaLibraryService.MediaLibrarySession.Callback {
 			override fun onConnect(
-					 session: MediaSession,
-					 controller: MediaSession.ControllerInfo
-				): MediaSession.ConnectionResult {
+				session: MediaSession,
+				controller: MediaSession.ControllerInfo
+			): MediaSession.ConnectionResult {
 				val base = super.onConnect(session, controller)
 				val availableSessionCommands = base.availableSessionCommands
 					.buildUpon()
@@ -428,22 +428,22 @@ class PlayerService : MediaLibraryService() {
 			}
 
 			override fun onCustomCommand(
-					 session: MediaSession,
-					 controller: MediaSession.ControllerInfo,
-					 customCommand: SessionCommand,
-					 args: Bundle
-				): ListenableFuture<SessionResult> {
+				session: MediaSession,
+				controller: MediaSession.ControllerInfo,
+				customCommand: SessionCommand,
+				args: Bundle
+			): ListenableFuture<SessionResult> {
 				if (customCommand.customAction == likeCommand.customAction) {
 					serviceScope.launch(Dispatchers.Main) {
 						try {
 							val id = session.player.currentMediaItem?.mediaId
 							if (id != null) {
 								withContext(Dispatchers.IO) {
-								val liked = repo.isLiked(id)
-								if (liked) {
-									repo.unlike(id)
-								} else {
-									repo.like(id)
+									val liked = repo.isLiked(id)
+									if (liked) {
+										repo.unlike(id)
+									} else {
+										repo.like(id)
 									}
 								}
 							}
@@ -453,6 +453,7 @@ class PlayerService : MediaLibraryService() {
 				}
 				return Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
 			}
+
 			override fun onPlaybackResumption(
 				session: MediaSession,
 				controller: MediaSession.ControllerInfo
@@ -460,30 +461,19 @@ class PlayerService : MediaLibraryService() {
 				val future = com.google.common.util.concurrent.SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
 				serviceScope.launch(Dispatchers.Main) {
 					try {
-						// Ensure player is initialized for headset button handling
 						ensurePlayerInitialized()
 
-						// All player operations must be on main thread
-						val currentItems: MutableList<MediaItem> = mutableListOf()
-						val startIndex: Int
-						val startPositionMs: Long
-
-						// Check if there is an existing queue with player access on main thread
 						if (exoPlayer.mediaItemCount > 0) {
-							for (i in 0 until exoPlayer.mediaItemCount) {
-								currentItems.add(exoPlayer.getMediaItemAt(i))
-							}
-							startIndex = exoPlayer.currentMediaItemIndex.coerceAtLeast(0)
-							startPositionMs = exoPlayer.currentPosition
+							val currentItems = (0 until exoPlayer.mediaItemCount).map { exoPlayer.getMediaItemAt(it) }.toMutableList()
+							val startIndex = exoPlayer.currentMediaItemIndex.coerceAtLeast(0)
+							val startPositionMs = exoPlayer.currentPosition
 							future.set(MediaSession.MediaItemsWithStartPosition(currentItems, startIndex, startPositionMs))
 							android.util.Log.d("PlayerService", "Resuming with existing queue: ${currentItems.size} items")
 							return@launch
 						}
 
-						// Switch to IO dispatcher for database operations
 						withContext(Dispatchers.IO) {
 							try {
-								// Try to restore from saved state first
 								val savedState = stateStore.load()
 								val queueState = queueStateStore.loadQueueState()
 
@@ -495,66 +485,69 @@ class PlayerService : MediaLibraryService() {
 										try { repo.getTrackByMediaId(id) } catch (_: Exception) { null }
 									}.filterNotNull()
 
-									android.util.Log.d("PlayerService", "Found ${tracks.size} valid tracks from saved state")
-									if (tracks.isNotEmpty()) {
-										val items = tracks.map { it.toMediaItem() }
-										val safeIndex = savedState.index?.coerceIn(0, items.size - 1) ?: 0
+									if (tracks.size < savedState.mediaIds.size) {
+										android.util.Log.w("PlayerService", "Some tracks missing from saved state")
+									}
 
-										// Set the main queue items
-										future.set(MediaSession.MediaItemsWithStartPosition(items, safeIndex, savedState.posMs ?: 0L))
-										android.util.Log.d("PlayerService", "Resuming from saved state: ${items.size} items at position ${savedState.posMs}")
+									val prefs = getSharedPreferences("musify_prefs", Context.MODE_PRIVATE)
+									val autoResume = prefs.getBoolean("auto_resume", true)
 
-										// Restore queue state (play-next and user queue) after a short delay to let the session initialize
-										serviceScope.launch {
-											kotlinx.coroutines.delay(1000) // Wait for queue to be ready
-											try {
-												if (queueState != null && queue != null) {
-													// Restore play-next items
-													if (queueState.playNextItems.isNotEmpty()) {
-														val playNextTracks = queueState.playNextItems.mapNotNull { id ->
-															try { repo.getTrackByMediaId(id) } catch (_: Exception) { null }
-														}.filterNotNull()
+									val items = tracks.map { it.toMediaItem() }
+									val safeIndex = savedState.index?.coerceIn(0, items.size - 1) ?: 0
 
-														if (playNextTracks.isNotEmpty()) {
-															runBlocking(Dispatchers.Main) {
-																try {
-																	queue?.playNext(playNextTracks.map { it.toMediaItem() }.toMutableList())
-																	android.util.Log.d("PlayerService", "Restored ${playNextTracks.size} play-next items")
-																} catch (e: Exception) {
-																	android.util.Log.w("PlayerService", "Failed to restore play-next items", e)
-																}
-															}
-														}
-													}
+									future.set(MediaSession.MediaItemsWithStartPosition(items, safeIndex, savedState.posMs ?: 0L))
+									android.util.Log.d("PlayerService", "Resuming from saved state: ${items.size} items at position ${savedState.posMs}")
 
-													// Restore user queue items
-													if (queueState.userQueueItems.isNotEmpty()) {
-														val userQueueTracks = queueState.userQueueItems.mapNotNull { id ->
-															try { repo.getTrackByMediaId(id) } catch (_: Exception) { null }
-														}.filterNotNull()
-
-														if (userQueueTracks.isNotEmpty()) {
-															runBlocking(Dispatchers.Main) {
-																try {
-																	queue?.addToUserQueue(userQueueTracks.map { it.toMediaItem() }.toMutableList())
-																	android.util.Log.d("PlayerService", "Restored ${userQueueTracks.size} user-queue items")
-																} catch (e: Exception) {
-																	android.util.Log.w("PlayerService", "Failed to restore user-queue items", e)
-																}
+									serviceScope.launch {
+										delay(1000)
+										try {
+											if (queueState != null && queue != null) {
+												if (queueState.playNextItems.isNotEmpty()) {
+													val playNextTracks = queueState.playNextItems.mapNotNull { id ->
+														try { repo.getTrackByMediaId(id) } catch (_: Exception) { null }
+													}.filterNotNull()
+													if (playNextTracks.isNotEmpty()) {
+														withContext(Dispatchers.Main) {
+															try {
+																queue.playNext(playNextTracks.map { it.toMediaItem() }.toMutableList())
+																android.util.Log.d("PlayerService", "Restored ${playNextTracks.size} play-next items")
+															} catch (e: Exception) {
+																android.util.Log.w("PlayerService", "Failed to restore play-next items", e)
 															}
 														}
 													}
 												}
-											} catch (e: Exception) {
-												android.util.Log.w("PlayerService", "Failed to restore queue state", e)
-											}
-										}
 
-										return@withContext
+												if (queueState.userQueueItems.isNotEmpty()) {
+													val userQueueTracks = queueState.userQueueItems.mapNotNull { id ->
+														try { repo.getTrackByMediaId(id) } catch (_: Exception) { null }
+													}.filterNotNull()
+													if (userQueueTracks.isNotEmpty()) {
+														withContext(Dispatchers.Main) {
+															try {
+																queue.addToUserQueue(userQueueTracks.map { it.toMediaItem() }.toMutableList())
+																android.util.Log.d("PlayerService", "Restored ${userQueueTracks.size} user-queue items")
+															} catch (e: Exception) {
+																android.util.Log.w("PlayerService", "Failed to restore user-queue items", e)
+															}
+														}
+													}
+												}
+											}
+										} catch (e: Exception) {
+											android.util.Log.w("PlayerService", "Failed to restore queue state", e)
+										}
 									}
+
+									if (!autoResume) {
+										withContext(Dispatchers.Main) {
+											exoPlayer.playWhenReady = false
+										}
+									}
+
+									return@withContext
 								}
 
-								// Otherwise, try to resume most recent played track
 								val recent = repo.recentlyPlayed(1)
 								android.util.Log.d("PlayerService", "Checked recently played: ${recent.size} tracks")
 								if (recent.isNotEmpty()) {
@@ -564,7 +557,6 @@ class PlayerService : MediaLibraryService() {
 									return@withContext
 								}
 
-								// If no recent tracks, try to get any track from the library as fallback
 								try {
 									val allTracks = repo.getAllTracks()
 									android.util.Log.d("PlayerService", "Library contains ${allTracks?.size ?: 0} total tracks")
@@ -579,8 +571,7 @@ class PlayerService : MediaLibraryService() {
 									android.util.Log.w("PlayerService", "Failed to get fallback track", e)
 								}
 
-							// No content to resume
-							future.set(MediaSession.MediaItemsWithStartPosition(mutableListOf(), 0, 0L))
+								future.set(MediaSession.MediaItemsWithStartPosition(mutableListOf(), 0, 0L))
 								android.util.Log.d("PlayerService", "No content available for resumption")
 							} catch (e: Exception) {
 								android.util.Log.e("PlayerService", "Error loading saved state", e)
@@ -589,12 +580,12 @@ class PlayerService : MediaLibraryService() {
 						}
 					} catch (e: Exception) {
 						android.util.Log.e("PlayerService", "Error during playback resumption", e)
-						// On error, provide empty result to indicate no resumption content
 						future.set(MediaSession.MediaItemsWithStartPosition(mutableListOf(), 0, 0L))
 					}
 				}
 				return future
 			}
+
 			override fun onGetLibraryRoot(
 				session: MediaLibraryService.MediaLibrarySession,
 				browser: MediaSession.ControllerInfo,
@@ -627,24 +618,24 @@ class PlayerService : MediaLibraryService() {
 				return future
 			}
 
-		override fun onAddMediaItems(
-			mediaSession: MediaSession,
-			controller: MediaSession.ControllerInfo,
-			mediaItems: MutableList<MediaItem>
-		): ListenableFuture<MutableList<MediaItem>> {
-			// Prevent repeated initialization with same items
-			if (queueInitialized && mediaItems.size == lastQueueItemCount && exoPlayer.mediaItemCount > 0) {
-				android.util.Log.d("PlayerService", "Queue already initialized with ${mediaItems.size} items, skipping redundant call")
-				return Futures.immediateFuture(mediaItems)
-			}
-			
-			// Ensure player is initialized when media items are added
-			ensurePlayerInitialized()
-			android.util.Log.d("PlayerService", "onAddMediaItems called with ${mediaItems.size} items")
-			cancelPendingStop()
-			// Cancel media button stop job since we now have media
-			mediaButtonStopJob?.cancel()
-			mediaButtonStopJob = null
+			override fun onAddMediaItems(
+				mediaSession: MediaSession,
+				controller: MediaSession.ControllerInfo,
+				mediaItems: MutableList<MediaItem>
+			): ListenableFuture<MutableList<MediaItem>> {
+				// Prevent repeated initialization with same items
+				if (queueInitialized && mediaItems.size == lastQueueItemCount && exoPlayer.mediaItemCount > 0) {
+					android.util.Log.d("PlayerService", "Queue already initialized with ${mediaItems.size} items, skipping redundant call")
+					return Futures.immediateFuture(mediaItems)
+				}
+
+				// Ensure player is initialized when media items are added
+				ensurePlayerInitialized()
+				android.util.Log.d("PlayerService", "onAddMediaItems called with ${mediaItems.size} items")
+				cancelPendingStop()
+				// Cancel media button stop job since we now have media
+				mediaButtonStopJob?.cancel()
+				mediaButtonStopJob = null
 
 				val future = com.google.common.util.concurrent.SettableFuture.create<MutableList<MediaItem>>()
 				serviceScope.launch(Dispatchers.IO) {
@@ -666,35 +657,35 @@ class PlayerService : MediaLibraryService() {
 								}
 							}
 						}
-					// If nothing could be resolved, return original items to let player try URIs
-					if (resolved.isEmpty()) {
-						resolved.addAll(mediaItems)
-					}
-					hasValidMedia = resolved.isNotEmpty()
-					
-					// Mark queue as initialized to prevent redundant calls
-					if (resolved.isNotEmpty()) {
-						queueInitialized = true
-						lastQueueItemCount = resolved.size
-						
-						// CRITICAL FIX: Ensure player is prepared after media items are loaded
-						// This is essential for MediaController commands to work
-						serviceScope.launch(Dispatchers.Main) {
-							try {
-								if (exoPlayer.mediaItemCount > 0 && exoPlayer.playbackState == Player.STATE_IDLE) {
-									exoPlayer.prepare()
-									android.util.Log.d("PlayerService", "Auto-prepared player with ${resolved.size} items")
-									
-									// CRITICAL: Notify QueueManager that media items are ready
-									queueManager?.onMediaItemsLoaded()
+						// If nothing could be resolved, return original items to let player try URIs
+						if (resolved.isEmpty()) {
+							resolved.addAll(mediaItems)
+						}
+						hasValidMedia = resolved.isNotEmpty()
+
+						// Mark queue as initialized to prevent redundant calls
+						if (resolved.isNotEmpty()) {
+							queueInitialized = true
+							lastQueueItemCount = resolved.size
+
+							// CRITICAL FIX: Ensure player is prepared after media items are loaded
+							// This is essential for MediaController commands to work
+							serviceScope.launch(Dispatchers.Main) {
+								try {
+									if (exoPlayer.mediaItemCount > 0 && exoPlayer.playbackState == Player.STATE_IDLE) {
+										exoPlayer.prepare()
+										android.util.Log.d("PlayerService", "Auto-prepared player with ${resolved.size} items")
+
+										// CRITICAL: Notify QueueManager that media items are ready
+										queueManager?.onMediaItemsLoaded()
+									}
+								} catch (e: Exception) {
+									android.util.Log.w("PlayerService", "Error auto-preparing player", e)
 								}
-							} catch (e: Exception) {
-								android.util.Log.w("PlayerService", "Error auto-preparing player", e)
 							}
 						}
-					}
-					
-					future.set(resolved)
+
+						future.set(resolved)
 					} catch (e: Exception) {
 						future.set(mutableListOf())
 					}
@@ -713,9 +704,9 @@ class PlayerService : MediaLibraryService() {
 			.setSessionActivity(createPlayerActivityIntent())
 			.setCustomLayout(ImmutableList.of(likeButton))
 			.build()
-		
+
 		android.util.Log.d("PlayerService", "MediaLibrarySession created successfully with player: ${mediaLibrarySession?.player != null}")
-		
+
 		// CRITICAL: Ensure the session is immediately available for MediaController connections
 		android.util.Log.d("PlayerService", "MediaSession ready for MediaController connections")
 
@@ -729,8 +720,8 @@ class PlayerService : MediaLibraryService() {
 			}
 		})
 
-			// If we have valid media, the Media3 notification provider should handle notifications
-			// If not, keep the temporary notification until media is available or service is stopped
+		// If we have valid media, the Media3 notification provider should handle notifications
+		// If not, keep the temporary notification until media is available or service is stopped
 	}
 
 	override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? {
@@ -780,7 +771,6 @@ class PlayerService : MediaLibraryService() {
 
 
 
-
 	override fun onTaskRemoved(rootIntent: Intent?) {
 		super.onTaskRemoved(rootIntent)
 		android.util.Log.d("PlayerService", "App swiped away from recents - complete shutdown")
@@ -797,11 +787,11 @@ class PlayerService : MediaLibraryService() {
 			}
 
 
-		releasePlayerAndSessionIfNeeded("onTaskRemoved")
+			releasePlayerAndSessionIfNeeded("onTaskRemoved")
 
-		// Stop service completely - no notifications should remain
-		stopSelf()
-		android.util.Log.d("PlayerService", "Service completely stopped - no notifications should remain")
+			// Stop service completely - no notifications should remain
+			stopSelf()
+			android.util.Log.d("PlayerService", "Service completely stopped - no notifications should remain")
 
 		} catch (e: Exception) {
 			android.util.Log.e("PlayerService", "Error during task removal cleanup", e)
@@ -812,7 +802,7 @@ class PlayerService : MediaLibraryService() {
 		pendingStopJob = null
 		mediaButtonStopJob?.cancel()
 		mediaButtonStopJob = null
-		
+
 		// Reset queue initialization state for fresh start
 		queueInitialized = false
 		lastQueueItemCount = 0

@@ -19,6 +19,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.Worker
+import androidx.work.WorkerParameters
 
 /**
  * Main local files service that coordinates MediaStore scanning, permission handling,
@@ -115,7 +119,7 @@ class LocalFilesService private constructor(
                     _scanState.value = ScanState.Completed(_tracks.value.size)
                 } else {
                     Log.d(TAG, "No valid cache found, performing initial scan")
-                    performInitialScan()
+                    scheduleInitialScan()
                 }
                 startListening()
             } else {
@@ -224,7 +228,7 @@ class LocalFilesService private constructor(
     /**
      * Perform initial scan of local files
      */
-    private suspend fun performInitialScan() {
+    internal suspend fun performInitialScan() {
         try {
             _scanState.value = ScanState.Scanning("Scanning local music library...")
 
@@ -461,6 +465,11 @@ class LocalFilesService private constructor(
         isListening = false
         Log.d(TAG, "LocalFilesService cleaned up")
     }
+
+    private fun scheduleInitialScan() {
+        val workRequest = OneTimeWorkRequestBuilder<ScanWorker>().build()
+        WorkManager.getInstance(context).enqueue(workRequest)
+    }
 }
 
 /**
@@ -502,5 +511,19 @@ class LocalFileImageLoader private constructor(
     suspend fun loadArtwork(trackUri: String): String? {
         // Delegate to SpotifyStyleArtworkLoader to avoid duplication
         return com.musify.mu.util.SpotifyStyleArtworkLoader.loadArtwork(trackUri)
+    }
+}
+
+class ScanWorker(appContext: Context, workerParams: WorkerParameters) : Worker(appContext, workerParams) {
+    override fun doWork(): Result {
+        try {
+            runBlocking {
+                val service = LocalFilesService.getInstance(applicationContext)
+                service.performInitialScan()  // Assuming we make performInitialScan internal
+            }
+            return Result.success()
+        } catch (e: Exception) {
+            return Result.failure()
+        }
     }
 }

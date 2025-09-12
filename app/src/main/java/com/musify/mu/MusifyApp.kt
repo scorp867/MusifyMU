@@ -15,6 +15,7 @@ import com.musify.mu.data.db.DatabaseProvider
 import com.musify.mu.util.CoilConfigModule
 import com.musify.mu.util.SpotifyStyleArtworkLoader
 import com.musify.mu.util.isLowMemoryDevice
+import android.content.Context
 
 @HiltAndroidApp
 class MusifyApp : Application(), ImageLoaderFactory {
@@ -24,6 +25,24 @@ class MusifyApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
 
+        val prefs = getSharedPreferences("musify_prefs", Context.MODE_PRIVATE)
+        val currentVersion = packageManager.getPackageInfo(packageName, 0).versionCode
+        val lastVersion = prefs.getInt("last_version", 0)
+        val lastClearTime = prefs.getLong("last_cache_clear", 0L)
+        val now = System.currentTimeMillis()
+        val oneDay = 24 * 60 * 60 * 1000L
+
+        if (currentVersion != lastVersion || now - lastClearTime > oneDay) {
+            newImageLoader().memoryCache?.clear()
+            prefs.edit().putInt("last_version", currentVersion).putLong("last_cache_clear", now).apply()
+        }
+
+        // Check for first launch
+        val isFirstLaunch = prefs.getBoolean("is_first_launch", true)
+        if (isFirstLaunch) {
+            prefs.edit().putBoolean("is_first_launch", false).apply()
+        }
+
         // Initialize Spotify-style artwork loader with application context
         SpotifyStyleArtworkLoader.initialize(this)
         
@@ -31,7 +50,6 @@ class MusifyApp : Application(), ImageLoaderFactory {
         // Trying to inject here is too early in the lifecycle
         
         // Clear Coil's memory cache on app start to prevent flickering from stale cache
-        newImageLoader().memoryCache?.clear()
         SpotifyStyleArtworkLoader.setImageLoader(newImageLoader())
 
         // Note: Data manager will be initialized by LibraryScreen when permissions are granted
